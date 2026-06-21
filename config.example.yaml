@@ -1,0 +1,8 @@
+manufacturers:
+  minicircuits:
+    base_url: "https://www.minicircuits.com"
+    rate_limit_rps: 1
+cache:
+  ttl_days: 7
+  db_path: ".cache/rf_finder.db"
+# anthropic_api_key: ""   # reserved for the future free-form search path

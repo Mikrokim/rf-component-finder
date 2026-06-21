@@ -1,0 +1,29 @@
+# Real config (only the example is committed)
+config.yaml
+
+# Cache directory
+.cache/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Test cache
+.pytest_cache/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Playwright browsers
+playwright-browsers/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Claude Code local settings
+.claude/settings.local.json
