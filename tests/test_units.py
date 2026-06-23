@@ -95,6 +95,29 @@ class TestPowerToDBm:
 
 
 # ---------------------------------------------------------------------------
+# Ratio → dB
+# ---------------------------------------------------------------------------
+
+class TestRatioToDB:
+    """dB is a dimensionless ratio (gain, NF); dB → dB is the identity."""
+
+    def test_db_identity(self):
+        # e.g. a gain of 18 dB stays 18 dB
+        assert to_canonical(18.0, "dB", "dB") == pytest.approx(18.0)
+
+    def test_db_identity_negative(self):
+        # gain/NF may be negative; must not be rejected
+        assert to_canonical(-3.5, "dB", "dB") == pytest.approx(-3.5)
+
+    def test_db_identity_zero(self):
+        assert to_canonical(0.0, "dB", "dB") == pytest.approx(0.0)
+
+    def test_non_db_source_unit_raises(self):
+        with pytest.raises(ValueError, match="Unknown ratio unit"):
+            to_canonical(10.0, "dBm", "dB")
+
+
+# ---------------------------------------------------------------------------
 # Unsupported canonical unit
 # ---------------------------------------------------------------------------
 

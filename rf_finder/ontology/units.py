@@ -1,4 +1,5 @@
-"""Pure unit-conversion functions: frequency (→ GHz) and power (→ dBm) (REQ-2.5).
+"""Pure unit-conversion functions: frequency (→ GHz), power (→ dBm), and
+dimensionless ratios (→ dB) (REQ-2.5).
 
 Supported conversions
 ---------------------
@@ -7,6 +8,9 @@ Frequency canonical unit: GHz
 
 Power canonical unit: dBm
     W, mW, dBm → dBm   (dBm = 10 * log10(mW))
+
+Ratio canonical unit: dB
+    dB → dB            (identity; dB is a dimensionless ratio, e.g. gain, NF)
 """
 
 import math
@@ -74,6 +78,15 @@ def to_canonical(value: float, from_unit: str, canonical: str) -> float:
     if canonical == "dBm":
         return _power_to_dbm(value, from_unit)
 
+    if canonical == "dB":
+        # dB is a dimensionless ratio (gain, noise figure, …); its only valid
+        # source unit is dB itself, so the conversion is the identity.
+        if from_unit != "dB":
+            raise ValueError(
+                f"Unknown ratio unit '{from_unit}'; expected 'dB'"
+            )
+        return value
+
     raise ValueError(
-        f"Unsupported canonical unit '{canonical}'; expected 'GHz' or 'dBm'"
+        f"Unsupported canonical unit '{canonical}'; expected 'GHz', 'dBm', or 'dB'"
     )
