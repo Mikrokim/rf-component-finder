@@ -72,10 +72,17 @@ def _normalize_header(raw: str) -> str:
 
 
 def _parse_float(cell_text: str) -> float | None:
-    """Return None for missing/non-numeric sentinels; float otherwise."""
+    """Return None for missing/non-numeric sentinels; float otherwise.
+
+    Mini-Circuits encodes a DC-coupled lower band edge as the literal "DC"
+    (i.e. 0 Hz); map it to 0.0 so DC-coupled amplifiers keep a usable
+    freq_range instead of being dropped to UNKNOWN.
+    """
     t = cell_text.strip()
     if t in _MISSING_SENTINELS or not t:
         return None
+    if t.upper() == "DC":
+        return 0.0
     try:
         return float(t)
     except ValueError:
