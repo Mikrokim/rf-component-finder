@@ -148,6 +148,7 @@ relative to each canonical unit:
 def to_canonical(value: float, from_unit: str, canonical: str) -> float: ...
 # frequency: Hz, kHz, MHz, GHz  → GHz
 # power:     W, mW, dBm         → dBm   (dBm = 10*log10(mW))
+# ratio:     dB                 → dB    (identity; dimensionless, e.g. Gain/NF)
 ```
 
 ---
