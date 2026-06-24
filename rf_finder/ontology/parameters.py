@@ -51,7 +51,7 @@ PARAMETERS: dict[str, ParamDef] = {
         label="Noise figure",
         canonical_unit="dB",
         units=["dB"],
-        comparison="max",
+        comparison="between",
         applies_to=["amplifier"],
     ),
     "OIP3": ParamDef(

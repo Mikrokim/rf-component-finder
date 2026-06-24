@@ -113,7 +113,7 @@ PARAMETERS: dict[str, ParamDef] = {
         applies_to=["amplifier"],
     ),
     "Gain":  ParamDef("Gain",          "dB",  ["dB"],        "between", ["amplifier"]),
-    "NF":    ParamDef("Noise figure",  "dB",  ["dB"],        "max",     ["amplifier"]),
+    "NF":    ParamDef("Noise figure",  "dB",  ["dB"],        "between", ["amplifier"]),
     "OIP3":  ParamDef("OIP3",          "dBm", ["dBm"],       "between", ["amplifier"]),
     "Pout":  ParamDef("Saturated power (Psat)",
                                        "dBm", ["dBm","W","mW"], "min", ["amplifier"]),
