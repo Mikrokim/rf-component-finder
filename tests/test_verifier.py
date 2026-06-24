@@ -287,6 +287,22 @@ class TestConfidence:
 # Structural checks
 # ---------------------------------------------------------------------------
 
+class TestEqComparison:
+    def test_eq_pass_within_tolerance(self):
+        """Float round-off must not break eq: 6.0 + 1e-12 GHz == 6.0 GHz → PASS."""
+        spec = _make_spec(_scalar_constraint("freq_point", "eq", 6.0, "GHz"))
+        cand = _make_candidate({"freq_point": RawValue(6.0 + 1e-12, "GHz")})
+        result = verify(spec, cand)
+        assert result.verdicts[0].status == "PASS"
+
+    def test_eq_fail_outside_tolerance(self):
+        """A genuine difference still FAILs: 6.5 GHz != 6.0 GHz → FAIL."""
+        spec = _make_spec(_scalar_constraint("freq_point", "eq", 6.0, "GHz"))
+        cand = _make_candidate({"freq_point": RawValue(6.5, "GHz")})
+        result = verify(spec, cand)
+        assert result.verdicts[0].status == "FAIL"
+
+
 class TestStructure:
     def test_verdict_carries_required_constraint(self):
         """ParamVerdict.required must reference the original ParamConstraint."""

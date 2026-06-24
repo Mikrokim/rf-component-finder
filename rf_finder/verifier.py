@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from rf_finder.models import (
     Candidate,
     ParamConstraint,
@@ -48,7 +50,7 @@ def _compare(constraint: ParamConstraint, raw: RawValue) -> str:
     if constraint.comparison == "max":
         return "PASS" if found <= required else "FAIL"
     if constraint.comparison == "eq":
-        return "PASS" if found == required else "FAIL"
+        return "PASS" if math.isclose(found, required, rel_tol=1e-9, abs_tol=1e-9) else "FAIL"
 
     raise ValueError(f"Unknown comparison rule: {constraint.comparison!r}")
 
