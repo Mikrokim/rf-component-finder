@@ -119,6 +119,56 @@ def _collect_from_answers(schema: FormSchema, answers: dict[str, str]) -> QueryS
                 )
             )
 
+        elif field.comparison == "between":
+            # Bounded range on a scalar value: the candidate's value must fall
+            # within [min, max].  Either side may be left empty; an omitted side
+            # defaults to the most extreme value possible, so it imposes no
+            # restriction:
+            #   only min given → max defaults to +inf  ("at least min")
+            #   only max given → min defaults to -inf  ("at most max")
+            min_str = _get_answer(answers, f"{name}.min")
+            max_str = _get_answer(answers, f"{name}.max")
+            unit_str = _get_answer(answers, f"{name}.unit")
+
+            if not min_str and not max_str:
+                continue  # nothing entered → no constraint
+
+            if min_str:
+                try:
+                    min_val = float(min_str)
+                except ValueError:
+                    raise ValueError(f"{name}.min: {min_str!r} is not a valid number")
+            else:
+                min_val = float("-inf")
+
+            if max_str:
+                try:
+                    max_val = float(max_str)
+                except ValueError:
+                    raise ValueError(f"{name}.max: {max_str!r} is not a valid number")
+            else:
+                max_val = float("inf")
+
+            if min_val > max_val:
+                raise ValueError(
+                    f"{name}: min ({min_val}) must not be greater than max ({max_val})"
+                )
+
+            if not unit_str:
+                unit_str = field.canonical_unit
+            else:
+                _validate_unit(unit_str, field)
+
+            constraints.append(
+                ParamConstraint(
+                    canonical_name=name,
+                    comparison="between",
+                    value=None,
+                    range=(min_val, max_val),
+                    unit=unit_str,
+                )
+            )
+
         else:
             # scalar: min / max / eq
             value_str = _get_answer(answers, f"{name}.value")
@@ -199,6 +249,42 @@ def _collect_interactive(schema: FormSchema) -> QuerySpec:
                     ParamConstraint(
                         canonical_name=name,
                         comparison="contains",
+                        value=None,
+                        range=(min_val, max_val),
+                        unit=unit,
+                    )
+                )
+                break
+
+        elif field.comparison == "between":
+            print(f"\n{field.label} (range — leave a side blank for open-ended)")
+
+            while True:
+                min_raw = input(f"  Min ({field.units}): ").strip()
+                max_raw = input(f"  Max ({field.units}): ").strip()
+                if not min_raw and not max_raw:
+                    break  # both empty → skip this field
+
+                try:
+                    min_val = float(min_raw) if min_raw else float("-inf")
+                    max_val = float(max_raw) if max_raw else float("inf")
+                except ValueError:
+                    print("  Please enter numeric values.")
+                    continue
+
+                if min_val > max_val:
+                    print("  Min must not be greater than max.")
+                    continue
+
+                if _use_questionary and len(field.units) > 1:
+                    unit = questionary.select("  Unit:", choices=field.units).ask()
+                else:
+                    unit = field.units[0]
+
+                constraints.append(
+                    ParamConstraint(
+                        canonical_name=name,
+                        comparison="between",
                         value=None,
                         range=(min_val, max_val),
                         unit=unit,

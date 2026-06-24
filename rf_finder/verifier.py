@@ -39,6 +39,19 @@ def _compare(constraint: ParamConstraint, raw: RawValue) -> str:
             return "PASS"
         return "FAIL"
 
+    if constraint.comparison == "between":
+        # Candidate has a single value; required is a (low, high) band.
+        # PASS when low <= value <= high (either bound may be 0 / +inf).
+        req_low, req_high = constraint.range  # type: ignore[misc]
+
+        found = to_canonical(raw.value, raw.unit, canonical)  # type: ignore[arg-type]
+        req_low_c = to_canonical(req_low, canonical, canonical)    # identity
+        req_high_c = to_canonical(req_high, canonical, canonical)
+
+        if req_low_c <= found <= req_high_c:
+            return "PASS"
+        return "FAIL"
+
     # Scalar comparisons (min / max / eq)
     found = to_canonical(raw.value, raw.unit, canonical)  # type: ignore[arg-type]
     required = to_canonical(constraint.value, canonical, canonical)  # identity

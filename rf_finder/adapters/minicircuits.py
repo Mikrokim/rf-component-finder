@@ -245,3 +245,4 @@ class MiniCircuitsAdapter(Adapter):
             )
 
         return candidates
+  
