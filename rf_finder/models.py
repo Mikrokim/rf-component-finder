@@ -29,9 +29,9 @@ class ParamConstraint:
     """
 
     canonical_name: str                   # e.g. "P1dB", "freq_range"
-    comparison: str                       # "min" | "max" | "contains" | "eq"
+    comparison: str                       # "min" | "max" | "contains" | "eq" | "between"
     value: float | None                   # for min/max/eq, in the chosen unit
-    range: tuple[float, float] | None     # for "contains" (e.g. (2.0, 6.0) GHz)
+    range: tuple[float, float] | None     # for "contains"/"between" (e.g. (2.0, 6.0))
     unit: str                             # e.g. "dBm", "GHz"
 
     def __post_init__(self) -> None:
