@@ -65,7 +65,8 @@ T10 cache ───────────────────────�
 
 ### T3 — Units conversion
 - [ ] Implement `ontology/units.py`: `to_canonical(value, from_unit, canonical)`
-      for frequency (Hz/kHz/MHz/GHz→GHz) and power (W/mW/dBm→dBm).
+      for frequency (Hz/kHz/MHz/GHz→GHz), power (W/mW/dBm→dBm), and
+      dimensionless ratios (dB→dB, identity; used by Gain/NF).
 - [ ] Tests: a conversion table incl. `6000 MHz → 6.0 GHz` and a dBm/mW round-trip.
 - **Deps:** T1 · **Reqs:** REQ-2.5
 

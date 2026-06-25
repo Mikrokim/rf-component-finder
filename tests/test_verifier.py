@@ -120,22 +120,22 @@ class TestMinComparison:
 class TestMaxComparison:
     def test_max_pass(self):
         """Candidate NF 2 dB <= required 3 dB → PASS."""
-        spec = _make_spec(_scalar_constraint("NF", "max", 3.0, "dBm"))
-        cand = _make_candidate({"NF": RawValue(2.0, "dBm")})
+        spec = _make_spec(_scalar_constraint("NF", "max", 3.0, "dB"))
+        cand = _make_candidate({"NF": RawValue(2.0, "dB")})
         result = verify(spec, cand)
         assert result.verdicts[0].status == "PASS"
 
     def test_max_pass_equal(self):
         """Candidate NF exactly at required ceiling → PASS (boundary)."""
-        spec = _make_spec(_scalar_constraint("NF", "max", 3.0, "dBm"))
-        cand = _make_candidate({"NF": RawValue(3.0, "dBm")})
+        spec = _make_spec(_scalar_constraint("NF", "max", 3.0, "dB"))
+        cand = _make_candidate({"NF": RawValue(3.0, "dB")})
         result = verify(spec, cand)
         assert result.verdicts[0].status == "PASS"
 
     def test_max_fail(self):
         """Candidate NF 5 dB > required 3 dB → FAIL."""
-        spec = _make_spec(_scalar_constraint("NF", "max", 3.0, "dBm"))
-        cand = _make_candidate({"NF": RawValue(5.0, "dBm")})
+        spec = _make_spec(_scalar_constraint("NF", "max", 3.0, "dB"))
+        cand = _make_candidate({"NF": RawValue(5.0, "dB")})
         result = verify(spec, cand)
         assert result.verdicts[0].status == "FAIL"
 
@@ -265,11 +265,11 @@ class TestOverallDecide:
     def test_fail_dominates_pass(self):
         """PASS + FAIL → overall "fail"."""
         spec = _make_spec(
-            _scalar_constraint("Gain", "min", 20.0, "dBm"),   # will PASS (30 >= 20)
+            _scalar_constraint("Gain", "min", 20.0, "dB"),    # will PASS (30 >= 20)
             _scalar_constraint("P1dB", "min", 30.0, "dBm"),   # will FAIL (20 < 30)
         )
         cand = _make_candidate({
-            "Gain": RawValue(30.0, "dBm"),
+            "Gain": RawValue(30.0, "dB"),
             "P1dB": RawValue(20.0, "dBm"),
         })
         result = verify(spec, cand)
@@ -282,12 +282,12 @@ class TestOverallDecide:
     def test_all_pass_yields_match(self):
         """All verdicts PASS → overall "match"."""
         spec = _make_spec(
-            _scalar_constraint("Gain", "min", 20.0, "dBm"),
-            _scalar_constraint("NF",   "max", 5.0,  "dBm"),
+            _scalar_constraint("Gain", "min", 20.0, "dB"),
+            _scalar_constraint("NF",   "max", 5.0,  "dB"),
         )
         cand = _make_candidate({
-            "Gain": RawValue(25.0, "dBm"),
-            "NF":   RawValue(3.0,  "dBm"),
+            "Gain": RawValue(25.0, "dB"),
+            "NF":   RawValue(3.0,  "dB"),
         })
         result = verify(spec, cand)
         assert all(v.status == "PASS" for v in result.verdicts)
@@ -297,7 +297,7 @@ class TestOverallDecide:
         """FAIL + UNKNOWN → overall "fail" (FAIL beats UNKNOWN)."""
         spec = _make_spec(
             _scalar_constraint("P1dB", "min", 30.0, "dBm"),   # FAIL
-            _scalar_constraint("Gain", "min", 20.0, "dBm"),   # UNKNOWN
+            _scalar_constraint("Gain", "min", 20.0, "dB"),    # UNKNOWN
         )
         cand = _make_candidate({"P1dB": RawValue(20.0, "dBm")})
         result = verify(spec, cand)
@@ -327,6 +327,41 @@ class TestUnitConversionInContains:
         """Candidate (3000, 8000) MHz → (3.0, 8.0) GHz does NOT contain (2.0, 6.0) → FAIL."""
         spec = _make_spec(_range_constraint("freq_range", 2.0, 6.0, "GHz"))
         cand = _make_candidate({"freq_range": RawValue((3000.0, 8000.0), "MHz")})
+        result = verify(spec, cand)
+        assert result.verdicts[0].status == "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# 12b. Non-canonical CONSTRAINT unit (user picks MHz / W) — regression
+#      Previously crashed with "Unsupported canonical unit 'MHz'".
+# ---------------------------------------------------------------------------
+
+class TestNonCanonicalConstraintUnit:
+    def test_mhz_constraint_vs_ghz_candidate_pass(self):
+        """User asks for 2000–6000 MHz; candidate (1.0, 8.0) GHz covers it → PASS."""
+        spec = _make_spec(_range_constraint("freq_range", 2000.0, 6000.0, "MHz"))
+        cand = _make_candidate({"freq_range": RawValue((1.0, 8.0), "GHz")})
+        result = verify(spec, cand)
+        assert result.verdicts[0].status == "PASS"
+
+    def test_mhz_constraint_vs_ghz_candidate_fail(self):
+        """User asks for 2000–6000 MHz; candidate (3.0, 5.0) GHz misses both ends → FAIL."""
+        spec = _make_spec(_range_constraint("freq_range", 2000.0, 6000.0, "MHz"))
+        cand = _make_candidate({"freq_range": RawValue((3.0, 5.0), "GHz")})
+        result = verify(spec, cand)
+        assert result.verdicts[0].status == "FAIL"
+
+    def test_watt_constraint_vs_dbm_candidate_pass(self):
+        """User asks P1dB min 0.1 W (= 20 dBm); candidate 25 dBm → PASS."""
+        spec = _make_spec(_scalar_constraint("P1dB", "min", 0.1, "W"))
+        cand = _make_candidate({"P1dB": RawValue(25.0, "dBm")})
+        result = verify(spec, cand)
+        assert result.verdicts[0].status == "PASS"
+
+    def test_watt_constraint_vs_dbm_candidate_fail(self):
+        """User asks P1dB min 0.1 W (= 20 dBm); candidate 15 dBm → FAIL."""
+        spec = _make_spec(_scalar_constraint("P1dB", "min", 0.1, "W"))
+        cand = _make_candidate({"P1dB": RawValue(15.0, "dBm")})
         result = verify(spec, cand)
         assert result.verdicts[0].status == "FAIL"
 
