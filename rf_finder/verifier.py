@@ -27,25 +27,25 @@ def _compare(constraint: ParamConstraint, raw: RawValue) -> str:
     ``constraint.unit``) are converted into that canonical unit before
     comparison, so the user may pick any accepted unit (e.g. MHz, W).
     """
-    canonical = PARAMETERS[constraint.canonical_name].canonical_unit
+    canonical_unit = PARAMETERS[constraint.canonical_name].canonical_unit
 
     if constraint.comparison == "contains":
         # Both candidate and required are (low, high) tuples.
         cand_low_raw, cand_high_raw = raw.value  # type: ignore[misc]
         req_low, req_high = constraint.range  # type: ignore[misc]
 
-        cand_low = to_canonical(cand_low_raw, raw.unit, canonical)
-        cand_high = to_canonical(cand_high_raw, raw.unit, canonical)
-        req_low_c = to_canonical(req_low, constraint.unit, canonical)
-        req_high_c = to_canonical(req_high, constraint.unit, canonical)
+        cand_low = to_canonical(cand_low_raw, raw.unit, canonical_unit)
+        cand_high = to_canonical(cand_high_raw, raw.unit, canonical_unit)
+        req_low_c = to_canonical(req_low, constraint.unit, canonical_unit)
+        req_high_c = to_canonical(req_high, constraint.unit, canonical_unit)
 
         if cand_low <= req_low_c and cand_high >= req_high_c:
             return "PASS"
         return "FAIL"
 
     # Scalar comparisons (min / max / eq)
-    found = to_canonical(raw.value, raw.unit, canonical)  # type: ignore[arg-type]
-    required = to_canonical(constraint.value, constraint.unit, canonical)
+    found = to_canonical(raw.value, raw.unit, canonical_unit)  # type: ignore[arg-type]
+    required = to_canonical(constraint.value, constraint.unit, canonical_unit)
 
     if constraint.comparison == "min":
         return "PASS" if found >= required else "FAIL"
