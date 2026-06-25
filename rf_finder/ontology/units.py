@@ -62,6 +62,12 @@ def to_canonical(value: float, from_unit: str, canonical: str) -> float:
     ------
     ValueError — unknown unit, unsupported canonical, or non-positive power.
     """
+    # Identity: a value already in the canonical unit needs no conversion.
+    # Also covers dimensionless ratios like "dB" (Gain, NF), whose only unit
+    # is the canonical one, and lets open bounds (0, +inf) pass through cleanly.
+    if from_unit == canonical:
+        return value
+
     if canonical == "GHz":
         factor = _FREQ_TO_GHZ.get(from_unit)
         if factor is None:

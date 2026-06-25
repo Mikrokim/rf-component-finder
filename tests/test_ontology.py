@@ -40,17 +40,17 @@ class TestComparisons:
     def test_freq_range_comparison_is_contains(self):
         assert PARAMETERS["freq_range"].comparison == "contains"
 
-    def test_p1db_comparison_is_min(self):
-        assert PARAMETERS["P1dB"].comparison == "min"
+    def test_p1db_comparison_is_between(self):
+        assert PARAMETERS["P1dB"].comparison == "between"
 
-    def test_gain_comparison_is_min(self):
-        assert PARAMETERS["Gain"].comparison == "min"
+    def test_gain_comparison_is_between(self):
+        assert PARAMETERS["Gain"].comparison == "between"
 
-    def test_nf_comparison_is_max(self):
-        assert PARAMETERS["NF"].comparison == "max"
+    def test_nf_comparison_is_between(self):
+        assert PARAMETERS["NF"].comparison == "between"
 
-    def test_oip3_comparison_is_min(self):
-        assert PARAMETERS["OIP3"].comparison == "min"
+    def test_oip3_comparison_is_between(self):
+        assert PARAMETERS["OIP3"].comparison == "between"
 
     def test_pout_comparison_is_min(self):
         assert PARAMETERS["Pout"].comparison == "min"

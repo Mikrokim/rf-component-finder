@@ -31,7 +31,16 @@ def main() -> None:
     print(f"  Component: {spec.component_type}")
     for c in spec.constraints:
         if c.range is not None:
-            print(f"  {c.canonical_name}: {c.range[0]}–{c.range[1]} {c.unit}  [{c.comparison}]")
+            lo, hi = c.range
+            if c.comparison == "between" and lo == float("-inf") and hi == float("inf"):
+                rng = "any"
+            elif c.comparison == "between" and hi == float("inf"):
+                rng = f"≥ {lo}"
+            elif c.comparison == "between" and lo == float("-inf"):
+                rng = f"≤ {hi}"
+            else:
+                rng = f"{lo}–{hi}"
+            print(f"  {c.canonical_name}: {rng} {c.unit}  [{c.comparison}]")
         else:
             print(f"  {c.canonical_name}: {c.value} {c.unit}  [{c.comparison}]")
 

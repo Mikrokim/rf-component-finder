@@ -14,7 +14,7 @@ class ParamDef(NamedTuple):
     canonical_unit: The unit everything is normalised to (e.g. "GHz", "dBm", "dB").
     units:          Accepted unit strings offered in the form's unit selector
                     (canonical unit listed first, per REQ-1.4).
-    comparison:     Rule used by the Verifier: "min" | "max" | "contains" | "eq".
+    comparison:     Rule used by the Verifier: "min" | "max" | "contains" | "eq" | "between".
     applies_to:     Component types for which this parameter is relevant.
     """
 
@@ -37,28 +37,28 @@ PARAMETERS: dict[str, ParamDef] = {
         label="P1dB (output 1 dB compression)",
         canonical_unit="dBm",
         units=["dBm", "W", "mW"],
-        comparison="min",
+        comparison="between",
         applies_to=["amplifier"],
     ),
     "Gain": ParamDef(
         label="Gain",
         canonical_unit="dB",
         units=["dB"],
-        comparison="min",
+        comparison="between",
         applies_to=["amplifier"],
     ),
     "NF": ParamDef(
         label="Noise figure",
         canonical_unit="dB",
         units=["dB"],
-        comparison="max",
+        comparison="between",
         applies_to=["amplifier"],
     ),
     "OIP3": ParamDef(
         label="OIP3",
         canonical_unit="dBm",
         units=["dBm"],
-        comparison="min",
+        comparison="between",
         applies_to=["amplifier"],
     ),
     "Pout": ParamDef(
