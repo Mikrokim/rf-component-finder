@@ -1,0 +1,34 @@
+{
+  "data": [
+    {
+      "0": {"value": ["ADL5243"], "displayValue": "ADL5243"},
+      "279": {"value": ["100000000"], "displayValue": "100 MHz"},
+      "278": {"value": ["4000000000"], "displayValue": "4 GHz"},
+      "2930": {"value": ["25.3"], "displayValue": "25.3 dBm"},
+      "2922": {"value": ["40"], "displayValue": "40 dBm"},
+      "2913": {"value": [""], "displayValue": ""},
+      "2921": {"value": ["3.1"], "displayValue": "3.1 dB"},
+      "4709": {"value": [""], "displayValue": ""}
+    },
+    {
+      "0": {"value": ["ADL5320"], "displayValue": "ADL5320"},
+      "279": {"value": ["400000000"], "displayValue": "400 MHz"},
+      "278": {"value": ["2700000000"], "displayValue": "2.7 GHz"},
+      "2930": {"value": ["25.7"], "displayValue": "25.7 dBm"},
+      "2922": {"value": ["42"], "displayValue": "42 dBm"},
+      "2913": {"value": ["13.2"], "displayValue": "13.2 dB"},
+      "2921": {"value": ["4.4"], "displayValue": "4.4 dB"},
+      "4709": {"value": [""], "displayValue": ""}
+    },
+    {
+      "0": {"value": ["HMC441LP3E"], "displayValue": "HMC441LP3E"},
+      "279": {"value": ["6000000000"], "displayValue": "6 GHz"},
+      "278": {"value": ["20000000000"], "displayValue": "20 GHz"},
+      "2930": {"value": ["18"], "displayValue": "18 dBm"},
+      "2922": {"value": ["34"], "displayValue": "34 dBm"},
+      "2913": {"value": ["15"], "displayValue": "15 dB"},
+      "2921": {"value": ["1.8"], "displayValue": "1.8 dB"},
+      "4709": {"value": ["24"], "displayValue": "24 dBm"}
+    }
+  ]
+}
