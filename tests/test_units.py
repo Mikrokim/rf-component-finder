@@ -121,6 +121,25 @@ class TestRatioToDB:
 # Unsupported canonical unit
 # ---------------------------------------------------------------------------
 
+class TestIdentityConversion:
+    """from_unit == canonical needs no conversion (incl. dimensionless dB)."""
+
+    def test_db_identity(self):
+        # "dB" (Gain, NF) is its own canonical — must pass through unchanged.
+        assert to_canonical(20.0, "dB", "dB") == pytest.approx(20.0)
+
+    def test_mhz_identity(self):
+        assert to_canonical(2400.0, "MHz", "MHz") == pytest.approx(2400.0)
+
+    def test_inf_identity(self):
+        # Open upper bound used by "between" one-sided ranges.
+        assert to_canonical(float("inf"), "dBm", "dBm") == float("inf")
+
+    def test_zero_dbm_identity_no_log(self):
+        # Floor of an only-max "between" range; identity avoids log10(0).
+        assert to_canonical(0.0, "dBm", "dBm") == pytest.approx(0.0)
+
+
 class TestUnsupportedCanonical:
     def test_unknown_canonical_raises(self):
         with pytest.raises(ValueError, match="Unsupported canonical unit"):

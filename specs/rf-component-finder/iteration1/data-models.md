@@ -43,15 +43,17 @@ by the Verifier. (REQ-1.4, REQ-1.5, REQ-2.4)
 @dataclass(frozen=True)
 class ParamConstraint:
     canonical_name: str          # e.g. "P1dB", "freq_range"
-    comparison: str              # "min" | "max" | "contains" | "eq"
+    comparison: str              # "min" | "max" | "contains" | "eq" | "between"
     value: float | None          # for min/max/eq, in the chosen `unit`
-    range: tuple[float, float] | None   # for "contains" (e.g. (2.0, 6.0) GHz)
+    range: tuple[float, float] | None   # for "contains"/"between" (e.g. (2.0, 6.0))
     unit: str                    # the unit chosen in the form, e.g. "dBm", "GHz"
 ```
 
 **Invariants:**
 - Exactly one of `value` / `range` is non-`None`.
-- `comparison == "contains"` ⇒ `range` is set; all others ⇒ `value` is set.
+- `comparison in ("contains", "between")` ⇒ `range` is set; all others ⇒ `value`
+  is set. For `between`, a one-sided range uses `-∞` (min) or `+∞` (max) for the
+  omitted bound (so it imposes no restriction).
 - `unit` is one of the parameter's accepted units (canonical or an equivalent);
   values are NOT pre-converted — the Verifier normalizes both sides to canonical.
 
@@ -159,7 +161,7 @@ constants) and reused:
 
 | Group | Values |
 |-------|--------|
-| `comparison` | `"min"`, `"max"`, `"contains"`, `"eq"` |
+| `comparison` | `"min"`, `"max"`, `"contains"`, `"eq"`, `"between"` |
 | verdict `status` | `"PASS"`, `"FAIL"`, `"UNKNOWN"` |
 | `overall` | `"match"`, `"partial"`, `"fail"` |
 | `source` (Candidate) | `"table"`, `"datasheet"` |

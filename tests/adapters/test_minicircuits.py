@@ -131,6 +131,16 @@ def test_adca3270_nf_present():
     assert c.raw_params["NF"] == RawValue(value=3.0, unit="dB")
 
 
+def test_dc_low_freq_parsed_as_zero():
+    """A 'DC' low-band edge must parse as 0.0 so the part keeps its
+    freq_range (GALI-39+ is DC-8000 MHz)."""
+    candidates = _load_candidates()
+    c = next(x for x in candidates if x.model == "GALI-39+")
+    rv = c.raw_params["freq_range"]
+    assert rv.unit == "MHz"
+    assert rv.value == (0.0, 8000.0)
+
+
 # ---------------------------------------------------------------------------
 # Integration test (network, skipped by default)
 # ---------------------------------------------------------------------------

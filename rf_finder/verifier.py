@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from rf_finder.models import (
     Candidate,
     ParamConstraint,
@@ -43,6 +45,19 @@ def _compare(constraint: ParamConstraint, raw: RawValue) -> str:
             return "PASS"
         return "FAIL"
 
+    if constraint.comparison == "between":
+        # Candidate has a single value; required is a (low, high) band.
+        # PASS when low <= value <= high (either bound may be 0 / +inf).
+        req_low, req_high = constraint.range  # type: ignore[misc]
+
+        found = to_canonical(raw.value, raw.unit, canonical)  # type: ignore[arg-type]
+        req_low_c = to_canonical(req_low, canonical, canonical)    # identity
+        req_high_c = to_canonical(req_high, canonical, canonical)
+
+        if req_low_c <= found <= req_high_c:
+            return "PASS"
+        return "FAIL"
+
     # Scalar comparisons (min / max / eq)
     found = to_canonical(raw.value, raw.unit, canonical_unit)  # type: ignore[arg-type]
     required = to_canonical(constraint.value, constraint.unit, canonical_unit)
@@ -52,7 +67,7 @@ def _compare(constraint: ParamConstraint, raw: RawValue) -> str:
     if constraint.comparison == "max":
         return "PASS" if found <= required else "FAIL"
     if constraint.comparison == "eq":
-        return "PASS" if found == required else "FAIL"
+        return "PASS" if math.isclose(found, required, rel_tol=1e-9, abs_tol=1e-9) else "FAIL"
 
     raise ValueError(f"Unknown comparison rule: {constraint.comparison!r}")
 

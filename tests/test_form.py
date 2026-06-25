@@ -75,7 +75,7 @@ class TestCollectKeystone:
             "freq_range.min": "2",
             "freq_range.max": "6",
             "freq_range.unit": "GHz",
-            "P1dB.value": "26",
+            "P1dB.min": "26",
             "P1dB.unit": "dBm",
         }
         result = collect(schema, answers=answers)
@@ -90,11 +90,12 @@ class TestCollectKeystone:
                     range=(2.0, 6.0),
                     unit="GHz",
                 ),
+                # P1dB is now a "between" param; only-min → max defaults to +inf.
                 ParamConstraint(
                     canonical_name="P1dB",
-                    comparison="min",
-                    value=26.0,
-                    range=None,
+                    comparison="between",
+                    value=None,
+                    range=(26.0, float("inf")),
                     unit="dBm",
                 ),
             ],
@@ -124,7 +125,7 @@ class TestCollectValidation:
     def test_non_numeric_value_raises_value_error(self):
         schema = _amplifier_schema()
         answers = {
-            "P1dB.value": "notanumber",
+            "P1dB.min": "notanumber",
             "P1dB.unit": "dBm",
         }
         with pytest.raises(ValueError):
@@ -143,7 +144,7 @@ class TestCollectValidation:
     def test_invalid_unit_raises_value_error(self):
         schema = _amplifier_schema()
         answers = {
-            "P1dB.value": "26",
+            "P1dB.min": "26",
             "P1dB.unit": "Watts",  # not in field.units
         }
         with pytest.raises(ValueError):
@@ -165,7 +166,7 @@ class TestCollectUnitStored:
     def test_scalar_unit_on_constraint_matches_answer(self):
         schema = _amplifier_schema()
         answers = {
-            "P1dB.value": "0.4",
+            "P1dB.min": "0.4",
             "P1dB.unit": "W",
         }
         result = collect(schema, answers=answers)
@@ -223,9 +224,61 @@ class TestCollectEdgeCases:
     def test_empty_string_value_skips_field(self):
         schema = _amplifier_schema()
         answers = {
-            "P1dB.value": "",
+            "P1dB.min": "",
+            "P1dB.max": "",
             "P1dB.unit": "dBm",
         }
         result = collect(schema, answers=answers)
         names = [c.canonical_name for c in result.constraints]
         assert "P1dB" not in names
+
+
+# ---------------------------------------------------------------------------
+# 3. collect — "between" params (P1dB / Gain / OIP3): min + max with
+#    one-sided defaults (only-min → +inf, only-max → 0)
+# ---------------------------------------------------------------------------
+
+def _p1db_constraint(result: QuerySpec) -> ParamConstraint:
+    return next(c for c in result.constraints if c.canonical_name == "P1dB")
+
+
+class TestCollectBetween:
+    def test_both_min_and_max(self):
+        schema = _amplifier_schema()
+        answers = {"P1dB.min": "20", "P1dB.max": "30", "P1dB.unit": "dBm"}
+        c = _p1db_constraint(collect(schema, answers=answers))
+        assert c.comparison == "between"
+        assert c.range == (20.0, 30.0)
+        assert c.value is None
+
+    def test_only_min_defaults_max_to_inf(self):
+        schema = _amplifier_schema()
+        answers = {"P1dB.min": "26", "P1dB.unit": "dBm"}
+        c = _p1db_constraint(collect(schema, answers=answers))
+        assert c.range == (26.0, float("inf"))
+
+    def test_only_max_defaults_min_to_neg_inf(self):
+        schema = _amplifier_schema()
+        answers = {"P1dB.max": "30", "P1dB.unit": "dBm"}
+        c = _p1db_constraint(collect(schema, answers=answers))
+        assert c.range == (float("-inf"), 30.0)
+
+    def test_neither_side_skips_field(self):
+        schema = _amplifier_schema()
+        result = collect(schema, answers={"P1dB.unit": "dBm"})
+        names = [c.canonical_name for c in result.constraints]
+        assert "P1dB" not in names
+
+    def test_min_greater_than_max_raises(self):
+        schema = _amplifier_schema()
+        answers = {"P1dB.min": "30", "P1dB.max": "20", "P1dB.unit": "dBm"}
+        with pytest.raises(ValueError):
+            collect(schema, answers=answers)
+
+    def test_unit_defaults_to_canonical_when_omitted(self):
+        schema = _amplifier_schema()
+        answers = {"Gain.min": "10", "Gain.max": "20"}
+        result = collect(schema, answers=answers)
+        gain = next(c for c in result.constraints if c.canonical_name == "Gain")
+        assert gain.unit == "dB"  # canonical for Gain
+        assert gain.range == (10.0, 20.0)

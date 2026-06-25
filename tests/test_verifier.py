@@ -69,6 +69,21 @@ def _range_constraint(
     )
 
 
+def _between_constraint(
+    name: str,
+    low: float,
+    high: float,
+    unit: str,
+) -> ParamConstraint:
+    return ParamConstraint(
+        canonical_name=name,
+        comparison="between",
+        value=None,
+        range=(low, high),
+        unit=unit,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. min comparison — PASS (candidate value >= required)
 # ---------------------------------------------------------------------------
@@ -150,6 +165,73 @@ class TestContainsComparison:
         cand = _make_candidate({"freq_range": RawValue((1.0, 5.0), "GHz")})
         result = verify(spec, cand)
         assert result.verdicts[0].status == "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# 7b. between comparison — scalar value must fall within [low, high]
+# ---------------------------------------------------------------------------
+
+class TestBetweenComparison:
+    def test_between_pass_inside_range(self):
+        """Candidate P1dB 26 dBm within [20, 30] → PASS."""
+        spec = _make_spec(_between_constraint("P1dB", 20.0, 30.0, "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(26.0, "dBm")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
+    def test_between_pass_on_low_boundary(self):
+        spec = _make_spec(_between_constraint("P1dB", 20.0, 30.0, "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(20.0, "dBm")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
+    def test_between_pass_on_high_boundary(self):
+        spec = _make_spec(_between_constraint("P1dB", 20.0, 30.0, "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(30.0, "dBm")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
+    def test_between_fail_below_low(self):
+        spec = _make_spec(_between_constraint("P1dB", 20.0, 30.0, "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(19.0, "dBm")})
+        assert verify(spec, cand).verdicts[0].status == "FAIL"
+
+    def test_between_fail_above_high(self):
+        spec = _make_spec(_between_constraint("P1dB", 20.0, 30.0, "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(31.0, "dBm")})
+        assert verify(spec, cand).verdicts[0].status == "FAIL"
+
+    def test_between_only_min_open_top_pass(self):
+        """Only-min range (26, +inf): 40 dBm >= 26 → PASS."""
+        spec = _make_spec(_between_constraint("P1dB", 26.0, float("inf"), "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(40.0, "dBm")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
+    def test_between_only_min_open_top_fail(self):
+        spec = _make_spec(_between_constraint("P1dB", 26.0, float("inf"), "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(10.0, "dBm")})
+        assert verify(spec, cand).verdicts[0].status == "FAIL"
+
+    def test_between_only_max_open_bottom_pass(self):
+        """Only-max range (-inf, 30): 25 dBm <= 30 → PASS (no lower bound)."""
+        spec = _make_spec(_between_constraint("P1dB", float("-inf"), 30.0, "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(25.0, "dBm")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
+    def test_between_only_max_open_bottom_fail(self):
+        spec = _make_spec(_between_constraint("P1dB", float("-inf"), 30.0, "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(35.0, "dBm")})
+        assert verify(spec, cand).verdicts[0].status == "FAIL"
+
+    def test_between_only_max_passes_negative_value(self):
+        """With -inf floor, a negative candidate value still passes the lower side."""
+        spec = _make_spec(_between_constraint("P1dB", float("-inf"), 30.0, "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(-5.0, "dBm")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
+    def test_between_unit_conversion(self):
+        """Candidate in mW vs required band in dBm is normalized before compare."""
+        # 1000 mW → 30 dBm, within [20, 35] dBm → PASS
+        spec = _make_spec(_between_constraint("P1dB", 20.0, 35.0, "dBm"))
+        cand = _make_candidate({"P1dB": RawValue(1000.0, "mW")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +403,22 @@ class TestConfidence:
 # ---------------------------------------------------------------------------
 # Structural checks
 # ---------------------------------------------------------------------------
+
+class TestEqComparison:
+    def test_eq_pass_within_tolerance(self):
+        """Float round-off must not break eq: 6.0 + 1e-12 GHz == 6.0 GHz → PASS."""
+        spec = _make_spec(_scalar_constraint("freq_point", "eq", 6.0, "GHz"))
+        cand = _make_candidate({"freq_point": RawValue(6.0 + 1e-12, "GHz")})
+        result = verify(spec, cand)
+        assert result.verdicts[0].status == "PASS"
+
+    def test_eq_fail_outside_tolerance(self):
+        """A genuine difference still FAILs: 6.5 GHz != 6.0 GHz → FAIL."""
+        spec = _make_spec(_scalar_constraint("freq_point", "eq", 6.0, "GHz"))
+        cand = _make_candidate({"freq_point": RawValue(6.5, "GHz")})
+        result = verify(spec, cand)
+        assert result.verdicts[0].status == "FAIL"
+
 
 class TestStructure:
     def test_verdict_carries_required_constraint(self):

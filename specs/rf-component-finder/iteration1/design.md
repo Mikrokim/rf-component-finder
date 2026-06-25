@@ -109,12 +109,12 @@ PARAMETERS: dict[str, ParamDef] = {
     "P1dB": ParamDef(
         label="P1dB (output 1 dB compression)",
         canonical_unit="dBm", units=["dBm", "W", "mW"],
-        comparison="min",
+        comparison="between",             # bounded-scalar param → min/max fields in form
         applies_to=["amplifier"],
     ),
-    "Gain":  ParamDef("Gain",          "dB",  ["dB"],        "min", ["amplifier"]),
-    "NF":    ParamDef("Noise figure",  "dB",  ["dB"],        "max", ["amplifier"]),
-    "OIP3":  ParamDef("OIP3",          "dBm", ["dBm"],       "min", ["amplifier"]),
+    "Gain":  ParamDef("Gain",          "dB",  ["dB"],        "between", ["amplifier"]),
+    "NF":    ParamDef("Noise figure",  "dB",  ["dB"],        "between", ["amplifier"]),
+    "OIP3":  ParamDef("OIP3",          "dBm", ["dBm"],       "between", ["amplifier"]),
     "Pout":  ParamDef("Saturated power (Psat)",
                                        "dBm", ["dBm","W","mW"], "min", ["amplifier"]),
 }
@@ -122,9 +122,12 @@ PARAMETERS: dict[str, ParamDef] = {
 
 > **Note:** `label` is the human-readable field name shown in the form; `units`
 > is the list offered in the field's unit selector (canonical first, REQ-1.4).
-> A `contains` comparison signals a **range** parameter → the form renders
-> separate min/max inputs (REQ-1.5). No aliases are needed: the form presents
-> labels directly, so there is no free text to disambiguate.
+> A `contains` **or** `between` comparison signals a **range** parameter → the
+> form renders separate min/max inputs (REQ-1.5). `contains` compares a candidate
+> *range* against the required band (frequency); `between` checks that a candidate
+> *scalar* falls within the required band, with one-sided defaults (omitted min→-∞,
+> omitted max→+∞). No aliases are needed: the form presents labels directly, so
+> there is no free text to disambiguate.
 
 ### 4.2 `components.py` (REQ-1.2, REQ-1.3)
 
@@ -165,9 +168,9 @@ Given a component type, returns the ordered list of fields to present, computed
 from the ontology (REQ-1.2):
 - For each `param` in `PARAMETERS` where `component_type in param.applies_to`,
   emit a `Field(name, label, units, kind)`.
-- `kind = "range"` if `param.comparison == "contains"` (renders min + max), else
-  `kind = "scalar"` (renders a single value). Each field carries its `units` list
-  (canonical first) for the unit selector (REQ-1.4, REQ-1.5).
+- `kind = "range"` if `param.comparison in ("contains", "between")` (renders
+  min + max), else `kind = "scalar"` (renders a single value). Each field carries
+  its `units` list (canonical first) for the unit selector (REQ-1.4, REQ-1.5).
 
 **`input.py` — `collect(schema) -> QuerySpec`.**
 Drives the interactive form (component selection first, then the parameter
@@ -192,14 +195,15 @@ field-to-constraint logic can be tested without a TTY.
 ### 5.2 Worked example
 
 Form input — component **Amplifier**; `Frequency range` min `2` max `6` unit `GHz`;
-`P1dB` value `26` unit `dBm`; all other fields left empty → produces:
+`P1dB` min `26` (max left blank) unit `dBm`; all other fields left empty → produces:
 
 ```python
 QuerySpec(
   component_type="amplifier",
   constraints=[
-    ParamConstraint("freq_range", "contains", None, (2.0, 6.0), "GHz"),
-    ParamConstraint("P1dB",       "min",      26.0, None,        "dBm"),
+    ParamConstraint("freq_range", "contains", None, (2.0, 6.0),           "GHz"),
+    # P1dB is a "between" param; only-min given → max defaults to +inf.
+    ParamConstraint("P1dB",       "between",  None, (26.0, float("inf")), "dBm"),
   ],
 )
 ```
@@ -259,8 +263,8 @@ task), but the **results table schema is already confirmed**:
 
 **Search strategy.** The adapter passes the query's frequency band to the page's
 F Low / F High filters to narrow server-side where possible, then scrapes the
-full results table and maps every column. Scalar `min`/`max` constraints
-(P1dB, etc.) are intentionally **not** pushed to the site filter — they are left
+full results table and maps every column. Non-frequency constraints
+(P1dB, Gain, etc.) are intentionally **not** pushed to the site filter — they are left
 to the Verifier so that `partial`/near-miss candidates are still surfaced rather
 than silently dropped by the site. Respects robots.txt + rate limiting (NFR-6).
 
@@ -295,6 +299,7 @@ def verify(spec: QuerySpec, cand: Candidate) -> VerifiedCandidate:
 | `min`      | `found >= required.value` |
 | `max`      | `found <= required.value` |
 | `contains` | `found.min <= required.range.min AND found.max >= required.range.max` |
+| `between`  | `required.range.min <= found <= required.range.max` (scalar `found`; an omitted bound is `-∞` / `+∞`) |
 | `eq`       | `found == required.value` (within tolerance) |
 
 **`decide` rules (REQ-4.2, REQ-4.4, REQ-4.5):**

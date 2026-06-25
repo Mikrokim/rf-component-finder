@@ -26,8 +26,9 @@ class FormSchema:
 def build_form(component_type: str) -> FormSchema:
     """Return an ordered ``FormSchema`` for *component_type*.
 
-    Fields are ordered: ``contains`` params first (e.g. freq_range), then
-    scalar params (min/max/eq) in ontology iteration order.
+    Fields are ordered: range params (``contains`` / ``between`` — both ask for
+    a min and a max, e.g. freq_range) first, then scalar params (min/max/eq) in
+    ontology iteration order.
 
     Raises
     ------
@@ -42,7 +43,7 @@ def build_form(component_type: str) -> FormSchema:
 
     param_defs = params_for(component_type)
 
-    contains_fields: list[Field] = []
+    range_fields: list[Field] = []
     scalar_fields: list[Field] = []
 
     for name, param in param_defs.items():
@@ -53,12 +54,12 @@ def build_form(component_type: str) -> FormSchema:
             canonical_unit=param.canonical_unit,
             units=param.units,
         )
-        if param.comparison == "contains":
-            contains_fields.append(field)
+        if param.comparison in ("contains", "between"):
+            range_fields.append(field)
         else:
             scalar_fields.append(field)
 
     return FormSchema(
         component_type=component_type,
-        fields=contains_fields + scalar_fields,
+        fields=range_fields + scalar_fields,
     )

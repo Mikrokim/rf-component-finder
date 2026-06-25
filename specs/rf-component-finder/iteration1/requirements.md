@@ -59,7 +59,7 @@ a single manufacturer (Mini-Circuits).**
 | **Ontology** | Central dictionary mapping parameter names, units, comparison rules, and applicable component types |
 | **Adapter** | Manufacturer-specific module that knows how to build a search and interpret results in that manufacturer's terms |
 | **Canonical unit** | The standard unit every value is converted to (GHz for frequency, dBm for power, etc.) |
-| **Comparison rule** | The comparison rule for a parameter: `min` / `max` / `contains` / `eq` |
+| **Comparison rule** | The comparison rule for a parameter: `min` / `max` / `contains` / `eq` / `between` |
 | **Verifier** | Component that compares actually-extracted values against the QuerySpec and marks a confidence level |
 
 ---
@@ -74,7 +74,7 @@ a single manufacturer (Mini-Circuits).**
 - **REQ-1.2** — WHEN a component type is selected, the system SHALL derive the available parameter fields from the ontology, showing only the parameters that apply to that component type.
 - **REQ-1.3** — The system SHALL present the component type as a selection from the ontology's known component types (the user does not type the type as free text).
 - **REQ-1.4** — For each parameter field, the system SHALL default to the parameter's canonical unit and allow selecting an equivalent unit; the chosen unit SHALL be recorded together with the value.
-- **REQ-1.5** — For range parameters (e.g. `freq_range`), the system SHALL provide separate `min` and `max` input fields.
+- **REQ-1.5** — For range parameters — both `contains` (e.g. `freq_range`) and bounded-scalar `between` (e.g. `P1dB`/`Gain`/`OIP3`/`NF`) — the system SHALL provide separate `min` and `max` input fields. For a `between` parameter either side may be omitted: an omitted `min` defaults to `-∞` and an omitted `max` defaults to `+∞` (a one-sided range — an omitted bound imposes no restriction).
 - **REQ-1.6** — The system SHALL treat empty fields as "no constraint" and include only the filled fields as constraints in the `QuerySpec`.
 - **REQ-1.7** — The system SHALL validate each field (numeric value, `min ≤ max`, value within sane bounds) and reject invalid input with a clear message, producing a valid `QuerySpec` or an explicit validation error.
 
@@ -83,7 +83,7 @@ a single manufacturer (Mini-Circuits).**
 - **REQ-2.1** — The system SHALL maintain a central dictionary defining, per parameter: canonical name, display label, canonical unit, accepted equivalent units, comparison rule, and the component types it applies to.
 - **REQ-2.2** — The system SHALL support at least the following parameters for amplifiers: frequency range (`freq_range`), P1dB, Gain, Noise Figure (NF), OIP3, Pout/Psat.
 - **REQ-2.3** — The system SHALL use the ontology's display labels and applicable-parameter lists to build the form fields for the selected component type.
-- **REQ-2.4** — The system SHALL define a comparison rule per parameter: `freq_range`=`contains`, `P1dB`/`Gain`/`OIP3`/`Pout`=`min`, `NF`=`max`.
+- **REQ-2.4** — The system SHALL define a comparison rule per parameter: `freq_range`=`contains`, `P1dB`/`Gain`/`OIP3`/`NF`=`between` (candidate value must fall within a min/max band; for `NF` the common "at most X" use is expressed by filling only `max`), `Pout`=`min`.
 - **REQ-2.5** — The system SHALL convert between equivalent units (MHz↔GHz, dBm↔W, mW↔dBm), and SHALL treat dimensionless ratio units (dB, for Gain/NF) as an identity conversion (dB→dB), through a dedicated conversion module.
 
 ### REQ-3 — Mini-Circuits Adapter (Site Adapter)
