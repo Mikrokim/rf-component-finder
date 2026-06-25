@@ -22,8 +22,8 @@ def collect(
         instead of prompting the user interactively.
 
         Key conventions:
-        - ``contains`` field  → ``"<canonical_name>.min"``, ``"<canonical_name>.max"``,
-          ``"<canonical_name>.unit"``
+        - range field (``contains`` / ``between``) → ``"<canonical_name>.min"``,
+          ``"<canonical_name>.max"``, ``"<canonical_name>.unit"``
         - scalar field        → ``"<canonical_name>.value"``, ``"<canonical_name>.unit"``
 
         Omit a key (or set its value to ``""``) to leave that field empty.
@@ -63,117 +63,92 @@ def _validate_unit(unit_str: str, field: Field) -> str:
     return unit_str
 
 
+def _resolve_unit(unit_str: str, field: Field) -> str:
+    """Return the canonical unit when *unit_str* is empty, else validate it."""
+    if not unit_str:
+        return field.canonical_unit
+    return _validate_unit(unit_str, field)
+
+
+def _build_range_constraint(
+    field: Field,
+    min_str: str,
+    max_str: str,
+    unit_str: str,
+    *,
+    require_both: bool,
+) -> ParamConstraint | None:
+    """Build a range ``ParamConstraint`` from raw min/max/unit strings.
+
+    Shared by both range comparison rules:
+
+    - ``contains`` (``require_both=True``): a partial range is meaningless, so
+      both bounds must be present — otherwise the field is skipped.
+    - ``between`` (``require_both=False``): either side may be omitted; an
+      omitted ``min`` defaults to ``-inf`` and an omitted ``max`` to ``+inf``,
+      i.e. a one-sided range that imposes no restriction on that side.
+
+    Returns ``None`` when the field has no usable input and should be skipped
+    (REQ-1.6).  Raises ``ValueError`` on a non-numeric bound, ``min > max``, or
+    an invalid unit (REQ-1.7).
+    """
+    name = field.canonical_name
+
+    if not min_str and not max_str:
+        return None  # nothing entered → no constraint
+    if require_both and (not min_str or not max_str):
+        return None  # partial range for a 'contains' field → skip
+
+    if min_str:
+        try:
+            min_val = float(min_str)
+        except ValueError:
+            raise ValueError(f"{name}.min: {min_str!r} is not a valid number")
+    else:
+        min_val = float("-inf")
+
+    if max_str:
+        try:
+            max_val = float(max_str)
+        except ValueError:
+            raise ValueError(f"{name}.max: {max_str!r} is not a valid number")
+    else:
+        max_val = float("inf")
+
+    if min_val > max_val:
+        raise ValueError(
+            f"{name}: min ({min_val}) must not be greater than max ({max_val})"
+        )
+
+    return ParamConstraint(
+        canonical_name=name,
+        comparison=field.comparison,
+        value=None,
+        range=(min_val, max_val),
+        unit=_resolve_unit(unit_str, field),
+    )
+
+
 def _collect_from_answers(schema: FormSchema, answers: dict[str, str]) -> QuerySpec:
     constraints: list[ParamConstraint] = []
 
     for field in schema.fields:
         name = field.canonical_name
 
-        if field.comparison == "contains":
-            min_str = _get_answer(answers, f"{name}.min")
-            max_str = _get_answer(answers, f"{name}.max")
-            unit_str = _get_answer(answers, f"{name}.unit")
-
-            # All three must be non-empty to create a constraint
-            if not min_str and not max_str and not unit_str:
-                continue
-            # If some but not all are provided, still skip gracefully when empty
-            if not min_str and not max_str:
-                continue
-
-            if not min_str or not max_str:
-                # partial — treat as empty and skip
-                continue
-
-            try:
-                min_val = float(min_str)
-            except ValueError:
-                raise ValueError(
-                    f"{name}.min: {min_str!r} is not a valid number"
-                )
-            try:
-                max_val = float(max_str)
-            except ValueError:
-                raise ValueError(
-                    f"{name}.max: {max_str!r} is not a valid number"
-                )
-
-            if min_val > max_val:
-                raise ValueError(
-                    f"{name}: min ({min_val}) must not be greater than max ({max_val})"
-                )
-
-            # Unit: use canonical if not provided
-            if not unit_str:
-                unit_str = field.canonical_unit
-            else:
-                _validate_unit(unit_str, field)
-
-            constraints.append(
-                ParamConstraint(
-                    canonical_name=name,
-                    comparison="contains",
-                    value=None,
-                    range=(min_val, max_val),
-                    unit=unit_str,
-                )
+        if field.comparison in ("contains", "between"):
+            constraint = _build_range_constraint(
+                field,
+                _get_answer(answers, f"{name}.min"),
+                _get_answer(answers, f"{name}.max"),
+                _get_answer(answers, f"{name}.unit"),
+                require_both=field.comparison == "contains",
             )
-
-        elif field.comparison == "between":
-            # Bounded range on a scalar value: the candidate's value must fall
-            # within [min, max].  Either side may be left empty; an omitted side
-            # defaults to the most extreme value possible, so it imposes no
-            # restriction:
-            #   only min given → max defaults to +inf  ("at least min")
-            #   only max given → min defaults to -inf  ("at most max")
-            min_str = _get_answer(answers, f"{name}.min")
-            max_str = _get_answer(answers, f"{name}.max")
-            unit_str = _get_answer(answers, f"{name}.unit")
-
-            if not min_str and not max_str:
-                continue  # nothing entered → no constraint
-
-            if min_str:
-                try:
-                    min_val = float(min_str)
-                except ValueError:
-                    raise ValueError(f"{name}.min: {min_str!r} is not a valid number")
-            else:
-                min_val = float("-inf")
-
-            if max_str:
-                try:
-                    max_val = float(max_str)
-                except ValueError:
-                    raise ValueError(f"{name}.max: {max_str!r} is not a valid number")
-            else:
-                max_val = float("inf")
-
-            if min_val > max_val:
-                raise ValueError(
-                    f"{name}: min ({min_val}) must not be greater than max ({max_val})"
-                )
-
-            if not unit_str:
-                unit_str = field.canonical_unit
-            else:
-                _validate_unit(unit_str, field)
-
-            constraints.append(
-                ParamConstraint(
-                    canonical_name=name,
-                    comparison="between",
-                    value=None,
-                    range=(min_val, max_val),
-                    unit=unit_str,
-                )
-            )
+            if constraint is not None:
+                constraints.append(constraint)
 
         else:
             # scalar: min / max / eq
             value_str = _get_answer(answers, f"{name}.value")
-            unit_str = _get_answer(answers, f"{name}.unit")
-
             if not value_str:
                 continue
 
@@ -184,18 +159,13 @@ def _collect_from_answers(schema: FormSchema, answers: dict[str, str]) -> QueryS
                     f"{name}.value: {value_str!r} is not a valid number"
                 )
 
-            if not unit_str:
-                unit_str = field.canonical_unit
-            else:
-                _validate_unit(unit_str, field)
-
             constraints.append(
                 ParamConstraint(
                     canonical_name=name,
                     comparison=field.comparison,
                     value=scalar,
                     range=None,
-                    unit=unit_str,
+                    unit=_resolve_unit(_get_answer(answers, f"{name}.unit"), field),
                 )
             )
 
@@ -210,60 +180,33 @@ def _collect_interactive(schema: FormSchema) -> QuerySpec:
     except ImportError:
         _use_questionary = False
 
+    def _select_unit(field: Field) -> str:
+        """Return the chosen unit (canonical unless the user picks another)."""
+        if _use_questionary and len(field.units) > 1:
+            return questionary.select("  Unit:", choices=field.units).ask()
+        return field.units[0]
+
     constraints: list[ParamConstraint] = []
 
     for field in schema.fields:
         name = field.canonical_name
 
-        if field.comparison == "contains":
-            print(f"\n{field.label} (range)")
-
-            while True:
-                min_raw = input(f"  Min ({field.units}): ").strip()
-                if not min_raw:
-                    break
-                max_raw = input(f"  Max ({field.units}): ").strip()
-                if not max_raw:
-                    break
-
-                try:
-                    min_val = float(min_raw)
-                    max_val = float(max_raw)
-                except ValueError:
-                    print("  Please enter numeric values.")
-                    continue
-
-                if min_val > max_val:
-                    print("  Min must not be greater than max.")
-                    continue
-
-                # Unit selection
-                if _use_questionary and len(field.units) > 1:
-                    unit = questionary.select(
-                        "  Unit:", choices=field.units
-                    ).ask()
-                else:
-                    unit = field.units[0]  # default to canonical
-
-                constraints.append(
-                    ParamConstraint(
-                        canonical_name=name,
-                        comparison="contains",
-                        value=None,
-                        range=(min_val, max_val),
-                        unit=unit,
-                    )
-                )
-                break
-
-        elif field.comparison == "between":
-            print(f"\n{field.label} (range — leave a side blank for open-ended)")
+        if field.comparison in ("contains", "between"):
+            require_both = field.comparison == "contains"
+            if require_both:
+                print(f"\n{field.label} (range)")
+            else:
+                print(f"\n{field.label} (range — leave a side blank for open-ended)")
 
             while True:
                 min_raw = input(f"  Min ({field.units}): ").strip()
                 max_raw = input(f"  Max ({field.units}): ").strip()
+
+                # Nothing entered (or a partial range on a 'contains' field) → skip.
                 if not min_raw and not max_raw:
-                    break  # both empty → skip this field
+                    break
+                if require_both and (not min_raw or not max_raw):
+                    break
 
                 try:
                     min_val = float(min_raw) if min_raw else float("-inf")
@@ -276,18 +219,13 @@ def _collect_interactive(schema: FormSchema) -> QuerySpec:
                     print("  Min must not be greater than max.")
                     continue
 
-                if _use_questionary and len(field.units) > 1:
-                    unit = questionary.select("  Unit:", choices=field.units).ask()
-                else:
-                    unit = field.units[0]
-
                 constraints.append(
                     ParamConstraint(
                         canonical_name=name,
-                        comparison="between",
+                        comparison=field.comparison,
                         value=None,
                         range=(min_val, max_val),
-                        unit=unit,
+                        unit=_select_unit(field),
                     )
                 )
                 break
@@ -313,18 +251,13 @@ def _collect_interactive(schema: FormSchema) -> QuerySpec:
             if scalar is None:
                 continue
 
-            if _use_questionary and len(field.units) > 1:
-                unit = questionary.select("  Unit:", choices=field.units).ask()
-            else:
-                unit = field.units[0]
-
             constraints.append(
                 ParamConstraint(
                     canonical_name=name,
                     comparison=field.comparison,
                     value=scalar,
                     range=None,
-                    unit=unit,
+                    unit=_select_unit(field),
                 )
             )
 
