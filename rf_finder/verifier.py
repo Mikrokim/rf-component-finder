@@ -50,9 +50,9 @@ def _compare(constraint: ParamConstraint, raw: RawValue) -> str:
         # PASS when low <= value <= high (either bound may be 0 / +inf).
         req_low, req_high = constraint.range  # type: ignore[misc]
 
-        found = to_canonical(raw.value, raw.unit, canonical)  # type: ignore[arg-type]
-        req_low_c = to_canonical(req_low, canonical, canonical)    # identity
-        req_high_c = to_canonical(req_high, canonical, canonical)
+        found = to_canonical(raw.value, raw.unit, canonical_unit)  # type: ignore[arg-type]
+        req_low_c = to_canonical(req_low, constraint.unit, canonical_unit)    # identity
+        req_high_c = to_canonical(req_high, constraint.unit, canonical_unit)
 
         if req_low_c <= found <= req_high_c:
             return "PASS"
