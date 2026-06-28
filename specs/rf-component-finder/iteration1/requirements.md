@@ -84,7 +84,7 @@ a single manufacturer (Mini-Circuits).**
 - **REQ-2.2** — The system SHALL support at least the following parameters for amplifiers: frequency range (`freq_range`), P1dB, Gain, Noise Figure (NF), OIP3, Pout/Psat.
 - **REQ-2.3** — The system SHALL use the ontology's display labels and applicable-parameter lists to build the form fields for the selected component type.
 - **REQ-2.4** — The system SHALL define a comparison rule per parameter: `freq_range`=`contains`, `P1dB`/`Gain`/`OIP3`/`NF`=`between` (candidate value must fall within a min/max band; for `NF` the common "at most X" use is expressed by filling only `max`), `Pout`=`min`.
-- **REQ-2.5** — The system SHALL convert between equivalent units (MHz↔GHz, dBm↔W, mW↔dBm) through a dedicated conversion module.
+- **REQ-2.5** — The system SHALL convert between equivalent units (MHz↔GHz, dBm↔W, mW↔dBm), and SHALL treat dimensionless ratio units (dB, for Gain/NF) as an identity conversion (dB→dB), through a dedicated conversion module.
 
 ### REQ-3 — Mini-Circuits Adapter (Site Adapter)
 
