@@ -9,10 +9,10 @@ Field-id -> ontology mapping confirmed from ADI view metadata:
     279  Frequency Response min (Hz) -> freq_range low
     278  Frequency Response max (Hz) -> freq_range high
     2930 OP1dB typ (dBm)             -> P1dB
-    2922 OIP3 typ (dBm)              -> OIP3
+    2922 OIP3 typ (dBm)              -> IP3
     2913 Gain typ (dB)               -> Gain
     2921 Noise Figure typ (dB)       -> NF
-    4709 Saturated Output Power (dBm)-> Pout
+    4709 Saturated Output Power (dBm)-> Psat
 """
 
 from __future__ import annotations
@@ -52,10 +52,10 @@ FIELD_MAP: dict[str, tuple[str, str | None]] = {
     "279":  ("freq_low",  "Hz"),
     "278":  ("freq_high", "Hz"),
     "2930": ("P1dB",      "dBm"),
-    "2922": ("OIP3",      "dBm"),
+    "2922": ("IP3",       "dBm"),
     "2913": ("Gain",      "dB"),
     "2921": ("NF",        "dB"),
-    "4709": ("Pout",      "dBm"),
+    "4709": ("Psat",      "dBm"),
 }
 
 

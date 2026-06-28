@@ -45,7 +45,7 @@ def test_freq_range_is_rawvalue_tuple_in_hz() -> None:
 def test_missing_scalar_params_are_absent() -> None:
     c = next(x for x in _load_candidates() if x.model == "ADL5243")
     assert "Gain" not in c.raw_params
-    assert "Pout" not in c.raw_params
+    assert "Psat" not in c.raw_params
 
 
 def test_present_scalar_param() -> None:
@@ -61,7 +61,7 @@ def test_candidate_url_contains_model() -> None:
 
 def test_all_rf_params_present_for_adh() -> None:
     c = next(x for x in _load_candidates() if x.model == "ADH465S")
-    expected_keys = {"freq_range", "Gain", "NF", "P1dB", "Pout", "OIP3"}
+    expected_keys = {"freq_range", "Gain", "NF", "P1dB", "Psat", "IP3"}
     assert expected_keys <= set(c.raw_params)
 
 
@@ -100,7 +100,7 @@ def test_na_and_dash_sentinels_skipped() -> None:
     }]}
     c = AnalogDevicesAdapter()._parse_json(json.dumps(doc))[0]
     assert "P1dB" not in c.raw_params
-    assert "OIP3" not in c.raw_params
+    assert "IP3" not in c.raw_params
     assert "NF" not in c.raw_params
     assert c.raw_params["Gain"] == RawValue(12.0, "dB")
 
@@ -114,7 +114,7 @@ def test_empty_freq_low_drops_range() -> None:
     }]}
     c = AnalogDevicesAdapter()._parse_json(json.dumps(doc))[0]
     assert "freq_range" not in c.raw_params
-    assert c.raw_params["OIP3"] == RawValue(46.0, "dBm")
+    assert c.raw_params["IP3"] == RawValue(46.0, "dBm")
 
 
 def test_part_with_no_rf_fields_yields_empty_params() -> None:

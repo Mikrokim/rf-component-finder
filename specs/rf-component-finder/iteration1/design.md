@@ -109,14 +109,19 @@ PARAMETERS: dict[str, ParamDef] = {
     "P1dB": ParamDef(
         label="P1dB (output 1 dB compression)",
         canonical_unit="dBm", units=["dBm", "W", "mW"],
-        comparison="between",             # bounded-scalar param → min/max fields in form
+        comparison="min",                 # scalar param → single value field in form
         applies_to=["amplifier"],
     ),
-    "Gain":  ParamDef("Gain",          "dB",  ["dB"],        "between", ["amplifier"]),
-    "NF":    ParamDef("Noise figure",  "dB",  ["dB"],        "between", ["amplifier"]),
-    "OIP3":  ParamDef("OIP3",          "dBm", ["dBm"],       "between", ["amplifier"]),
-    "Pout":  ParamDef("Saturated power (Psat)",
+    "Gain":  ParamDef("Gain",          "dB",  ["dB"],        "min",     ["amplifier"]),
+    "NF":    ParamDef("Noise figure",  "dB",  ["dB"],        "max",     ["amplifier"]),
+    "IP3":   ParamDef("IP3",           "dBm", ["dBm"],       "min",     ["amplifier"]),
+    "Psat":  ParamDef("Saturated power (Psat)",
                                        "dBm", ["dBm","W","mW"], "min", ["amplifier"]),
+    "VDD":   ParamDef("Supply voltage (VDD)", "V", ["V"],       "between",  ["amplifier"]),
+    "Size":  ParamDef("Size",          "mm",  ["mm"],          "max",      ["amplifier"]),
+    "MSL":   ParamDef("MSL level (1–5)", "",  [""],            "max",      ["amplifier"]),
+    "Temperature": ParamDef("Operating temperature",
+                                       "degC", ["degC"],       "contains", ["amplifier"]),
 }
 ```
 
@@ -195,15 +200,15 @@ field-to-constraint logic can be tested without a TTY.
 ### 5.2 Worked example
 
 Form input — component **Amplifier**; `Frequency range` min `2` max `6` unit `GHz`;
-`P1dB` min `26` (max left blank) unit `dBm`; all other fields left empty → produces:
+`P1dB` `26` unit `dBm`; all other fields left empty → produces:
 
 ```python
 QuerySpec(
   component_type="amplifier",
   constraints=[
     ParamConstraint("freq_range", "contains", None, (2.0, 6.0),           "GHz"),
-    # P1dB is a "between" param; only-min given → max defaults to +inf.
-    ParamConstraint("P1dB",       "between",  None, (26.0, float("inf")), "dBm"),
+    # P1dB is a "min" param: a single value, no max.
+    ParamConstraint("P1dB",       "min",      26.0, None,                 "dBm"),
   ],
 )
 ```
@@ -248,8 +253,8 @@ task), but the **results table schema is already confirmed**:
 | `Gain (dB) Typ.`             | `Gain`          | dB             | |
 | `NF (dB) Typ.`               | `NF`            | dB             | |
 | `P1dB (dBm) Typ.`            | `P1dB`          | dBm            | target param |
-| `PSAT (dBm) Typ.`            | `Pout`          | dBm            | |
-| `OIP3 (dBm) Typ.`            | `OIP3`          | dBm            | |
+| `PSAT (dBm) Typ.`            | `Psat`          | dBm            | header reads "PSAT" |
+| `OIP3 (dBm) Typ.`            | `IP3`           | dBm            | header reads "OIP3" |
 | `Voltage (V)`                | `voltage`       | V              | not used this iter |
 | `Current (mA)`               | `current`       | mA             | not used this iter |
 | `Case Style`, `Connector Type` | —             | —              | metadata |
