@@ -217,6 +217,7 @@ QuerySpec(
 class Adapter(ABC):
     manufacturer: str
     supported_components: set[str]
+    datasheet_params: frozenset[str] = frozenset()   # params only a datasheet has
 
     @abstractmethod
     def search(self, spec: QuerySpec) -> list[Candidate]:
@@ -224,7 +225,13 @@ class Adapter(ABC):
         Must NOT judge matches. Raises AdapterError with context on failure
         (REQ-3.6)."""
 
-ADAPTERS: list[Adapter] = []     # self-registration registry
+    # --- generic datasheet enrichment (REQ-3.8); see §6.4 ---
+    def needs_datasheet(self, spec) -> bool: ...     # spec params ∩ datasheet_params
+    def enrich(self, candidate, needed) -> Candidate: ...  # generic template
+    def _datasheet_text(self, candidate) -> str | None:    # hook, default None
+        return None
+
+ADAPTERS: dict[str, Adapter] = {}     # self-registration registry, keyed by manufacturer
 ```
 
 ### 6.2 Mini-Circuits Adapter (`minicircuits.py`)
@@ -270,6 +277,38 @@ than silently dropped by the site. Respects robots.txt + rate limiting (NFR-6).
 **Fetching.** `httpx` for plain HTML; if the table proves to be JS-rendered,
 fall back to `playwright` (dependency already planned, D-1). Decision deferred to
 the implementation task that inspects the live request.
+
+### 6.3 AmcomUSA Adapter (`amcomusa.py`, REQ-3.7)
+
+Static ASP.NET HTML, no API. Eight amplifier categories each render a
+`table#allPnTable`; values are the **cell text**, aligned 1:1 with the live
+header row (read per category — column order/units differ). Frequency is MHz for
+LNA / Medium-Power SSPA and GHz elsewhere, stored in its source unit and
+normalised by the Verifier; `Psat` and `Pout` both map to canonical `Pout`. The
+card-only **Rackmount HPAs** page (no table) yields model+link candidates. The
+datasheet PDF link is captured per row from `td.pn-pdf` for enrichment (§6.4).
+
+### 6.4 Generic datasheet enrichment (`datasheet.py` + `base.py`, REQ-3.8)
+
+Some parameters appear on **no** HTML table (verified live: OIP3 is absent from
+every AmcomUSA table) and live only in the PDF datasheet. Enrichment is generic,
+not manufacturer- or parameter-specific:
+
+- **`datasheet.py`** — shared engine: `extract_pdf_text` (pdfplumber), a
+  `PATTERNS` library (`canonical → (regex, unit)`), and `parse_params(text, wanted)`.
+- **`base.Adapter`** — `datasheet_params` declaration, `needs_datasheet(spec)`,
+  the generic `enrich` template (hook → `parse_params` → merge **without
+  overwriting table values** → `source="datasheet"`), and the `_datasheet_text`
+  hook (default `None`).
+- An adapter opts in by declaring `datasheet_params` and overriding
+  `_datasheet_text` (locate + download + `extract_pdf_text`). AmcomUSA declares
+  `{"OIP3"}`.
+- **Orchestration (`__main__`)** loads a datasheet only when `needs_datasheet(spec)`
+  is true, and only for `partial` candidates whose every `UNKNOWN` is
+  datasheet-recoverable (i.e. the rest already `PASS`), then re-verifies.
+
+Adding a datasheet parameter = one `PATTERNS` entry + the adapter's
+`datasheet_params`. No new per-adapter parsing code.
 
 ---
 
@@ -365,6 +404,7 @@ column-mapping logic is verifiable offline and stable against site changes.
 | REQ-1.1–1.7 | §5 Form Input (schema + input), §3 QuerySpec |
 | REQ-2.1–2.5 | §4 Ontology, §4.3 Units |
 | REQ-3.1–3.6 | §6 Adapter interface + Mini-Circuits, §9.3 errors |
+| REQ-3.7–3.8 | §6.3 AmcomUSA adapter, §6.4 generic datasheet enrichment |
 | REQ-4.1–4.5 | §7 Verifier |
 | REQ-5.1–5.4 | §8 Reporter |
 | NFR-1 | §5.1 structured form (no LLM), §9.1 cache |

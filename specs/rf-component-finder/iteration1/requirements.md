@@ -18,18 +18,18 @@ result title alone.
 
 The full system is designed around two search paths: (a) adapters for the
 manufacturers on the list, (b) smart free-form search across additional
-manufacturers. **In this iteration we build path (a) only, for amplifiers only, with
-a single manufacturer (Mini-Circuits).**
+manufacturers. **In this iteration we build path (a) only, for amplifiers only,
+starting with two manufacturers (Mini-Circuits and AmcomUSA).**
 
 ### Scope
 
 **In scope for this iteration:**
 - Single component type: **amplifier**
-- Single manufacturer: **Mini-Circuits**
+- Manufacturers: **Mini-Circuits** and **AmcomUSA**
 - Structured form input → structured data (`QuerySpec`)
 - Ontology of parameters relevant to amplifiers (drives the form fields)
-- Real search against Mini-Circuits and verification of parameters against the request
-- Verification source is the manufacturer parametric **table only** (PDF datasheet parsing deferred — see OQ-3)
+- Real search against Mini-Circuits and AmcomUSA and verification of parameters against the request
+- Verification source is primarily the manufacturer parametric **table**; for a parameter a table omits (e.g. OIP3 on AmcomUSA), an adapter MAY recover it from the product **PDF datasheet** (optional, targeted enrichment — see REQ-3.7/3.8)
 - Clean CLI output
 
 **Out of scope (future phases, documented to prevent ambiguity):**
@@ -86,14 +86,16 @@ a single manufacturer (Mini-Circuits).**
 - **REQ-2.4** — The system SHALL define a comparison rule per parameter: `freq_range`=`contains`, `P1dB`/`Gain`/`OIP3`/`NF`=`between` (candidate value must fall within a min/max band; for `NF` the common "at most X" use is expressed by filling only `max`), `Pout`=`min`.
 - **REQ-2.5** — The system SHALL convert between equivalent units (MHz↔GHz, dBm↔W, mW↔dBm) through a dedicated conversion module.
 
-### REQ-3 — Mini-Circuits Adapter (Site Adapter)
+### REQ-3 — Site Adapters (Mini-Circuits, AmcomUSA)
 
 - **REQ-3.1** — The system SHALL expose a uniform adapter interface (`base adapter`) so that additional manufacturers can be added without changing the system core.
-- **REQ-3.2** — WHEN a `QuerySpec` for an amplifier is received, the Mini-Circuits adapter SHALL build a search appropriate to the structure of the Mini-Circuits site/API.
+- **REQ-3.2** — WHEN a `QuerySpec` for an amplifier is received, each adapter SHALL build a search appropriate to the structure of its own manufacturer site/API.
 - **REQ-3.3** — The adapter SHALL prefer an official API if one exists; otherwise a parametric search via URL; otherwise scraping the results table.
-- **REQ-3.4** — WHEN a results table is received, the adapter SHALL map the Mini-Circuits column headers to the canonical parameter names in the ontology.
+- **REQ-3.4** — WHEN a results table is received, the adapter SHALL map the manufacturer's column headers to the canonical parameter names in the ontology.
 - **REQ-3.5** — The adapter SHALL return a list of candidate components, each with a model number, manufacturer, link, and raw parameter values + units.
 - **REQ-3.6** — IF the search fails (network/site structure change), the adapter SHALL return a clear error with context, and not crash silently.
+- **REQ-3.7** — The AmcomUSA adapter SHALL scrape every amplifier category table (`table#allPnTable`, plus the card-only Rackmount HPAs page), normalising MHz/GHz frequency and mapping per-category headers (e.g. `Psat`→`Pout`) to canonical names.
+- **REQ-3.8** — WHEN a required parameter is absent from an adapter's table but available in the product datasheet (e.g. OIP3 on AmcomUSA), the adapter MAY declare it (`datasheet_params`) and recover it from the PDF datasheet via the shared engine. The system SHALL load a datasheet only when the search constrains such a parameter (`needs_datasheet`) and only for candidates whose other required parameters already `PASS`; recovered values SHALL NOT overwrite table values and SHALL raise the candidate's confidence source to `datasheet`.
 
 ### REQ-4 — Result Verification (Verifier)
 
