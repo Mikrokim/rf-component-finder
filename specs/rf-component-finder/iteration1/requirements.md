@@ -86,14 +86,17 @@ a single manufacturer (Mini-Circuits).**
 - **REQ-2.4** — The system SHALL define a comparison rule per parameter: `freq_range`=`contains`, `P1dB`/`Gain`/`OIP3`/`NF`=`between` (candidate value must fall within a min/max band; for `NF` the common "at most X" use is expressed by filling only `max`), `Pout`=`min`.
 - **REQ-2.5** — The system SHALL convert between equivalent units (MHz↔GHz, dBm↔W, mW↔dBm), and SHALL treat dimensionless ratio units (dB, for Gain/NF) as an identity conversion (dB→dB), through a dedicated conversion module.
 
-### REQ-3 — Mini-Circuits Adapter (Site Adapter)
+### REQ-3 — Site Adapter (generic)
+
+> Manufacturer-specific refinements live in that adapter's own spec — e.g.
+> [adapters/minicircuits/requirements.md](../adapters/minicircuits/requirements.md).
 
 - **REQ-3.1** — The system SHALL expose a uniform adapter interface (`base adapter`) so that additional manufacturers can be added without changing the system core.
-- **REQ-3.2** — WHEN a `QuerySpec` for an amplifier is received, the Mini-Circuits adapter SHALL build a search appropriate to the structure of the Mini-Circuits site/API.
-- **REQ-3.3** — The adapter SHALL prefer an official API if one exists; otherwise a parametric search via URL; otherwise scraping the results table.
-- **REQ-3.4** — WHEN a results table is received, the adapter SHALL map the Mini-Circuits column headers to the canonical parameter names in the ontology.
-- **REQ-3.5** — The adapter SHALL return a list of candidate components, each with a model number, manufacturer, link, and raw parameter values + units.
-- **REQ-3.6** — IF the search fails (network/site structure change), the adapter SHALL return a clear error with context, and not crash silently.
+- **REQ-3.2** — WHEN a `QuerySpec` for a supported component is received, a site adapter SHALL build a search appropriate to the structure of that manufacturer's site/API.
+- **REQ-3.3** — A site adapter SHALL prefer an official API if one exists; otherwise a parametric search via URL; otherwise scraping the results table.
+- **REQ-3.4** — WHEN a results table is received, a site adapter SHALL map the manufacturer's column headers to the canonical parameter names in the ontology.
+- **REQ-3.5** — A site adapter SHALL return a list of candidate components, each with a model number, manufacturer, link, and raw parameter values + units.
+- **REQ-3.6** — IF the search fails (network/site structure change), a site adapter SHALL return a clear error with context, and not crash silently.
 
 ### REQ-4 — Result Verification (Verifier)
 
@@ -127,7 +130,7 @@ a single manufacturer (Mini-Circuits).**
 ## 6. Assumptions and Dependencies
 
 - **A-1** — No LLM/API key is required for this iteration; the structured form is fully local. (An Anthropic API key will be needed later for the free-form search path.)
-- **A-2** — The Mini-Circuits site has an accessible search path (API / parametric / table) — to be verified in the Design stage.
+- **A-2** — Each target manufacturer site has an accessible search path (API / parametric / table), verified per adapter in that adapter's spec (e.g. [adapters/minicircuits/requirements.md](../adapters/minicircuits/requirements.md)).
 - **A-3** — Python 3.11+ is available in the runtime environment (Windows).
 - **D-1** — External dependencies: `httpx`, `selectolax`/`playwright`, `pdfplumber`, `pyyaml`, and an interactive-prompt library for the form (e.g. `questionary`). (`anthropic` deferred to the free-form path.)
 
@@ -137,7 +140,7 @@ a single manufacturer (Mini-Circuits).**
 
 The iteration is complete when:
 1. Completing the form (component = amplifier, frequency `2–6 GHz`, P1dB `26 dBm`) produces a valid QuerySpec and displays its summary.
-2. The system returns real candidates from Mini-Circuits.
+2. The system returns real candidates from the configured manufacturer adapter(s). (Mini-Circuits acceptance: see [adapters/minicircuits/requirements.md](../adapters/minicircuits/requirements.md).)
 3. Each candidate is marked `match` / `partial` / `fail` with a confidence level.
 4. Unit tests exist for the form input, ontology, and verifier, and they pass.
 5. All code is documented and consistent with the Design and Tasks documents.
@@ -147,4 +150,4 @@ The iteration is complete when:
 ## 8. Open Questions
 
 - **OQ-1** — The full list of 10 manufacturers — pending (does not block this iteration).
-- **OQ-2** — Does Mini-Circuits have a usable official API without registration? — to be verified in Design.
+- **OQ-2** — Manufacturer-specific open questions (e.g. whether a given site has a usable official API) are tracked in that adapter's spec — e.g. [adapters/minicircuits/requirements.md](../adapters/minicircuits/requirements.md).
