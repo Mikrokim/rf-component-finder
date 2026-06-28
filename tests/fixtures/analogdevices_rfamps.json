@@ -21,13 +21,13 @@
       "4709": {"value": [""], "displayValue": ""}
     },
     {
-      "0": {"value": ["HMC441LP3E"], "displayValue": "HMC441LP3E"},
-      "279": {"value": ["6000000000"], "displayValue": "6 GHz"},
+      "0": {"value": ["ADH465S"], "displayValue": "ADH465S"},
+      "279": {"value": ["0"], "displayValue": "0 Hz"},
       "278": {"value": ["20000000000"], "displayValue": "20 GHz"},
-      "2930": {"value": ["18"], "displayValue": "18 dBm"},
-      "2922": {"value": ["34"], "displayValue": "34 dBm"},
-      "2913": {"value": ["15"], "displayValue": "15 dB"},
-      "2921": {"value": ["1.8"], "displayValue": "1.8 dB"},
+      "2930": {"value": ["22"], "displayValue": "22 dBm"},
+      "2922": {"value": ["30"], "displayValue": "30 dBm"},
+      "2913": {"value": ["17"], "displayValue": "17 dB"},
+      "2921": {"value": ["2.5"], "displayValue": "2.5 dB"},
       "4709": {"value": ["24"], "displayValue": "24 dBm"}
     }
   ]

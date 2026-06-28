@@ -59,15 +59,16 @@ def test_candidate_url_contains_model() -> None:
     assert "adl5243" in c.url
 
 
-def test_all_rf_params_present_for_hmc() -> None:
-    c = next(x for x in _load_candidates() if x.model == "HMC441LP3E")
+def test_all_rf_params_present_for_adh() -> None:
+    c = next(x for x in _load_candidates() if x.model == "ADH465S")
     expected_keys = {"freq_range", "Gain", "NF", "P1dB", "Pout", "OIP3"}
     assert expected_keys <= set(c.raw_params)
 
 
-def test_freq_range_stored_in_hz_for_hmc() -> None:
-    c = next(x for x in _load_candidates() if x.model == "HMC441LP3E")
-    assert c.raw_params["freq_range"] == RawValue((6000000000.0, 20000000000.0), "Hz")
+def test_freq_range_stored_in_hz_with_zero_low_edge() -> None:
+    """ADH465S is DC-coupled: freq_low '0' must be kept, giving a (0, high) range."""
+    c = next(x for x in _load_candidates() if x.model == "ADH465S")
+    assert c.raw_params["freq_range"] == RawValue((0.0, 20000000000.0), "Hz")
 
 
 # ---------------------------------------------------------------------------
