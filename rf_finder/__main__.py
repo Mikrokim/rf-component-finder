@@ -9,6 +9,7 @@ from __future__ import annotations
 
 def main() -> None:
     from rf_finder.adapters.minicircuits import MiniCircuitsAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.amcomusa import AmcomUSAAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.analogdevices import AnalogDevicesAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.base import ADAPTERS
     from rf_finder.form import build_form, collect
@@ -66,6 +67,8 @@ def main() -> None:
     print(f"Retrieved {len(candidates)} raw candidates.")
 
     # ── 3. Verify ─────────────────────────────────────────────────────────────
+    # Candidates already include any datasheet-enriched values: each adapter
+    # performs targeted datasheet enrichment inside its own search (REQ-3.8).
     verified = [verify(spec, c) for c in candidates]
 
     # ── 4. Simple output ──────────────────────────────────────────────────────
