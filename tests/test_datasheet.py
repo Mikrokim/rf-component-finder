@@ -139,3 +139,49 @@ class TestEnrich:
     def test_base_enrich_noop_for_adapter_without_datasheet(self):
         c = Candidate("M", "Mini-Circuits", "u", {}, "table")
         assert MiniCircuitsAdapter().enrich(c, {"OIP3"}) is c
+
+
+# ---------------------------------------------------------------------------
+# _enrich_search_results — targeting done INSIDE the adapter's search
+# ---------------------------------------------------------------------------
+
+class TestEnrichSearchResults:
+    def _spec(self):
+        # Gain comes from the table; OIP3 only from the datasheet.
+        return QuerySpec("amplifier", [
+            ParamConstraint("Gain", "between", None, (20.0, 30.0), "dB"),
+            ParamConstraint("OIP3", "between", None, (30.0, float("inf")), "dBm"),
+        ])
+
+    def test_enriches_only_candidates_the_rest_already_match(self, monkeypatch):
+        a = AmcomUSAAdapter()
+        enriched: list[str] = []
+
+        def fake_enrich(cand, needed):
+            enriched.append(cand.model)
+            return Candidate(
+                cand.model, cand.manufacturer, cand.url,
+                {**cand.raw_params, "OIP3": RawValue(35.0, "dBm")}, "datasheet",
+            )
+
+        monkeypatch.setattr(a, "enrich", fake_enrich)
+
+        gain_ok = Candidate("A", "AmcomUSA", "u", {"Gain": RawValue(25.0, "dB")}, "table")    # Gain PASS, OIP3 UNKNOWN
+        gain_fail = Candidate("B", "AmcomUSA", "u", {"Gain": RawValue(10.0, "dB")}, "table")  # Gain FAIL → skip
+        gain_missing = Candidate("C", "AmcomUSA", "u", {}, "table")                            # Gain UNKNOWN too → skip
+
+        out = a._enrich_search_results(self._spec(), [gain_ok, gain_fail, gain_missing])
+
+        assert enriched == ["A"]                       # only the otherwise-matching candidate
+        assert out[0].raw_params["OIP3"].value == 35.0
+        assert out[1] is gain_fail                     # untouched
+        assert out[2] is gain_missing                  # untouched
+
+    def test_noop_when_spec_has_no_datasheet_param(self, monkeypatch):
+        a = AmcomUSAAdapter()
+        monkeypatch.setattr(a, "enrich", lambda c, n: pytest.fail("must not enrich"))
+        spec = QuerySpec("amplifier", [
+            ParamConstraint("Gain", "between", None, (20.0, 30.0), "dB"),
+        ])
+        cands = [Candidate("A", "AmcomUSA", "u", {"Gain": RawValue(25.0, "dB")}, "table")]
+        assert a._enrich_search_results(spec, cands) is cands

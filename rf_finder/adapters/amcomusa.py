@@ -162,6 +162,11 @@ class AmcomUSAAdapter(Adapter):
         constraints (REQ-4.1).  A page that returns OK but contains no product
         table yields no Candidates for that category (it is skipped, not an
         error) — only genuine HTTP/network failures raise ``AdapterError``.
+
+        Datasheet retrieval is part of this search: when the spec constrains a
+        datasheet-only parameter (e.g. OIP3), candidates that already match every
+        other parameter are enriched from their PDF datasheet before returning
+        (REQ-3.8, via ``_enrich_search_results``).
         """
         candidates: list[Candidate] = []
 
@@ -172,7 +177,7 @@ class AmcomUSAAdapter(Adapter):
         rackmount_html = self._fetch(f"/categories/{RACKMOUNT_CATEGORY['slug']}")
         candidates.extend(self._parse_rackmount_html(rackmount_html))
 
-        return candidates
+        return self._enrich_search_results(spec, candidates)
 
     def _datasheet_text(self, candidate: Candidate) -> str | None:
         """Return the datasheet PDF text for *candidate*, or None if unavailable.

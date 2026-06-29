@@ -303,9 +303,13 @@ not manufacturer- or parameter-specific:
 - An adapter opts in by declaring `datasheet_params` and overriding
   `_datasheet_text` (locate + download + `extract_pdf_text`). AmcomUSA declares
   `{"OIP3"}`.
-- **Orchestration (`__main__`)** loads a datasheet only when `needs_datasheet(spec)`
-  is true, and only for `partial` candidates whose every `UNKNOWN` is
-  datasheet-recoverable (i.e. the rest already `PASS`), then re-verifies.
+- **Enrichment is part of the adapter's own `search`.** At the end of `search`
+  the adapter calls the generic `Adapter._enrich_search_results(spec, candidates)`,
+  which (when `needs_datasheet(spec)`) reuses the Verifier to enrich only the
+  candidates whose every remaining `UNKNOWN` is datasheet-recoverable — i.e. the
+  rest already `PASS`, so a datasheet is pulled only when it can complete the
+  match. All candidates are still returned (near-misses are never dropped), so
+  `__main__` stays a thin search→verify→report with no enrichment step.
 
 Adding a datasheet parameter = one `PATTERNS` entry + the adapter's
 `datasheet_params`. No new per-adapter parsing code.

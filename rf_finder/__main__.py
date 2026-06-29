@@ -66,34 +66,9 @@ def main() -> None:
     print(f"Retrieved {len(candidates)} raw candidates.")
 
     # ── 3. Verify ─────────────────────────────────────────────────────────────
+    # Candidates already include any datasheet-enriched values: each adapter
+    # performs targeted datasheet enrichment inside its own search (REQ-3.8).
     verified = [verify(spec, c) for c in candidates]
-
-    # ── 3b. Datasheet enrichment ──────────────────────────────────────────────
-    # Decide up front, from the spec, whether any adapter needs a datasheet at
-    # all.  Then enrich only the partial candidates whose *every* remaining
-    # UNKNOWN is a parameter the producing adapter recovers from its datasheet —
-    # i.e. the rest already match, so pulling the datasheet can complete them.
-    if any(adapter.needs_datasheet(spec) for adapter in ADAPTERS.values()):
-        to_enrich = []
-        for i, v in enumerate(verified):
-            if v.overall != "partial":
-                continue
-            unknown = {vd.canonical_name for vd in v.verdicts if vd.status == "UNKNOWN"}
-            adapter = ADAPTERS.get(v.candidate.manufacturer)
-            if adapter is None or not unknown:
-                continue
-            if unknown <= adapter.datasheet_params:
-                to_enrich.append((i, v, unknown, adapter))
-
-        if to_enrich:
-            print(f"Enriching {len(to_enrich)} candidate(s) from datasheets… ", end="", flush=True)
-            enriched = 0
-            for i, v, unknown, adapter in to_enrich:
-                new_c = adapter.enrich(v.candidate, unknown)
-                if new_c.raw_params != v.candidate.raw_params:
-                    verified[i] = verify(spec, new_c)
-                    enriched += 1
-            print(f"{enriched} updated.")
 
     # ── 4. Simple output ──────────────────────────────────────────────────────
     order = {"match": 0, "partial": 1, "fail": 2}
