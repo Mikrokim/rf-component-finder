@@ -86,11 +86,6 @@ class TestNeedsDatasheet:
 # enrich — generic template in base, _datasheet_text hook in the adapter
 # ---------------------------------------------------------------------------
 
-class _FakeResp:
-    def __init__(self, content: bytes):
-        self.content = content
-
-
 class TestEnrich:
     def _adapter(self, model=None, url=None):
         a = AmcomUSAAdapter()
@@ -110,7 +105,7 @@ class TestEnrich:
 
     def test_merges_oip3_and_sets_datasheet_source(self, monkeypatch):
         a = self._adapter("M", "http://x/ds.pdf")
-        monkeypatch.setattr(a, "_request", lambda url: _FakeResp(b"%PDF"))
+        monkeypatch.setattr(a, "_get_bytes", lambda url: b"%PDF")
         monkeypatch.setattr(amcomusa, "extract_pdf_text", lambda b: "IP3 35 dBm")
         c = Candidate("M", "AmcomUSA", "u", {"Gain": RawValue(20.0, "dB")}, "table")
 
@@ -123,14 +118,14 @@ class TestEnrich:
 
     def test_does_not_overwrite_existing_param(self, monkeypatch):
         a = self._adapter("M", "http://x/ds.pdf")
-        monkeypatch.setattr(a, "_request", lambda url: _FakeResp(b""))
+        monkeypatch.setattr(a, "_get_bytes", lambda url: b"")
         monkeypatch.setattr(amcomusa, "extract_pdf_text", lambda b: "IP3 99 dBm")
         c = Candidate("M", "AmcomUSA", "u", {"OIP3": RawValue(30.0, "dBm")}, "table")
         assert a.enrich(c, {"OIP3"}) is c  # already present → nothing added
 
     def test_datasheet_without_param_is_noop(self, monkeypatch):
         a = self._adapter("M", "http://x/ds.pdf")
-        monkeypatch.setattr(a, "_request", lambda url: _FakeResp(b""))
+        monkeypatch.setattr(a, "_get_bytes", lambda url: b"")
         monkeypatch.setattr(amcomusa, "extract_pdf_text", lambda b: "P1dB 19 dBm")
         c = Candidate("M", "AmcomUSA", "u", {}, "table")
         assert a.enrich(c, {"OIP3"}) is c
@@ -141,7 +136,7 @@ class TestEnrich:
         def boom(url):
             raise RuntimeError("network down")
 
-        monkeypatch.setattr(a, "_request", boom)
+        monkeypatch.setattr(a, "_get_bytes", boom)
         c = Candidate("M", "AmcomUSA", "u", {}, "table")
         assert a.enrich(c, {"OIP3"}) is c  # no crash, unchanged
 

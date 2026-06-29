@@ -33,6 +33,7 @@ from selectolax.parser import HTMLParser
 
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.adapters.datasheet import extract_pdf_text
+from rf_finder.cache import get_cache
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
 # ---------------------------------------------------------------------------
@@ -213,7 +214,7 @@ class AmcomUSAAdapter(Adapter):
         if not url:
             return None
         try:
-            return extract_pdf_text(self._request(url).content)
+            return extract_pdf_text(self._get_bytes(url))
         except Exception:
             return None
 
@@ -264,9 +265,22 @@ class AmcomUSAAdapter(Adapter):
             cause=last_exc,
         )
 
+    def _get_bytes(self, url: str) -> bytes:
+        """Return the body for *url* — from cache if fresh, else fetched + cached.
+
+        A cache hit skips both the network round-trip and the rate-limit delay,
+        which is what makes a repeated search effectively instant (NFR-1/NFR-2).
+        """
+        cached = get_cache().get(url)
+        if cached is not None:
+            return cached
+        body = self._request(url).content
+        get_cache().set(url, body)
+        return body
+
     def _fetch(self, path: str) -> str:
-        """GET ``_BASE_URL + path`` and return the response text."""
-        return self._request(_BASE_URL + path).text
+        """GET ``_BASE_URL + path`` (cached) and return the response text."""
+        return self._get_bytes(_BASE_URL + path).decode("utf-8", errors="replace")
 
     # ------------------------------------------------------------------
     # Parsing (exposed for tests to call directly with fixtures)

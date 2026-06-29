@@ -22,6 +22,7 @@ import httpx
 from selectolax.parser import HTMLParser
 
 from rf_finder.adapters.base import Adapter, AdapterError, register
+from rf_finder.cache import get_cache
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
 # ---------------------------------------------------------------------------
@@ -105,7 +106,16 @@ class MiniCircuitsAdapter(Adapter):
 
         No server-side filtering is applied — the Mini-Circuits server ignores
         the freq filter form fields.  The Verifier applies all constraints.
+        The page is cached, so a repeat search skips the (large) re-download.
         """
+        return self._parse_html(self._fetch_html())
+
+    def _fetch_html(self) -> str:
+        """Return the amplifiers page HTML, from cache if fresh else fetched."""
+        cached = get_cache().get(_AMPLIFIERS_URL)
+        if cached is not None:
+            return cached.decode("utf-8", errors="replace")
+
         # Enforce minimum inter-request delay
         elapsed = time.time() - self._last_fetch_time
         if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
@@ -134,7 +144,8 @@ class MiniCircuitsAdapter(Adapter):
                 cause=exc,
             ) from exc
 
-        return self._parse_html(response.text)
+        get_cache().set(_AMPLIFIERS_URL, response.content)
+        return response.text
 
     # ------------------------------------------------------------------
     # Internal parse method (exposed for tests to call directly)
