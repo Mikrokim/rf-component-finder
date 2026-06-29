@@ -58,6 +58,7 @@ COLUMN_MAP: dict[str, tuple[str, str | None]] = {
     "p1db dbm typ":    ("P1dB",      "dBm"),
     "psat dbm typ":    ("Psat",      "dBm"),
     "oip3 dbm typ":    ("IP3",       "dBm"),
+    "voltage v":       ("VDD",       "V"),
 }
 
 # ---------------------------------------------------------------------------
@@ -233,9 +234,16 @@ class MiniCircuitsAdapter(Adapter):
             if f_low is not None and f_high is not None:
                 raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="MHz")
 
+            # VDD: the Voltage column holds a single value; store it as a
+            # degenerate (v, v) range so VDD is a range everywhere (Analog
+            # Devices supplies a real min/max) and compares via "contains".
+            v = _parse_float(_cell_val("voltage v"))
+            if v is not None:
+                raw_params["VDD"] = RawValue(value=(v, v), unit="V")
+
             # Scalar params from COLUMN_MAP
             for norm_key, (canonical, unit) in COLUMN_MAP.items():
-                if canonical in ("model", "freq_low", "freq_high"):
+                if canonical in ("model", "freq_low", "freq_high", "VDD"):
                     continue
                 val = _parse_float(_cell_val(norm_key))
                 if val is not None:

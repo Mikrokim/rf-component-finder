@@ -65,6 +65,12 @@ def test_all_rf_params_present_for_adh() -> None:
     assert expected_keys <= set(c.raw_params)
 
 
+def test_vdd_range_from_min_max_fields() -> None:
+    """VDD combines fields 1516 (min) + 1517 (max) into a (min, max) range."""
+    c = next(x for x in _load_candidates() if x.model == "ADL5243")
+    assert c.raw_params["VDD"] == RawValue(value=(4.75, 5.25), unit="V")
+
+
 def test_freq_range_stored_in_hz_with_zero_low_edge() -> None:
     """ADH465S is DC-coupled: freq_low '0' must be kept, giving a (0, high) range."""
     c = next(x for x in _load_candidates() if x.model == "ADH465S")
