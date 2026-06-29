@@ -21,7 +21,7 @@ read this first.
 
 > Reference implementation: [minicircuits.py](../../../rf_finder/adapters/minicircuits.py)
 > Architecture contracts: [base.py](../../../rf_finder/adapters/base.py), [models.py](../../../rf_finder/models.py)
-> Contrast with the embedded-JSON site: [macom skill](../macom/SKILL.md)
+> Contrast with the embedded-JSON site: [macom skill](../macom/SKILL.md) · the other server-rendered-table site (`?function=` template, multi-GET): [ums skill](../ums/SKILL.md)
 
 ---
 
