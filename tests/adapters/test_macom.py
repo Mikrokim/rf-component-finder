@@ -59,13 +59,13 @@ def test_freq_range_combined_in_mhz():
 
 
 def test_rich_part_all_mapped_params():
-    """MAAL-011182 exposes freq + Gain/OIP3/P1dB/NF (no PSAT for this part)."""
+    """MAAL-011182 exposes freq + Gain/IP3/P1dB/NF (no PSAT for this part)."""
     c = _by_model("MAAL-011182")
     assert c.raw_params["Gain"] == RawValue(15.0, "dB")
-    assert c.raw_params["OIP3"] == RawValue(24.0, "dBm")
+    assert c.raw_params["IP3"] == RawValue(24.0, "dBm")
     assert c.raw_params["P1dB"] == RawValue(14.0, "dBm")
     assert c.raw_params["NF"] == RawValue(1.5, "dB")
-    assert "Pout" not in c.raw_params
+    assert "Psat" not in c.raw_params
 
 
 def test_missing_params_absent_not_none():
@@ -73,7 +73,7 @@ def test_missing_params_absent_not_none():
     c = _by_model("CGH40006S")
     assert c.raw_params["freq_range"].value == (0.0, 6000.0)
     assert c.raw_params["Gain"] == RawValue(11.0, "dB")
-    for absent in ("P1dB", "OIP3", "NF", "Pout"):
+    for absent in ("P1dB", "IP3", "NF", "Psat"):
         assert absent not in c.raw_params
 
 
@@ -83,10 +83,10 @@ def test_noise_figure_synonym_maps_to_nf():
     assert c.raw_params["NF"] == RawValue(5.0, "dB")
 
 
-def test_psat_maps_to_pout_in_dbm():
-    """'PSAT' (dBm) maps to canonical Pout; discontinued part still returned."""
+def test_psat_maps_to_psat_in_dbm():
+    """'PSAT' (dBm) maps to canonical Psat; discontinued part still returned."""
     c = _by_model("MAPC-A1524")
-    assert c.raw_params["Pout"] == RawValue(55.0, "dBm")
+    assert c.raw_params["Psat"] == RawValue(55.0, "dBm")
     assert c.raw_params["Gain"] == RawValue(16.0, "dB")
 
 
@@ -100,7 +100,7 @@ def test_units_normalized_to_ontology_not_source():
     """Power params are stored in canonical units regardless of source 'uom'."""
     c = _by_model("MAAL-011182")
     assert c.raw_params["P1dB"].unit == "dBm"
-    assert c.raw_params["OIP3"].unit == "dBm"
+    assert c.raw_params["IP3"].unit == "dBm"
 
 
 def test_high_frequency_part():

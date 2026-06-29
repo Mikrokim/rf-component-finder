@@ -205,8 +205,8 @@ This confirms and extends the design.md §6.2 table with two additional observed
 | 4 | `Gain (dB) Typ.` | `Gain` | dB | `RawValue(value, "dB")` | |
 | 5 | `NF (dB) Typ.` | `NF` | dB | `RawValue(value, "dB")` | |
 | 6 | `P1dB (dBm) Typ.` | `P1dB` | dBm | `RawValue(value, "dBm")` | |
-| 7 | `PSAT (dBm) Typ.` | `Pout` | dBm | `RawValue(value, "dBm")` | Header is "PSAT", param is "Pout" |
-| 8 | `OIP3 (dBm) Typ.` | `OIP3` | dBm | `RawValue(value, "dBm")` | |
+| 7 | `PSAT (dBm) Typ.` | `Psat` | dBm | `RawValue(value, "dBm")` | header reads "PSAT" |
+| 8 | `OIP3 (dBm) Typ.` | `IP3` | dBm | `RawValue(value, "dBm")` | header reads "OIP3" |
 | 9 | `Input VSWR (:1) Typ.` | — | — | skip | Not in ontology this iter |
 | 10 | `Output VSWR (:1) Typ.` | — | — | skip | Not in ontology this iter |
 | 11 | `Voltage (V)` | `voltage` | V | skip | Not in ontology this iter |
@@ -237,8 +237,8 @@ COLUMN_MAP = {
     "gain db typ":     ("Gain",       "dB"),
     "nf db typ":       ("NF",         "dB"),
     "p1db dbm typ":    ("P1dB",       "dBm"),
-    "psat dbm typ":    ("Pout",       "dBm"),
-    "oip3 dbm typ":    ("OIP3",       "dBm"),
+    "psat dbm typ":    ("Psat",       "dBm"),
+    "oip3 dbm typ":    ("IP3",        "dBm"),
     # all others → skip
 }
 
@@ -310,7 +310,7 @@ Candidate(
         "freq_range": RawValue(value=(45.0, 1218.0), unit="MHz"),
         "Gain":       RawValue(value=25.0,            unit="dB"),
         "NF":         RawValue(value=3.0,             unit="dB"),
-        # P1dB, Pout, OIP3 are "-" for this model → absent from raw_params
+        # P1dB, Psat, IP3 are "-" for this model → absent from raw_params
     },
     source="table",
 )

@@ -67,10 +67,10 @@ _DATA_PART_RE = re.compile(r'data-part="(.*?)"', re.S)
 SPEC_MAP: dict[str, tuple[str, str]] = {
     "gain":         ("Gain", "dB"),
     "output p1db":  ("P1dB", "dBm"),
-    "oip3":         ("OIP3", "dBm"),
+    "oip3":         ("IP3", "dBm"),
     "nf":           ("NF",   "dB"),
     "noise figure": ("NF",   "dB"),   # synonym of NF
-    "psat":         ("Pout", "dBm"),
+    "psat":         ("Psat", "dBm"),
 }
 
 _MIN_FREQ_KEY = "min frequency"
