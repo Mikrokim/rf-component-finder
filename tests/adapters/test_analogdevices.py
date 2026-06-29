@@ -117,6 +117,29 @@ def test_empty_freq_low_drops_range() -> None:
     assert c.raw_params["IP3"] == RawValue(46.0, "dBm")
 
 
+def test_bandwidth_fallback_builds_dc_to_bw_range() -> None:
+    """A wideband/differential part with only a -3 dB Bandwidth (fid 1519) and no
+    279/278 band maps its bandwidth to a (0, BW) freq_range."""
+    doc = {"data": [{
+        "0": {"value": ["AD8131"]},
+        "1519": {"value": ["400000000"]},   # 400 MHz bandwidth, no 279/278
+    }]}
+    c = AnalogDevicesAdapter()._parse_json(json.dumps(doc))[0]
+    assert c.raw_params["freq_range"] == RawValue((0.0, 400000000.0), "Hz")
+
+
+def test_freq_response_band_takes_precedence_over_bandwidth() -> None:
+    """When both 279/278 and 1519 exist (true RF parts), the frequency-response
+    band wins; the bandwidth (which merely mirrors the upper edge) is ignored."""
+    doc = {"data": [{
+        "0": {"value": ["ADL5243"]},
+        "279": {"value": ["100000000"]}, "278": {"value": ["4000000000"]},
+        "1519": {"value": ["4000000000"]},   # mirrors upper edge -> must be ignored
+    }]}
+    c = AnalogDevicesAdapter()._parse_json(json.dumps(doc))[0]
+    assert c.raw_params["freq_range"] == RawValue((100000000.0, 4000000000.0), "Hz")
+
+
 def test_part_with_no_rf_fields_yields_empty_params() -> None:
     """A differential-amp-style row with no mapped fields -> empty raw_params."""
     doc = {"data": [{"0": {"value": ["AD8131"]}, "278": {"value": [""]}}]}

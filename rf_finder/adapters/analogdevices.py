@@ -22,7 +22,13 @@ import time
 
 import httpx
 
-from rf_finder.adapters.base import Adapter, AdapterError, register
+from rf_finder.adapters.base import (
+    Adapter,
+    AdapterError,
+    drop_paramless,
+    freq_range_from_bandwidth,
+    register,
+)
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
 # ---------------------------------------------------------------------------
@@ -42,6 +48,12 @@ _USER_AGENT = (
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA"})
 
 _MIN_DELAY_SECONDS = 5.0
+
+# ADI field-id holding a single -3 dB Bandwidth (Hz). Wideband / differential
+# amplifiers (e.g. AD8131, ADA49xx) carry this instead of a 279/278 frequency
+# band. Used only as a fallback: for true RF parts 1519 merely mirrors the upper
+# freq edge, so 279/278 take precedence when present.
+_BANDWIDTH_FID = "1519"
 
 # ---------------------------------------------------------------------------
 # Field-id -> (canonical_name, unit)
@@ -135,7 +147,7 @@ class AnalogDevicesAdapter(Adapter):
                 cause=exc,
             ) from exc
 
-        return self._parse_json(response.text)
+        return drop_paramless(self._parse_json(response.text))
 
     def _parse_json(self, text: str) -> list[Candidate]:
         """Parse the parametric JSON body into Candidates."""
@@ -170,6 +182,12 @@ class AnalogDevicesAdapter(Adapter):
             f_high = _parse_float(_cell_value(row, "278"))
             if f_low is not None and f_high is not None:
                 raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="Hz")
+            else:
+                # No frequency-response band: fall back to a -3 dB Bandwidth
+                # (wideband / differential parts) and convert it to a range.
+                bw = _parse_float(_cell_value(row, _BANDWIDTH_FID))
+                if bw is not None:
+                    raw_params["freq_range"] = freq_range_from_bandwidth(bw)
 
             for fid, (canonical, unit) in FIELD_MAP.items():
                 if canonical in ("model", "freq_low", "freq_high"):

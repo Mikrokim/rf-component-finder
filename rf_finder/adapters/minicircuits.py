@@ -21,7 +21,7 @@ import time
 import httpx
 from selectolax.parser import HTMLParser
 
-from rf_finder.adapters.base import Adapter, AdapterError, register
+from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ class MiniCircuitsAdapter(Adapter):
                 cause=exc,
             ) from exc
 
-        return self._parse_html(response.text)
+        return drop_paramless(self._parse_html(response.text))
 
     # ------------------------------------------------------------------
     # Internal parse method (exposed for tests to call directly)
