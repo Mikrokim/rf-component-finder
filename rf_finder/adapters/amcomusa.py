@@ -53,6 +53,10 @@ _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "TBD", "tbd"})
 # Minimum seconds between consecutive live HTTP fetches (site asks for ~1.5s)
 _MIN_DELAY_SECONDS = 1.5
 
+# Transient network errors (e.g. SSL UNEXPECTED_EOF) are retried per request.
+_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 1.0
+
 _TABLE_SELECTOR = "table#allPnTable"
 
 # ---------------------------------------------------------------------------
@@ -160,8 +164,11 @@ class AmcomUSAAdapter(Adapter):
 
         No server-side filtering is applied; the Verifier applies all
         constraints (REQ-4.1).  A page that returns OK but contains no product
-        table yields no Candidates for that category (it is skipped, not an
-        error) — only genuine HTTP/network failures raise ``AdapterError``.
+        table yields no Candidates for that category (skipped, not an error).
+
+        Resilience (NFR-4): each of the ~9 category pages is fetched
+        independently — a page that fails is skipped so the others still return.
+        ``AdapterError`` is raised only if *every* page fails.
 
         Datasheet retrieval is part of this search: when the spec constrains a
         datasheet-only parameter (e.g. OIP3), candidates that already match every
@@ -169,13 +176,28 @@ class AmcomUSAAdapter(Adapter):
         (REQ-3.8, via ``_enrich_search_results``).
         """
         candidates: list[Candidate] = []
+        errors: list[str] = []
 
         for category in TABLE_CATEGORIES:
-            html = self._fetch(f"/categories/{category['slug']}")
-            candidates.extend(self._parse_table_html(html, category))
+            try:
+                html = self._fetch(f"/categories/{category['slug']}")
+                candidates.extend(self._parse_table_html(html, category))
+            except AdapterError as exc:
+                errors.append(str(exc))  # skip this category, keep the others
 
-        rackmount_html = self._fetch(f"/categories/{RACKMOUNT_CATEGORY['slug']}")
-        candidates.extend(self._parse_rackmount_html(rackmount_html))
+        try:
+            rackmount_html = self._fetch(f"/categories/{RACKMOUNT_CATEGORY['slug']}")
+            candidates.extend(self._parse_rackmount_html(rackmount_html))
+        except AdapterError as exc:
+            errors.append(str(exc))
+
+        # A single page hiccup must not lose the whole manufacturer; only fail
+        # outright when nothing at all could be retrieved.
+        if not candidates and errors:
+            raise AdapterError(
+                manufacturer=self.manufacturer,
+                context=f"all {len(errors)} category fetches failed; first: {errors[0]}",
+            )
 
         return self._enrich_search_results(spec, candidates)
 
@@ -200,39 +222,47 @@ class AmcomUSAAdapter(Adapter):
     # ------------------------------------------------------------------
 
     def _request(self, url: str) -> httpx.Response:
-        """GET *url* with the browser headers, rate-limited and raise-checked.
+        """GET *url* with the browser headers, rate-limited and retried.
 
-        Enforces ``_MIN_DELAY_SECONDS`` between consecutive requests.  Raises
-        ``AdapterError`` on any HTTP failure.
+        Enforces ``_MIN_DELAY_SECONDS`` between requests and retries transient
+        failures (e.g. SSL ``UNEXPECTED_EOF``) up to ``_MAX_ATTEMPTS`` times.
+        Raises ``AdapterError`` only after every attempt fails.
         """
-        elapsed = time.time() - self._last_fetch_time
-        if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
-            time.sleep(_MIN_DELAY_SECONDS - elapsed)
+        last_exc: httpx.HTTPError | None = None
 
-        try:
-            response = httpx.get(
-                url,
-                headers={
-                    "User-Agent": _USER_AGENT,
-                    "Accept": (
-                        "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                        "image/webp,*/*;q=0.8"
-                    ),
-                    "Accept-Language": "en-US,en;q=0.5",
-                },
-                follow_redirects=True,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            self._last_fetch_time = time.time()
-        except httpx.HTTPError as exc:
-            raise AdapterError(
-                manufacturer=self.manufacturer,
-                context=f"HTTP error fetching {url}",
-                cause=exc,
-            ) from exc
+        for attempt in range(_MAX_ATTEMPTS):
+            elapsed = time.time() - self._last_fetch_time
+            if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
+                time.sleep(_MIN_DELAY_SECONDS - elapsed)
 
-        return response
+            try:
+                response = httpx.get(
+                    url,
+                    headers={
+                        "User-Agent": _USER_AGENT,
+                        "Accept": (
+                            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                            "image/webp,*/*;q=0.8"
+                        ),
+                        "Accept-Language": "en-US,en;q=0.5",
+                    },
+                    follow_redirects=True,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                self._last_fetch_time = time.time()
+                return response
+            except httpx.HTTPError as exc:
+                last_exc = exc
+                self._last_fetch_time = time.time()  # keep the rate limit honest before retry
+                if attempt < _MAX_ATTEMPTS - 1:
+                    time.sleep(_RETRY_BACKOFF_SECONDS)
+
+        raise AdapterError(
+            manufacturer=self.manufacturer,
+            context=f"HTTP error fetching {url} (after {_MAX_ATTEMPTS} attempts)",
+            cause=last_exc,
+        )
 
     def _fetch(self, path: str) -> str:
         """GET ``_BASE_URL + path`` and return the response text."""

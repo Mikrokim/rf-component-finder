@@ -5,9 +5,18 @@ import pytest
 
 from rf_finder.adapters import amcomusa
 from rf_finder.adapters.amcomusa import AmcomUSAAdapter
+from rf_finder.adapters.base import AdapterError
 from rf_finder.adapters.minicircuits import MiniCircuitsAdapter
 from rf_finder.adapters.datasheet import parse_params
 from rf_finder.models import Candidate, ParamConstraint, QuerySpec, RawValue
+
+
+_MINI_TABLE = (
+    '<table id="allPnTable"><thead><tr><th>Product</th>'
+    '<th>Fmin (GHz)</th><th>Fmax (GHz)</th></tr></thead>'
+    '<tbody><tr><td name="product"><a href="/product-details/x">X</a></td>'
+    '<td>2</td><td>6</td></tr></tbody></table>'
+)
 
 
 # ---------------------------------------------------------------------------
@@ -185,3 +194,31 @@ class TestEnrichSearchResults:
         ])
         cands = [Candidate("A", "AmcomUSA", "u", {"Gain": RawValue(25.0, "dB")}, "table")]
         assert a._enrich_search_results(spec, cands) is cands
+
+
+# ---------------------------------------------------------------------------
+# search resilience: one failed category page must not lose the others (NFR-4)
+# ---------------------------------------------------------------------------
+
+class TestSearchResilience:
+    def test_one_failed_category_does_not_abort(self, monkeypatch):
+        a = AmcomUSAAdapter()
+
+        def fake_fetch(path):
+            if "gan-mmic-pas" in path:
+                raise AdapterError("AmcomUSA", "transient SSL error")
+            return _MINI_TABLE
+
+        monkeypatch.setattr(a, "_fetch", fake_fetch)
+        result = a.search(QuerySpec("amplifier", []))   # no datasheet → no enrichment
+        assert len(result) >= 1   # other categories still returned candidates
+
+    def test_all_categories_failed_raises(self, monkeypatch):
+        a = AmcomUSAAdapter()
+
+        def boom(path):
+            raise AdapterError("AmcomUSA", "down")
+
+        monkeypatch.setattr(a, "_fetch", boom)
+        with pytest.raises(AdapterError):
+            a.search(QuerySpec("amplifier", []))
