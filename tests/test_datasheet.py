@@ -26,32 +26,33 @@ _MINI_TABLE = (
 class TestParseParams:
     def test_value_before_unit(self):
         # AM001019SF-1H layout: "IP3 35 dBm"
-        r = parse_params("P1dB 19 dBm\nNoise Figure 2.8 dB\nIP3 35 dBm\n", {"OIP3"})
-        assert r["OIP3"].value == 35.0
-        assert r["OIP3"].unit == "dBm"
+        r = parse_params("P1dB 19 dBm\nNoise Figure 2.8 dB\nIP3 35 dBm\n", {"IP3"})
+        assert r["IP3"].value == 35.0
+        assert r["IP3"].unit == "dBm"
 
     def test_unit_before_value(self):
         # AM07014020LN-P1 layout: "... IP3 dBm +25 ..."
-        r = parse_params("P1dB +11 +13 1dB IP3 dBm +25 Input Return Loss", {"OIP3"})
-        assert r["OIP3"].value == 25.0
+        r = parse_params("P1dB +11 +13 1dB IP3 dBm +25 Input Return Loss", {"IP3"})
+        assert r["IP3"].value == 25.0
 
-    def test_oip3_explicit_label(self):
-        assert parse_params("OIP3 32 dBm", {"OIP3"})["OIP3"].value == 32.0
+    def test_oip3_spelling_maps_to_ip3(self):
+        # datasheet may spell it "OIP3"; canonical key is "IP3"
+        assert parse_params("OIP3 32 dBm", {"IP3"})["IP3"].value == 32.0
 
     def test_decimal_value(self):
-        assert parse_params("IP3 28.5 dBm", {"OIP3"})["OIP3"].value == 28.5
+        assert parse_params("IP3 28.5 dBm", {"IP3"})["IP3"].value == 28.5
 
     def test_iip3_is_ignored(self):
-        assert "OIP3" not in parse_params("IIP3 8 dBm", {"OIP3"})
+        assert "IP3" not in parse_params("IIP3 8 dBm", {"IP3"})
 
     def test_word_containing_ip3_not_matched(self):
-        assert "OIP3" not in parse_params("MYCHIP3 thing", {"OIP3"})
+        assert "IP3" not in parse_params("MYCHIP3 thing", {"IP3"})
 
     def test_absent_returns_empty(self):
-        assert parse_params("P1dB 19 dBm\nNoise Figure 2.8 dB", {"OIP3"}) == {}
+        assert parse_params("P1dB 19 dBm\nNoise Figure 2.8 dB", {"IP3"}) == {}
 
     def test_only_wanted_params_extracted(self):
-        # OIP3 present in the text but not requested -> not returned
+        # IP3 present in the text but not requested -> not returned
         assert parse_params("IP3 35 dBm", set()) == {}
         # name requested but not in the pattern library -> skipped
         assert parse_params("IP3 35 dBm", {"NF"}) == {}
@@ -69,17 +70,17 @@ class TestNeedsDatasheet:
         return QuerySpec("amplifier", cons)
 
     def test_true_when_datasheet_param_requested(self):
-        assert AmcomUSAAdapter().needs_datasheet(self._spec("OIP3")) is True
+        assert AmcomUSAAdapter().needs_datasheet(self._spec("IP3")) is True
 
     def test_true_when_among_other_params(self):
-        assert AmcomUSAAdapter().needs_datasheet(self._spec("Gain", "OIP3")) is True
+        assert AmcomUSAAdapter().needs_datasheet(self._spec("Gain", "IP3")) is True
 
     def test_false_without_datasheet_param(self):
         assert AmcomUSAAdapter().needs_datasheet(self._spec("Gain", "NF")) is False
 
     def test_minicircuits_never_needs(self):
         # no datasheet_params declared -> default empty -> always False
-        assert MiniCircuitsAdapter().needs_datasheet(self._spec("OIP3")) is False
+        assert MiniCircuitsAdapter().needs_datasheet(self._spec("IP3")) is False
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +102,7 @@ class TestEnrich:
     def test_no_url_is_noop(self):
         a = self._adapter()  # no URL captured for this model
         c = Candidate("M", "AmcomUSA", "u", {}, "table")
-        assert a.enrich(c, {"OIP3"}) is c
+        assert a.enrich(c, {"IP3"}) is c
 
     def test_merges_oip3_and_sets_datasheet_source(self, monkeypatch):
         a = self._adapter("M", "http://x/ds.pdf")
@@ -109,26 +110,26 @@ class TestEnrich:
         monkeypatch.setattr(amcomusa, "extract_pdf_text", lambda b: "IP3 35 dBm")
         c = Candidate("M", "AmcomUSA", "u", {"Gain": RawValue(20.0, "dB")}, "table")
 
-        out = a.enrich(c, {"OIP3"})
+        out = a.enrich(c, {"IP3"})
 
         assert out is not c
         assert out.source == "datasheet"
-        assert out.raw_params["OIP3"].value == 35.0
+        assert out.raw_params["IP3"].value == 35.0
         assert out.raw_params["Gain"].value == 20.0  # existing table value preserved
 
     def test_does_not_overwrite_existing_param(self, monkeypatch):
         a = self._adapter("M", "http://x/ds.pdf")
         monkeypatch.setattr(a, "_get_bytes", lambda url: b"")
         monkeypatch.setattr(amcomusa, "extract_pdf_text", lambda b: "IP3 99 dBm")
-        c = Candidate("M", "AmcomUSA", "u", {"OIP3": RawValue(30.0, "dBm")}, "table")
-        assert a.enrich(c, {"OIP3"}) is c  # already present → nothing added
+        c = Candidate("M", "AmcomUSA", "u", {"IP3": RawValue(30.0, "dBm")}, "table")
+        assert a.enrich(c, {"IP3"}) is c  # already present → nothing added
 
     def test_datasheet_without_param_is_noop(self, monkeypatch):
         a = self._adapter("M", "http://x/ds.pdf")
         monkeypatch.setattr(a, "_get_bytes", lambda url: b"")
         monkeypatch.setattr(amcomusa, "extract_pdf_text", lambda b: "P1dB 19 dBm")
         c = Candidate("M", "AmcomUSA", "u", {}, "table")
-        assert a.enrich(c, {"OIP3"}) is c
+        assert a.enrich(c, {"IP3"}) is c
 
     def test_fetch_failure_is_best_effort(self, monkeypatch):
         a = self._adapter("M", "http://x/ds.pdf")
@@ -138,11 +139,11 @@ class TestEnrich:
 
         monkeypatch.setattr(a, "_get_bytes", boom)
         c = Candidate("M", "AmcomUSA", "u", {}, "table")
-        assert a.enrich(c, {"OIP3"}) is c  # no crash, unchanged
+        assert a.enrich(c, {"IP3"}) is c  # no crash, unchanged
 
     def test_base_enrich_noop_for_adapter_without_datasheet(self):
         c = Candidate("M", "Mini-Circuits", "u", {}, "table")
-        assert MiniCircuitsAdapter().enrich(c, {"OIP3"}) is c
+        assert MiniCircuitsAdapter().enrich(c, {"IP3"}) is c
 
 
 # ---------------------------------------------------------------------------
@@ -151,10 +152,10 @@ class TestEnrich:
 
 class TestEnrichSearchResults:
     def _spec(self):
-        # Gain comes from the table; OIP3 only from the datasheet.
+        # Gain comes from the table; IP3 only from the datasheet.
         return QuerySpec("amplifier", [
             ParamConstraint("Gain", "between", None, (20.0, 30.0), "dB"),
-            ParamConstraint("OIP3", "between", None, (30.0, float("inf")), "dBm"),
+            ParamConstraint("IP3", "between", None, (30.0, float("inf")), "dBm"),
         ])
 
     def test_enriches_only_candidates_the_rest_already_match(self, monkeypatch):
@@ -165,19 +166,19 @@ class TestEnrichSearchResults:
             enriched.append(cand.model)
             return Candidate(
                 cand.model, cand.manufacturer, cand.url,
-                {**cand.raw_params, "OIP3": RawValue(35.0, "dBm")}, "datasheet",
+                {**cand.raw_params, "IP3": RawValue(35.0, "dBm")}, "datasheet",
             )
 
         monkeypatch.setattr(a, "enrich", fake_enrich)
 
-        gain_ok = Candidate("A", "AmcomUSA", "u", {"Gain": RawValue(25.0, "dB")}, "table")    # Gain PASS, OIP3 UNKNOWN
+        gain_ok = Candidate("A", "AmcomUSA", "u", {"Gain": RawValue(25.0, "dB")}, "table")    # Gain PASS, IP3 UNKNOWN
         gain_fail = Candidate("B", "AmcomUSA", "u", {"Gain": RawValue(10.0, "dB")}, "table")  # Gain FAIL → skip
         gain_missing = Candidate("C", "AmcomUSA", "u", {}, "table")                            # Gain UNKNOWN too → skip
 
         out = a._enrich_search_results(self._spec(), [gain_ok, gain_fail, gain_missing])
 
         assert enriched == ["A"]                       # only the otherwise-matching candidate
-        assert out[0].raw_params["OIP3"].value == 35.0
+        assert out[0].raw_params["IP3"].value == 35.0
         assert out[1] is gain_fail                     # untouched
         assert out[2] is gain_missing                  # untouched
 

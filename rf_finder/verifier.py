@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from rf_finder.models import (
     Candidate,
     ParamConstraint,
@@ -10,6 +12,7 @@ from rf_finder.models import (
     RawValue,
     VerifiedCandidate,
 )
+from rf_finder.ontology.parameters import PARAMETERS
 from rf_finder.ontology.units import to_canonical
 
 
@@ -20,20 +23,23 @@ from rf_finder.ontology.units import to_canonical
 def _compare(constraint: ParamConstraint, raw: RawValue) -> str:
     """Return ``"PASS"`` or ``"FAIL"`` by normalising both sides to canonical unit.
 
-    The canonical unit is taken from ``constraint.unit`` — callers must ensure
-    the constraint's unit is a valid canonical target for ``to_canonical``.
+    The canonical unit is taken from the ontology (the parameter's
+    ``canonical_unit``), not from ``constraint.unit``.  Both the candidate's
+    raw value (in ``raw.unit``) and the requirement (in the user-chosen
+    ``constraint.unit``) are converted into that canonical unit before
+    comparison, so the user may pick any accepted unit (e.g. MHz, W).
     """
-    canonical = constraint.unit
+    canonical_unit = PARAMETERS[constraint.canonical_name].canonical_unit
 
     if constraint.comparison == "contains":
         # Both candidate and required are (low, high) tuples.
         cand_low_raw, cand_high_raw = raw.value  # type: ignore[misc]
         req_low, req_high = constraint.range  # type: ignore[misc]
 
-        cand_low = to_canonical(cand_low_raw, raw.unit, canonical)
-        cand_high = to_canonical(cand_high_raw, raw.unit, canonical)
-        req_low_c = to_canonical(req_low, canonical, canonical)   # identity
-        req_high_c = to_canonical(req_high, canonical, canonical)
+        cand_low = to_canonical(cand_low_raw, raw.unit, canonical_unit)
+        cand_high = to_canonical(cand_high_raw, raw.unit, canonical_unit)
+        req_low_c = to_canonical(req_low, constraint.unit, canonical_unit)
+        req_high_c = to_canonical(req_high, constraint.unit, canonical_unit)
 
         if cand_low <= req_low_c and cand_high >= req_high_c:
             return "PASS"
@@ -44,24 +50,24 @@ def _compare(constraint: ParamConstraint, raw: RawValue) -> str:
         # PASS when low <= value <= high (either bound may be 0 / +inf).
         req_low, req_high = constraint.range  # type: ignore[misc]
 
-        found = to_canonical(raw.value, raw.unit, canonical)  # type: ignore[arg-type]
-        req_low_c = to_canonical(req_low, canonical, canonical)    # identity
-        req_high_c = to_canonical(req_high, canonical, canonical)
+        found = to_canonical(raw.value, raw.unit, canonical_unit)  # type: ignore[arg-type]
+        req_low_c = to_canonical(req_low, constraint.unit, canonical_unit)    # identity
+        req_high_c = to_canonical(req_high, constraint.unit, canonical_unit)
 
         if req_low_c <= found <= req_high_c:
             return "PASS"
         return "FAIL"
 
     # Scalar comparisons (min / max / eq)
-    found = to_canonical(raw.value, raw.unit, canonical)  # type: ignore[arg-type]
-    required = to_canonical(constraint.value, canonical, canonical)  # identity
+    found = to_canonical(raw.value, raw.unit, canonical_unit)  # type: ignore[arg-type]
+    required = to_canonical(constraint.value, constraint.unit, canonical_unit)
 
     if constraint.comparison == "min":
         return "PASS" if found >= required else "FAIL"
     if constraint.comparison == "max":
         return "PASS" if found <= required else "FAIL"
     if constraint.comparison == "eq":
-        return "PASS" if found == required else "FAIL"
+        return "PASS" if math.isclose(found, required, rel_tol=1e-9, abs_tol=1e-9) else "FAIL"
 
     raise ValueError(f"Unknown comparison rule: {constraint.comparison!r}")
 

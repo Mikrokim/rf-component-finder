@@ -1,6 +1,6 @@
 """Shared datasheet engine: PDF→text and pattern-driven parameter extraction.
 
-Adapters whose HTML tables omit a parameter (e.g. AmcomUSA omits OIP3) recover it
+Adapters whose HTML tables omit a parameter (e.g. AmcomUSA omits IP3) recover it
 from the PDF datasheet.  The mechanics are identical across manufacturers — only
 *which* parameters (declared per adapter via ``Adapter.datasheet_params``) and
 *where* the PDF lives differ — so the generic, reusable parts live here:
@@ -10,7 +10,7 @@ from the PDF datasheet.  The mechanics are identical across manufacturers — on
                            keyed by canonical parameter name.
   * ``parse_params``     — apply the patterns for a requested set of params.
 
-Nothing here is OIP3-specific: OIP3 is simply the one entry currently in
+Nothing here is IP3-specific: IP3 is simply the one entry currently in
 ``PATTERNS``.  A new datasheet parameter is added with one ``PATTERNS`` entry
 (once, for every adapter) rather than new extraction code per adapter.
 """
@@ -31,7 +31,9 @@ PATTERNS: dict[str, tuple[re.Pattern[str], str]] = {
     # IP3 / OIP3 (but NOT IIP3) followed — within a short non-numeric gap that
     # may contain a "dBm" token in either order — by the first signed number.
     # Tolerant to both real AmcomUSA layouts: "IP3 35 dBm" and "IP3 dBm +25".
-    "OIP3": (
+    # Canonical name is "IP3" (matches the ontology); the regex also accepts the
+    # output-referred "OIP3" spelling found on some datasheets.
+    "IP3": (
         re.compile(
             r"(?<![A-Za-z])O?IP3\b"       # IP3 or OIP3, not preceded by a letter (skips IIP3)
             r"[^0-9+\-\n]{0,12}"           # up to 12 non-numeric chars (e.g. " dBm ")

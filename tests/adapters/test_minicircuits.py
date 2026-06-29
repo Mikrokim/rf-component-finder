@@ -67,8 +67,8 @@ def test_missing_param_is_absent_not_none():
     # ADCA3270 has P1dB = '-', PSAT = '-', OIP3 = '-'
     c = next(x for x in candidates if x.model == "ADCA3270")
     assert "P1dB" not in c.raw_params
-    assert "Pout" not in c.raw_params
-    assert "OIP3" not in c.raw_params
+    assert "Psat" not in c.raw_params
+    assert "IP3" not in c.raw_params
 
 
 def test_present_scalar_param():
@@ -100,7 +100,7 @@ def test_all_params_present_row():
     """ZX60-P103LN+ has all 6 RF params present in raw_params."""
     candidates = _load_candidates()
     c = next(x for x in candidates if x.model == "ZX60-P103LN+")
-    expected_keys = {"freq_range", "Gain", "NF", "P1dB", "Pout", "OIP3"}
+    expected_keys = {"freq_range", "Gain", "NF", "P1dB", "Psat", "IP3"}
     assert expected_keys <= c.raw_params.keys(), (
         f"Missing keys: {expected_keys - c.raw_params.keys()}"
     )
@@ -129,6 +129,16 @@ def test_adca3270_nf_present():
     candidates = _load_candidates()
     c = next(x for x in candidates if x.model == "ADCA3270")
     assert c.raw_params["NF"] == RawValue(value=3.0, unit="dB")
+
+
+def test_dc_low_freq_parsed_as_zero():
+    """A 'DC' low-band edge must parse as 0.0 so the part keeps its
+    freq_range (GALI-39+ is DC-8000 MHz)."""
+    candidates = _load_candidates()
+    c = next(x for x in candidates if x.model == "GALI-39+")
+    rv = c.raw_params["freq_range"]
+    assert rv.unit == "MHz"
+    assert rv.value == (0.0, 8000.0)
 
 
 # ---------------------------------------------------------------------------

@@ -86,7 +86,8 @@ RACKMOUNT_CATEGORY: dict[str, str] = {
 # Scalar column mapping: normalised header text -> (canonical_name, source unit)
 #
 # Frequency columns (Fmin/Fmax) are handled specially — their unit is detected
-# from the header (MHz vs GHz).  "Psat" and "Pout" both map to canonical Pout.
+# from the header (MHz vs GHz).  Both "Pout" and "Psat" columns map to the
+# canonical "Psat"; "IP3"/"OIP3" map to canonical "IP3".
 # Any header not listed here (Vd, Bias, Package, ECCN, Connector, Size...) is
 # ignored.
 # ---------------------------------------------------------------------------
@@ -95,9 +96,9 @@ SCALAR_COLUMN_MAP: dict[str, tuple[str, str]] = {
     "nf db":     ("NF",   "dB"),
     "gain db":   ("Gain", "dB"),
     "p1db dbm":  ("P1dB", "dBm"),
-    "pout dbm":  ("Pout", "dBm"),
-    "psat dbm":  ("Pout", "dBm"),
-    "oip3 dbm":  ("OIP3", "dBm"),
+    "pout dbm":  ("Psat", "dBm"),
+    "psat dbm":  ("Psat", "dBm"),
+    "oip3 dbm":  ("IP3",  "dBm"),
 }
 
 # ---------------------------------------------------------------------------
@@ -147,9 +148,9 @@ class AmcomUSAAdapter(Adapter):
 
     manufacturer = "AmcomUSA"
     supported_components = {"amplifier"}
-    # OIP3 is absent from every AmcomUSA HTML table; it lives only in the PDF
+    # IP3 is absent from every AmcomUSA HTML table; it lives only in the PDF
     # datasheet.  Declaring it here drives needs_datasheet / enrich (generic).
-    datasheet_params = frozenset({"OIP3"})
+    datasheet_params = frozenset({"IP3"})
 
     def __init__(self) -> None:
         self._last_fetch_time: float = 0.0
@@ -172,7 +173,7 @@ class AmcomUSAAdapter(Adapter):
         ``AdapterError`` is raised only if *every* page fails.
 
         Datasheet retrieval is part of this search: when the spec constrains a
-        datasheet-only parameter (e.g. OIP3), candidates that already match every
+        datasheet-only parameter (e.g. IP3), candidates that already match every
         other parameter are enriched from their PDF datasheet before returning
         (REQ-3.8, via ``_enrich_search_results``).
         """

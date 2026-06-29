@@ -6,7 +6,10 @@ from rf_finder.ontology.parameters import PARAMETERS, ParamDef, params_for
 from rf_finder.ontology.components import COMPONENTS, component_labels
 
 
-_AMPLIFIER_PARAMS = {"freq_range", "P1dB", "Gain", "NF", "OIP3", "Pout"}
+_AMPLIFIER_PARAMS = {
+    "freq_range", "P1dB", "Gain", "NF", "IP3", "Psat",
+    "VDD", "Size", "MSL", "Temperature",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -14,7 +17,7 @@ _AMPLIFIER_PARAMS = {"freq_range", "P1dB", "Gain", "NF", "OIP3", "Pout"}
 # ---------------------------------------------------------------------------
 
 class TestParamsFor:
-    def test_amplifier_returns_exactly_six_params(self):
+    def test_amplifier_returns_expected_params(self):
         result = params_for("amplifier")
         assert set(result.keys()) == _AMPLIFIER_PARAMS
 
@@ -40,20 +43,20 @@ class TestComparisons:
     def test_freq_range_comparison_is_contains(self):
         assert PARAMETERS["freq_range"].comparison == "contains"
 
-    def test_p1db_comparison_is_between(self):
-        assert PARAMETERS["P1dB"].comparison == "between"
+    def test_p1db_comparison_is_min(self):
+        assert PARAMETERS["P1dB"].comparison == "min"
 
-    def test_gain_comparison_is_between(self):
-        assert PARAMETERS["Gain"].comparison == "between"
+    def test_gain_comparison_is_min(self):
+        assert PARAMETERS["Gain"].comparison == "min"
 
-    def test_nf_comparison_is_between(self):
-        assert PARAMETERS["NF"].comparison == "between"
+    def test_nf_comparison_is_max(self):
+        assert PARAMETERS["NF"].comparison == "max"
 
-    def test_oip3_comparison_is_between(self):
-        assert PARAMETERS["OIP3"].comparison == "between"
+    def test_ip3_comparison_is_min(self):
+        assert PARAMETERS["IP3"].comparison == "min"
 
-    def test_pout_comparison_is_min(self):
-        assert PARAMETERS["Pout"].comparison == "min"
+    def test_psat_comparison_is_min(self):
+        assert PARAMETERS["Psat"].comparison == "min"
 
 
 # ---------------------------------------------------------------------------
@@ -73,11 +76,11 @@ class TestCanonicalUnits:
     def test_nf_canonical_unit_is_db(self):
         assert PARAMETERS["NF"].canonical_unit == "dB"
 
-    def test_oip3_canonical_unit_is_dbm(self):
-        assert PARAMETERS["OIP3"].canonical_unit == "dBm"
+    def test_ip3_canonical_unit_is_dbm(self):
+        assert PARAMETERS["IP3"].canonical_unit == "dBm"
 
-    def test_pout_canonical_unit_is_dbm(self):
-        assert PARAMETERS["Pout"].canonical_unit == "dBm"
+    def test_psat_canonical_unit_is_dbm(self):
+        assert PARAMETERS["Psat"].canonical_unit == "dBm"
 
 
 # ---------------------------------------------------------------------------
