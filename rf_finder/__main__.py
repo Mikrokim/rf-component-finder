@@ -11,6 +11,7 @@ def main() -> None:
     from rf_finder.adapters.minicircuits import MiniCircuitsAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.amcomusa import AmcomUSAAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.analogdevices import AnalogDevicesAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.marki import MarkiMicrowaveAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.base import ADAPTERS
     from rf_finder.form import build_form, collect
     from rf_finder.verifier import verify
