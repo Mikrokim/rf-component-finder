@@ -58,6 +58,83 @@ class TestParseParams:
         assert parse_params("IP3 35 dBm", {"NF"}) == {}
 
 
+class TestParseMSL:
+    def test_msl_with_label(self):
+        r = parse_params("Moisture Sensitivity Level: 3 (per J-STD-020)", {"MSL"})
+        assert r["MSL"].value == 3.0
+        assert r["MSL"].unit == ""
+
+    def test_msl_abbreviation(self):
+        assert parse_params("MSL 1", {"MSL"})["MSL"].value == 1.0
+
+    def test_msl_absent(self):
+        assert parse_params("Operating Temperature -40 to +85 C", {"MSL"}) == {}
+
+    def test_msl_jedec_letter_suffix(self):
+        # JEDEC levels like "2a"/"3a" are common; the digit is what matters.
+        assert parse_params("MSL 2a", {"MSL"})["MSL"].value == 2.0
+
+
+class TestParseTemperature:
+    def test_range_to_separator(self):
+        r = parse_params("Operating Temperature: -40°C to +85°C", {"Temperature"})
+        assert r["Temperature"].value == (-40.0, 85.0)
+        assert r["Temperature"].unit == "degC"
+
+    def test_range_tilde_separator(self):
+        r = parse_params("Case Temperature -55 ~ +125 C", {"Temperature"})
+        assert r["Temperature"].value == (-55.0, 125.0)
+
+    def test_plain_hyphen_not_a_separator(self):
+        # "-40 - +85" would be ambiguous with the negative sign; not matched.
+        assert parse_params("Temperature -40 - +85 C", {"Temperature"}) == {}
+
+    def test_unicode_minus_and_spaced_plus(self):
+        # Real ADL8103 wording: Unicode minus (U+2212) and a space in "+ 125".
+        r = parse_params(
+            "operating temperature range: −55°C to + 125°C", {"Temperature"}
+        )
+        assert r["Temperature"].value == (-55.0, 125.0)
+
+    def test_no_temperature_word_needed(self):
+        # Anchored on the trailing °C, not on the word "temperature".
+        r = parse_params("Operating Range −40°C to +85°C", {"Temperature"})
+        assert r["Temperature"].value == (-40.0, 85.0)
+
+
+class TestParseSize:
+    def test_size_in_mm(self):
+        r = parse_params("Package size: 4 x 4 mm", {"Size"})
+        assert r["Size"].value == 4.0
+        assert r["Size"].unit == "mm"
+
+    def test_size_in_inches_keeps_unit(self):
+        # unit read inline -> Verifier converts in->mm; not silently mislabelled
+        r = parse_params("Body size 0.49 x 0.49 in", {"Size"})
+        assert r["Size"].value == 0.49
+        assert r["Size"].unit == "in"
+
+    def test_size_without_unit_is_unknown(self):
+        assert parse_params("Size 4 x 4", {"Size"}) == {}
+
+    def test_unit_after_each_dim_with_multiplication_sign(self):
+        # Real ADL8103 wording: "2 mm × 2 mm" (× sign, unit after both dims).
+        r = parse_params("RoHS-compliant, 2 mm × 2 mm, 8-lead LFCSP", {"Size"})
+        assert r["Size"].value == 2.0
+        assert r["Size"].unit == "mm"
+
+    def test_inch_marks_on_both_dims(self):
+        # AmcomUSA real wording: 1.25" x 1.25" (inch mark after each dim).
+        r = parse_params('Size: 1.25" x 1.25"', {"Size"})
+        assert r["Size"].value == 1.25
+        assert r["Size"].unit == "in"
+
+    def test_three_dimensions_takes_first(self):
+        r = parse_params("Package 4 x 4 x 1 mm", {"Size"})
+        assert r["Size"].value == 4.0
+        assert r["Size"].unit == "mm"
+
+
 # ---------------------------------------------------------------------------
 # needs_datasheet — generic in base, driven by per-adapter datasheet_params
 # ---------------------------------------------------------------------------
@@ -117,6 +194,21 @@ class TestEnrich:
         assert out.raw_params["IP3"].value == 35.0
         assert out.raw_params["Gain"].value == 20.0  # existing table value preserved
 
+    def test_merges_range_temperature(self, monkeypatch):
+        # A range (contains) datasheet param merges as a (low, high) tuple.
+        a = self._adapter("M", "http://x/ds.pdf")
+        monkeypatch.setattr(a, "_get_bytes", lambda url: b"%PDF")
+        monkeypatch.setattr(
+            amcomusa, "extract_pdf_text",
+            lambda b: "Operating Temperature -40 to +85 C",
+        )
+        c = Candidate("M", "AmcomUSA", "u", {}, "table")
+
+        out = a.enrich(c, {"Temperature"})
+
+        assert out.raw_params["Temperature"].value == (-40.0, 85.0)
+        assert out.source == "datasheet"
+
     def test_does_not_overwrite_existing_param(self, monkeypatch):
         a = self._adapter("M", "http://x/ds.pdf")
         monkeypatch.setattr(a, "_get_bytes", lambda url: b"")
@@ -144,52 +236,6 @@ class TestEnrich:
     def test_base_enrich_noop_for_adapter_without_datasheet(self):
         c = Candidate("M", "Mini-Circuits", "u", {}, "table")
         assert MiniCircuitsAdapter().enrich(c, {"IP3"}) is c
-
-
-# ---------------------------------------------------------------------------
-# _enrich_search_results — targeting done INSIDE the adapter's search
-# ---------------------------------------------------------------------------
-
-class TestEnrichSearchResults:
-    def _spec(self):
-        # Gain comes from the table; IP3 only from the datasheet.
-        return QuerySpec("amplifier", [
-            ParamConstraint("Gain", "between", None, (20.0, 30.0), "dB"),
-            ParamConstraint("IP3", "between", None, (30.0, float("inf")), "dBm"),
-        ])
-
-    def test_enriches_only_candidates_the_rest_already_match(self, monkeypatch):
-        a = AmcomUSAAdapter()
-        enriched: list[str] = []
-
-        def fake_enrich(cand, needed):
-            enriched.append(cand.model)
-            return Candidate(
-                cand.model, cand.manufacturer, cand.url,
-                {**cand.raw_params, "IP3": RawValue(35.0, "dBm")}, "datasheet",
-            )
-
-        monkeypatch.setattr(a, "enrich", fake_enrich)
-
-        gain_ok = Candidate("A", "AmcomUSA", "u", {"Gain": RawValue(25.0, "dB")}, "table")    # Gain PASS, IP3 UNKNOWN
-        gain_fail = Candidate("B", "AmcomUSA", "u", {"Gain": RawValue(10.0, "dB")}, "table")  # Gain FAIL → skip
-        gain_missing = Candidate("C", "AmcomUSA", "u", {}, "table")                            # Gain UNKNOWN too → skip
-
-        out = a._enrich_search_results(self._spec(), [gain_ok, gain_fail, gain_missing])
-
-        assert enriched == ["A"]                       # only the otherwise-matching candidate
-        assert out[0].raw_params["IP3"].value == 35.0
-        assert out[1] is gain_fail                     # untouched
-        assert out[2] is gain_missing                  # untouched
-
-    def test_noop_when_spec_has_no_datasheet_param(self, monkeypatch):
-        a = AmcomUSAAdapter()
-        monkeypatch.setattr(a, "enrich", lambda c, n: pytest.fail("must not enrich"))
-        spec = QuerySpec("amplifier", [
-            ParamConstraint("Gain", "between", None, (20.0, 30.0), "dB"),
-        ])
-        cands = [Candidate("A", "AmcomUSA", "u", {"Gain": RawValue(25.0, "dB")}, "table")]
-        assert a._enrich_search_results(spec, cands) is cands
 
 
 # ---------------------------------------------------------------------------

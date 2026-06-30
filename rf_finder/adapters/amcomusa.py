@@ -87,9 +87,13 @@ RACKMOUNT_CATEGORY: dict[str, str] = {
 #
 # Frequency columns (Fmin/Fmax) are handled specially — their unit is detected
 # from the header (MHz vs GHz).  Both "Pout" and "Psat" columns map to the
-# canonical "Psat"; "IP3"/"OIP3" map to canonical "IP3".
-# Any header not listed here (Vd, Bias, Package, ECCN, Connector, Size...) is
-# ignored.
+# canonical "Psat".  The supply column is "Vd (V)" (LNA / GaN) or "Bias (V)"
+# (Driver / GaAs / SSPA); both carry volts and map to canonical "VDD" (V→V
+# identity).  Dual-supply cells ("+8 / -0.75") are not a single float, so
+# _parse_float returns None and VDD stays UNKNOWN for those rows — correct.
+# Any header still not listed here (Package, ECCN, Connector...) is ignored;
+# IP3, Size, MSL and Temperature are not in these tables and come from the PDF
+# datasheet instead (see ``datasheet_params``).
 # ---------------------------------------------------------------------------
 
 SCALAR_COLUMN_MAP: dict[str, tuple[str, str]] = {
@@ -98,7 +102,9 @@ SCALAR_COLUMN_MAP: dict[str, tuple[str, str]] = {
     "p1db dbm":  ("P1dB", "dBm"),
     "pout dbm":  ("Psat", "dBm"),
     "psat dbm":  ("Psat", "dBm"),
-    "oip3 dbm":  ("IP3",  "dBm"),
+    "oip3 dbm":  ("IP3",  "dBm"),  # rare in tables; datasheet is the usual source
+    "vd v":      ("VDD",  "V"),
+    "bias v":    ("VDD",  "V"),
 }
 
 # ---------------------------------------------------------------------------
@@ -149,8 +155,11 @@ class AmcomUSAAdapter(Adapter):
     manufacturer = "AmcomUSA"
     supported_components = {"amplifier"}
     # IP3 is absent from every AmcomUSA HTML table; it lives only in the PDF
-    # datasheet.  Declaring it here drives needs_datasheet / enrich (generic).
-    datasheet_params = frozenset({"IP3"})
+    # datasheet.  Declaring them here drives needs_datasheet / enrich (generic,
+    # via the SearchManager): every amplifier parameter the HTML tables omit —
+    # IP3, Size, MSL and operating Temperature — is recovered from the PDF.
+    # (VDD is NOT here: it comes from the table's Vd/Bias column.)
+    datasheet_params = frozenset({"IP3", "Size", "MSL", "Temperature"})
 
     def __init__(self) -> None:
         self._last_fetch_time: float = 0.0
@@ -172,10 +181,11 @@ class AmcomUSAAdapter(Adapter):
         independently — a page that fails is skipped so the others still return.
         ``AdapterError`` is raised only if *every* page fails.
 
-        Datasheet retrieval is part of this search: when the spec constrains a
-        datasheet-only parameter (e.g. IP3), candidates that already match every
-        other parameter are enriched from their PDF datasheet before returning
-        (REQ-3.8, via ``_enrich_search_results``).
+        This returns the *raw* table candidates only.  Datasheet enrichment
+        (recovering IP3 etc. from the PDF) is orchestrated by the SearchManager,
+        which owns the search→enrich→verify flow; the adapter exposes the
+        capability (``datasheet_params`` / ``needs_datasheet`` / ``enrich`` /
+        ``_datasheet_text``) but does not decide when to use it.
         """
         candidates: list[Candidate] = []
         errors: list[str] = []
@@ -201,7 +211,7 @@ class AmcomUSAAdapter(Adapter):
                 context=f"all {len(errors)} category fetches failed; first: {errors[0]}",
             )
 
-        return self._enrich_search_results(spec, candidates)
+        return candidates
 
     def _datasheet_text(self, candidate: Candidate) -> str | None:
         """Return the datasheet PDF text for *candidate*, or None if unavailable.

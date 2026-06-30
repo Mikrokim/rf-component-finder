@@ -89,37 +89,6 @@ class Adapter(ABC):
         """
         return None
 
-    def _enrich_search_results(
-        self, spec: QuerySpec, candidates: list[Candidate]
-    ) -> list[Candidate]:
-        """Enrich (in place) the candidates whose only remaining gap is a
-        datasheet-only parameter, and return the list.
-
-        An adapter calls this at the end of its own ``search`` so datasheet
-        retrieval is part of the adapter's flow.  A no-op unless *spec* needs a
-        datasheet param.  Targeting uses the Verifier (the manufacturer sites
-        cannot range-filter), so a datasheet is pulled only for a candidate that
-        already PASSes every other required parameter — i.e. enrichment can turn
-        it into a full match.  All candidates are returned (near-misses are never
-        dropped); only some are enriched.
-        """
-        if not self.needs_datasheet(spec):
-            return candidates
-
-        # Local import: the Verifier is the authoritative comparison, reused here
-        # for targeting.  Imported lazily to avoid any module-load coupling.
-        from rf_finder.verifier import verify
-
-        for i, candidate in enumerate(candidates):
-            result = verify(spec, candidate)
-            if result.overall != "partial":
-                continue  # full match needs nothing; a fail can't be rescued
-            unknown = {v.canonical_name for v in result.verdicts if v.status == "UNKNOWN"}
-            if unknown and unknown <= self.datasheet_params:
-                candidates[i] = self.enrich(candidate, unknown)
-
-        return candidates
-
 
 # Self-registration registry
 ADAPTERS: dict[str, "Adapter"] = {}  # keyed by manufacturer name

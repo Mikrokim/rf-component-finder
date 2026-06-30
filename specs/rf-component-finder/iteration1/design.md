@@ -11,12 +11,16 @@
 ## 1. Design Overview
 
 The system is a layered pipeline. A structured **form input** is collected into a
-`QuerySpec`, dispatched to one or more manufacturer adapters, which return raw
-`Candidate` objects; a `Verifier` normalizes and compares each candidate against
-the spec and assigns a verdict; a `Reporter` ranks and renders the output.
+`QuerySpec` and handed to the **SearchManager**, which dispatches it to one or
+more manufacturer adapters (raw `Candidate` objects), optionally enriches them
+from datasheets, and runs the `Verifier` to normalize and compare each candidate
+against the spec; a `Reporter` ranks and renders the output.
 
 ```
-Form input ──► QuerySpec ──► Adapter(s) ──► [Candidate] ──► Verifier ──► [VerifiedCandidate] ──► Reporter ──► CLI output
+Form input ──► QuerySpec ──► SearchManager ──► Adapter(s) ──► [Candidate]
+                                  │                               │
+                                  ├──► (datasheet enrich) ────────┘
+                                  └──► Verifier ──► [VerifiedCandidate] ──► Reporter ──► CLI output
      │                            │                            │
      └────────── Ontology ────────┴──────── Units ────────────┘
                        (cross-cutting reference data)
@@ -43,6 +47,11 @@ infrastructure used by the Adapter.
 4. **Verification is separated from retrieval.** Adapters only fetch and map;
    they never judge a match. The Verifier owns all comparison logic. (Satisfies
    REQ-4, testability.)
+5. **Orchestration is centralized in the SearchManager.** The manager is the one
+   layer that knows about both adapters and the Verifier — it runs the search,
+   targets datasheet enrichment (reusing the Verifier), and verifies. Adapters
+   therefore never depend on the Verifier, and `__main__` stays a thin CLI.
+   (Satisfies REQ-3.8 layering, NFR-3, NFR-4.)
 
 ---
 
@@ -63,6 +72,7 @@ rf_finder/
 ├── adapters/
 │   ├── base.py            # Adapter ABC + registry (REQ-3.1)
 │   └── minicircuits.py    # Mini-Circuits adapter (REQ-3.2–3.6)
+├── manager.py             # SearchManager: orchestrates search → enrich → verify (§6.5)
 ├── verifier.py            # normalization + comparison + verdicts (REQ-4)
 ├── reporter.py            # ranking + CLI rendering (REQ-5)
 ├── cache.py               # SQLite response cache (NFR-1, NFR-2)
@@ -290,8 +300,12 @@ Static ASP.NET HTML, no API. Eight amplifier categories each render a
 `table#allPnTable`; values are the **cell text**, aligned 1:1 with the live
 header row (read per category — column order/units differ). Frequency is MHz for
 LNA / Medium-Power SSPA and GHz elsewhere, stored in its source unit and
-normalised by the Verifier; both `Pout` and `Psat` columns map to canonical `Psat`. The
-card-only **Rackmount HPAs** page (no table) yields model+link candidates. The
+normalised by the Verifier; both `Pout` and `Psat` columns map to canonical `Psat`,
+and the supply column (`Vd (V)` on LNA/GaN, `Bias (V)` on Driver/SSPA) maps to
+canonical `VDD` (volts, identity — dual-supply cells like `+8 / -0.75` are not a
+single float and stay UNKNOWN). Every amplifier parameter the tables omit — `IP3`,
+`Size`, `MSL`, `Temperature` — is recovered from the PDF datasheet instead (§6.4).
+The card-only **Rackmount HPAs** page (no table) yields model+link candidates. The
 datasheet PDF link is captured per row from `td.pn-pdf` for enrichment (§6.4).
 
 ### 6.4 Generic datasheet enrichment (`datasheet.py` + `base.py`, REQ-3.8)
@@ -301,24 +315,46 @@ every AmcomUSA table) and live only in the PDF datasheet. Enrichment is generic,
 not manufacturer- or parameter-specific:
 
 - **`datasheet.py`** — shared engine: `extract_pdf_text` (pdfplumber), a
-  `PATTERNS` library (`canonical → (regex, unit)`), and `parse_params(text, wanted)`.
-- **`base.Adapter`** — `datasheet_params` declaration, `needs_datasheet(spec)`,
-  the generic `enrich` template (hook → `parse_params` → merge **without
-  overwriting table values** → `source="datasheet"`), and the `_datasheet_text`
-  hook (default `None`).
+  `PATTERNS` library (`canonical → _Spec(regex, unit, is_range, unit_group)`),
+  and `parse_params(text, wanted)`. Two value shapes are supported: **scalar**
+  (IP3, MSL, Size — value in group 1) and **range** (Temperature, `contains` —
+  `(low, high)` in groups 1–2). A pattern may read its unit inline (`unit_group`,
+  e.g. Size as `4 x 4 mm` vs `0.49 x 0.49 in`), which the Verifier normalises
+  (`in → mm`).
+- **`base.Adapter`** — the datasheet *capability* (not the orchestration):
+  the `datasheet_params` declaration, `needs_datasheet(spec)`, the generic
+  `enrich` template (hook → `parse_params` → merge **without overwriting table
+  values** → `source="datasheet"`), and the `_datasheet_text` hook (default
+  `None`). The adapter knows *how* to enrich; it does not decide *when*.
 - An adapter opts in by declaring `datasheet_params` and overriding
   `_datasheet_text` (locate + download + `extract_pdf_text`). AmcomUSA declares
-  `{"IP3"}`.
-- **Enrichment is part of the adapter's own `search`.** At the end of `search`
-  the adapter calls the generic `Adapter._enrich_search_results(spec, candidates)`,
-  which (when `needs_datasheet(spec)`) reuses the Verifier to enrich only the
-  candidates whose every remaining `UNKNOWN` is datasheet-recoverable — i.e. the
-  rest already `PASS`, so a datasheet is pulled only when it can complete the
-  match. All candidates are still returned (near-misses are never dropped), so
-  `__main__` stays a thin search→verify→report with no enrichment step.
+  `{"IP3", "Size", "MSL", "Temperature"}` — every amplifier parameter its tables
+  omit. `search` returns the **raw** table candidates only.
+
+The *decision* of which candidates to enrich lives in the SearchManager
+(§6.5), so an adapter never depends on the Verifier.
 
 Adding a datasheet parameter = one `PATTERNS` entry + the adapter's
 `datasheet_params`. No new per-adapter parsing code.
+
+### 6.5 Search orchestration (`manager.py`, the *manager*)
+
+`SearchManager(adapters).run(spec)` owns the end-to-end flow for one query and
+is the single layer that depends on **both** the adapters (data access) and the
+Verifier (comparison) — so neither of those depends on the other:
+
+1. for each adapter whose `supported_components` includes `spec.component_type`,
+   call `adapter.search(spec)` (raw candidates), isolating any failure into a
+   returned `errors` list rather than raising (NFR-4);
+2. **enrich** — when `adapter.needs_datasheet(spec)`, reuse the Verifier to find
+   the candidates whose every remaining `UNKNOWN` is datasheet-recoverable
+   (i.e. the rest already `PASS`) and call `adapter.enrich` on just those, so a
+   datasheet is pulled only when it can complete the match;
+3. `verify(spec, candidate)` for every candidate.
+
+`run` returns `(verified, errors)`. This keeps `__main__` a thin form → manager
+→ report CLI, and keeps the verify-based targeting out of the adapter (the
+layering fix: the adapter no longer reaches "up" to the Verifier).
 
 ---
 
