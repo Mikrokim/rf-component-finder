@@ -5,21 +5,31 @@ from abc import ABC, abstractmethod
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
 
-def drop_paramless(candidates: list[Candidate]) -> list[Candidate]:
-    """Drop candidates that carry no parametric data at all.
+# Secondary parameters: supply/physical/environmental specs that qualify a part
+# but do not describe its RF performance. A candidate carrying ONLY these (e.g. a
+# non-RF part that a vendor lists with a supply voltage but no freq/gain/etc.)
+# cannot be evaluated as an amplifier, so it counts as having no usable data.
+_SECONDARY_PARAMS = frozenset({"VDD", "Size", "MSL", "Temperature"})
 
-    A candidate with an empty ``raw_params`` gives the Verifier nothing to check,
-    so it can only ever surface as an all-UNKNOWN ``partial`` — pure noise rather
-    than a usable result (typically non-RF parts mis-listed in a manufacturer's
-    amplifier table). Every adapter filters these out at the ``search()``
-    boundary.
+
+def drop_paramless(candidates: list[Candidate]) -> list[Candidate]:
+    """Drop candidates that carry no RF performance data.
+
+    A candidate keeps only if it has at least one *primary* (RF) parameter —
+    ``freq_range``, ``Gain``, ``NF``, ``P1dB``, ``Psat``, ``IP3``. One that has
+    nothing, or only *secondary* params (``VDD``/``Size``/``MSL``/``Temperature``;
+    see ``_SECONDARY_PARAMS``), gives the Verifier no RF spec to check and can only
+    surface as an all-UNKNOWN ``partial`` — pure noise rather than a usable result
+    (typically non-RF parts mis-listed in a manufacturer's amplifier feed, e.g.
+    ADI lists a supply voltage for such parts). Every adapter filters these out at
+    the ``search()`` boundary.
 
     Note: this filter is intentionally silent. The dropped parts are unusable, so
     they are not reported. Trade-off: a future source schema change that breaks
     parsing would yield empty ``raw_params`` for every row and surface as "no
     results" rather than a parse error (see t8-plan.md risk R2).
     """
-    return [c for c in candidates if c.raw_params]
+    return [c for c in candidates if set(c.raw_params) - _SECONDARY_PARAMS]
 
 
 def freq_range_from_bandwidth(bandwidth_hz: float) -> RawValue:

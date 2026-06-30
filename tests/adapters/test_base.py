@@ -39,6 +39,14 @@ def test_drop_paramless_empty_input() -> None:
     assert drop_paramless([]) == []
 
 
+def test_drop_paramless_removes_secondary_only() -> None:
+    """A candidate with only secondary params (VDD) and no RF param is dropped."""
+    vdd_only = _cand("V", {"VDD": RawValue((2.7, 5.0), "V")})
+    has_rf = _cand("R", {"Gain": RawValue(10.0, "dB"), "VDD": RawValue((5.0, 5.0), "V")})
+    kept = drop_paramless([vdd_only, has_rf])
+    assert kept == [has_rf]  # vdd_only dropped; has_rf kept (it has Gain)
+
+
 # ---------------------------------------------------------------------------
 # freq_range_from_bandwidth
 # ---------------------------------------------------------------------------
