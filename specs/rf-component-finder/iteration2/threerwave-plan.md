@@ -208,13 +208,16 @@ this choice and is therefore also pending.
 
 ## 7. Open questions (all currently UNANSWERED)
 
-- **OQ-3W-1 — Size input decoding (BLOCKER for Size).** How is the user's Size
-  constraint received and matched against the free-text Size column (§6, options
-  A–D)? The user cannot decide yet. Candidate-side reduction depends on this.
-  **No recommendation locked; must be decided before Size is built.**
-- **OQ-3W-2 — `manufacturer` string & file/class name.** Module names can't start
-  with a digit, so `3rwave.py` is impossible. *Proposed:* `manufacturer = "3rWave"`,
-  file `threerwave.py`, class `ThreeRWaveAdapter`. Needs sign-off.
+- **OQ-3W-1 — Size input decoding (BLOCKER for Size). [DEFERRED 2026-06-30]** How
+  is the user's Size constraint received and matched against the free-text Size
+  column (§6, options A–D)? **User will decide later.** Until then, **Size is NOT
+  implemented** — the adapter is built without it and a Size hook is left for when
+  the decision lands. Note also (§6): Size is **not uniformly mm** across sites
+  (3rwave alone mixes mm, inches, and package-only strings), so unit detection
+  must be **per-adapter**, not a shared assumption.
+- **OQ-3W-2 — `manufacturer` string & file/class name. [RESOLVED 2026-06-30]**
+  Approved: `manufacturer = "3rWave"`, file `threerwave.py`, class
+  `ThreeRWaveAdapter` (module can't start with a digit, so `3rwave.py` is out).
 - **OQ-3W-3 — Psat efficiency fallback.** Include the `Pout = η·Vd·Id` derivation
   for blank-Psat rows (and as a cross-check)? Resolve the drain-efficiency-vs-PAE
   ambiguity and the W→dBm conversion. *Proposed:* include, fire only when Psat

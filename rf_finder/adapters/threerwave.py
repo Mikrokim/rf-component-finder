@@ -1,0 +1,305 @@
+"""3rWave (3rwave.com) amplifier adapter.
+
+Fetch strategy: a single HTTP GET to /amplifier/.  The page is a WordPress site
+whose product specs are rendered by the **TablePress** plugin: the full PA
+(power amplifier) and LNA (low-noise amplifier) tables are server-side rendered
+as real ``<td class="column-N">`` cells in the initial HTML.  DataTables.js only
+adds client-side paging/search/sort on top — no AJAX, no POST, no JavaScript
+rendering is required to read the data (same family as the Mini-Circuits and UMS
+adapters; contrast the embedded-JSON MACOM / Analog Devices adapters).
+
+PA and LNA are two amplifier sub-types on one page; both map to component type
+``amplifier``.  This adapter parses every ``table.tablepress`` on the page and
+returns ALL rows; the Verifier applies all constraints (REQ-4.1).
+
+Frequency is already in GHz on the site (Start Freq. / Stop Freq.) — no MHz
+conversion (unlike Mini-Circuits / Analog Devices).
+
+robots.txt note: 3rwave.com disallows nothing, so /amplifier/ is crawlable.
+
+Deferred (see threerwave-plan.md):
+  * Size — the column is free text with mixed units (mm, inch ", package-only
+    strings).  How the *user's* Size input is decoded is undecided (OQ-3W-1), so
+    Size is NOT emitted yet; a clearly-marked hook is left in _build_candidate.
+  * P1dB, IP3, MSL, Temperature — no table columns; sourced from the per-part
+    datasheet in a future iteration → resolve to UNKNOWN for now.
+
+Runtime note (OQ-3W-10): some networks (e.g. the Etrog/safepage content filter)
+intercept 3rwave.com for non-browser requests; the live fetch then fails and is
+surfaced as AdapterError.  Offline parsing/tests are unaffected.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+
+import httpx
+from selectolax.parser import HTMLParser
+
+from rf_finder.adapters.base import Adapter, AdapterError, register
+from rf_finder.models import Candidate, QuerySpec, RawValue
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_BASE_URL = "https://3rwave.com"
+_AMPLIFIER_URL = _BASE_URL + "/amplifier/"
+
+# Browser-style User-Agent (plain bot UAs may be rejected; same string the other
+# adapters use).
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+_MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA", "—"})
+
+# Markers of a content-filter block stub returned instead of the real page
+# (e.g. the Etrog/safepage filter — see threerwave-plan.md OQ-3W-10).  Detected
+# so the failure is legible instead of a confusing "no table" error.
+_BLOCK_MARKERS = ("safepage.etrog", "block/block1", "cause=url_level")
+
+# Minimum seconds between consecutive live HTTP fetches (single light page).
+_MIN_DELAY_SECONDS = 1.0
+
+# ---------------------------------------------------------------------------
+# Column mapping: normalised header text -> (canonical_name, unit | None)
+# "model", "freq_low", "freq_high" are handled specially; all others map to
+# raw_params.  Headers not in this dict (Consumption Current, Efficiency, Size,
+# Connector, Description) are skipped.
+# ---------------------------------------------------------------------------
+
+COLUMN_MAP: dict[str, tuple[str, str | None]] = {
+    "part number":     ("model",     None),
+    "start freq ghz":  ("freq_low",  "GHz"),
+    "stop freq ghz":   ("freq_high", "GHz"),
+    "gain db":         ("Gain",      "dB"),
+    "psat dbm":        ("Psat",      "dBm"),
+    "nf db":           ("NF",        "dB"),
+    "drain voltage v": ("VDD",       "V"),
+}
+
+# Normalised header that identifies the real header row of a product table.
+_MODEL_HEADER = "part number"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _normalize_header(raw: str) -> str:
+    """Lowercase, remove punctuation characters, collapse whitespace.
+
+    e.g. "Start Freq.(GHz)" -> "start freq ghz", "Gain(dB)" -> "gain db".
+    """
+    text = raw.lower()
+    text = re.sub(r"[().,:/\\@%]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _parse_float(cell_text: str) -> float | None:
+    """Return None for missing/non-numeric sentinels; float otherwise."""
+    t = cell_text.strip()
+    if not t or t in _MISSING_SENTINELS:
+        return None
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Adapter
+# ---------------------------------------------------------------------------
+
+@register
+class ThreeRWaveAdapter(Adapter):
+    """Scrapes 3rwave.com /amplifier/ (PA + LNA TablePress tables)."""
+
+    manufacturer = "3rWave"
+    supported_components = {"amplifier"}
+
+    def __init__(self) -> None:
+        self._last_fetch_time: float = 0.0
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def search(self, spec: QuerySpec) -> list[Candidate]:
+        """Fetch the amplifier page and return every PA + LNA row as Candidates.
+
+        No server-side filtering exists (DataTables filters client-side only);
+        all rows are returned and the Verifier applies all constraints.
+        """
+        # Enforce minimum inter-request delay (only paid on a live fetch).
+        elapsed = time.time() - self._last_fetch_time
+        if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
+            time.sleep(_MIN_DELAY_SECONDS - elapsed)
+
+        try:
+            response = httpx.get(
+                _AMPLIFIER_URL,
+                headers={
+                    "User-Agent": _USER_AGENT,
+                    "Accept": (
+                        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                        "image/webp,*/*;q=0.8"
+                    ),
+                    "Accept-Language": "en-US,en;q=0.5",
+                },
+                follow_redirects=True,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            self._last_fetch_time = time.time()
+        except httpx.HTTPError as exc:
+            raise AdapterError(
+                manufacturer=self.manufacturer,
+                context=f"HTTP error fetching {_AMPLIFIER_URL}",
+                cause=exc,
+            ) from exc
+
+        return self._parse_html(response.text)
+
+    # ------------------------------------------------------------------
+    # Internal parse method (exposed for tests to call directly)
+    # ------------------------------------------------------------------
+
+    def _parse_html(self, html: str) -> list[Candidate]:
+        """Parse HTML string; return list of Candidates from all product tables.
+
+        Raises AdapterError if the response is a content-filter block stub, or
+        if no ``table.tablepress`` is found in the HTML — the site-redesign
+        tripwire (fail loudly, never return empty silently).
+        """
+        # A network content filter may return a short block stub (HTTP 200)
+        # instead of the real page; distinguish it from a genuine redesign.
+        if any(marker in html for marker in _BLOCK_MARKERS):
+            raise AdapterError(
+                manufacturer=self.manufacturer,
+                context=(
+                    "request intercepted by a content filter (e.g. Etrog/"
+                    "safepage) — whitelist 3rwave.com to fetch live"
+                ),
+            )
+
+        tree = HTMLParser(html)
+        tables = tree.css("table.tablepress")
+        if not tables:
+            raise AdapterError(
+                manufacturer=self.manufacturer,
+                context="no table.tablepress found in HTML",
+            )
+
+        candidates: list[Candidate] = []
+        for table in tables:
+            candidates.extend(self._parse_table(table))
+        return candidates
+
+    # ------------------------------------------------------------------
+    # Per-table parsing
+    # ------------------------------------------------------------------
+
+    def _parse_table(self, table) -> list[Candidate]:
+        """Parse one TablePress table into Candidates.
+
+        Tables whose header row has no "Part Number" column are skipped (the
+        page may carry unrelated tables); both the PA and LNA tables share the
+        same header set, so one COLUMN_MAP serves both.
+        """
+        # ---- Locate the header row (the <tr> containing "Part Number") ----
+        header_texts: list[str] = []
+        thead = table.css_first("thead")
+        candidate_rows = thead.css("tr") if thead else table.css("tr")
+        for tr in candidate_rows:
+            texts = [c.text(strip=True) for c in tr.css("th")] or [
+                c.text(strip=True) for c in tr.css("td")
+            ]
+            if any(_normalize_header(t) == _MODEL_HEADER for t in texts):
+                header_texts = texts
+                break
+
+        if not header_texts:
+            return []  # not a product table
+
+        # Build normalised-header -> column-index lookup (first occurrence wins).
+        col_index: dict[str, int] = {}
+        for idx, raw_header in enumerate(header_texts):
+            norm = _normalize_header(raw_header)
+            if norm and norm not in col_index:
+                col_index[norm] = idx
+
+        # ---- Parse data rows ----
+        candidates: list[Candidate] = []
+        tbody = table.css_first("tbody")
+        if tbody is None:
+            return candidates
+
+        for row in tbody.css("tr"):
+            cand = self._build_candidate(row, col_index)
+            if cand is not None:
+                candidates.append(cand)
+        return candidates
+
+    def _build_candidate(self, row, col_index: dict[str, int]) -> Candidate | None:
+        """Build one Candidate from a <tr>; return None if it has no model."""
+        cells = row.css("td")
+        if not cells:
+            return None
+        cell_texts = [c.text(strip=True) for c in cells]
+
+        def _cell_val(norm_key: str) -> str:
+            idx = col_index.get(norm_key)
+            if idx is None or idx >= len(cell_texts):
+                return "-"
+            return cell_texts[idx]
+
+        # ---- Model (Part Number) ----
+        model_idx = col_index.get(_MODEL_HEADER, 0)
+        model_cell = cells[model_idx] if model_idx < len(cells) else cells[0]
+        a_tag = model_cell.css_first("a")
+        model_name = a_tag.text(strip=True) if a_tag else _cell_val(_MODEL_HEADER)
+        if not model_name:
+            return None
+
+        # ---- Product URL (display only; never fetched) ----
+        href = a_tag.attributes.get("href", "") if a_tag else ""
+        if href:
+            url = href if href.startswith("http") else _BASE_URL + "/" + href.lstrip("/")
+        else:
+            url = _AMPLIFIER_URL
+
+        # ---- raw_params ----
+        raw_params: dict[str, RawValue] = {}
+
+        # Frequency range: combine Start + Stop (already GHz).
+        f_low = _parse_float(_cell_val("start freq ghz"))
+        f_high = _parse_float(_cell_val("stop freq ghz"))
+        if f_low is not None and f_high is not None:
+            raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="GHz")
+
+        # Scalar params from COLUMN_MAP.
+        for norm_key, (canonical, unit) in COLUMN_MAP.items():
+            if canonical in ("model", "freq_low", "freq_high"):
+                continue
+            val = _parse_float(_cell_val(norm_key))
+            if val is not None:
+                raw_params[canonical] = RawValue(value=val, unit=unit)  # type: ignore[arg-type]
+
+        # ---- Size hook (DEFERRED — OQ-3W-1) ----
+        # The Size column is free text with mixed units (mm, inch ", package-only
+        # strings) and the user-input decoding rule is undecided, so Size is NOT
+        # emitted yet.  When OQ-3W-1 is resolved, parse `_cell_val("size")` here
+        # (detect unit, convert inch->mm, reduce to the chosen scalar) and add it
+        # to raw_params as RawValue(<scalar>, "mm").
+
+        return Candidate(
+            model=model_name,
+            manufacturer=self.manufacturer,
+            url=url,
+            raw_params=raw_params,
+            source="table",
+        )
