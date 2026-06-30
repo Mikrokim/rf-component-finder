@@ -1,5 +1,6 @@
 # Real config (only the example is committed)
-config.yaml
+# Anchored to repo root so it does not also ignore openspec/config.yaml
+/config.yaml
 
 # Cache directory
 .cache/
