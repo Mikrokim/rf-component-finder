@@ -83,18 +83,40 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
-def _num(text: str) -> float | None:
-    """Return None for missing/sentinel/non-numeric; float otherwise.
+_NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
-    Handles leading-sign supply values like ``"+8"``.
+
+def _num(text: str) -> float | None:
+    """Return None for missing/sentinel; else the first numeric value.
+
+    Handles VectraWave's messier cells: ``"DC"`` (a DC-coupled lower band edge)
+    -> 0.0; leading-sign supply values like ``"+8"``; and a malformed trailing
+    dot (``"24.0."``) or trailing unit is tolerated by extracting the first
+    numeric token rather than a strict ``float()`` parse.
     """
     t = (text or "").strip()
     if not t or t in _MISSING_SENTINELS:
         return None
-    try:
-        return float(t)
-    except ValueError:
+    if t.upper() == "DC":
+        return 0.0
+    m = _NUM_RE.search(t)
+    return float(m.group()) if m else None
+
+
+def _vdd(text: str) -> tuple[float, float] | None:
+    """Supply voltage -> a ``(low, high)`` band, else None.
+
+    A single value -> ``(v, v)``; a dual/multi-rail supply such as ``"+3/-3"``
+    yields ``(min, max)`` of all listed values (``(-3.0, 3.0)``), which behaves
+    correctly under the ontology's ``contains`` rule.
+    """
+    t = (text or "").strip()
+    if not t or t in _MISSING_SENTINELS:
         return None
+    nums = [float(x) for x in _NUM_RE.findall(t)]
+    if not nums:
+        return None
+    return (min(nums), max(nums))
 
 
 def _is_amplifier_section(heading: str) -> bool:
@@ -222,6 +244,11 @@ class VectraWaveAdapter(Adapter):
             canonical, unit = mapped
 
             for i in range(1, min(n_cols, len(texts))):
+                if canonical == "VDD":
+                    vdd = _vdd(texts[i])
+                    if vdd is not None:
+                        raw_params[i]["VDD"] = RawValue(value=vdd, unit="V")
+                    continue
                 v = _num(texts[i])
                 if v is None:
                     continue
@@ -229,8 +256,6 @@ class VectraWaveAdapter(Adapter):
                     freq_low[i] = v
                 elif canonical == "freq_high":
                     freq_high[i] = v
-                elif canonical == "VDD":
-                    raw_params[i]["VDD"] = RawValue(value=(v, v), unit="V")
                 else:
                     raw_params[i][canonical] = RawValue(value=v, unit=unit)
 

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from rf_finder.adapters.base import AdapterError
-from rf_finder.adapters.vectrawave import VectraWaveAdapter, _normalize, _num
+from rf_finder.adapters.vectrawave import VectraWaveAdapter, _normalize, _num, _vdd
 from rf_finder.models import Candidate, RawValue
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "vectrawave_mmic.html"
@@ -110,3 +110,25 @@ def test_num_values() -> None:
     assert _num("+8") == 8.0      # leading-sign supply value
     assert _num("40.0") == 40.0
     assert _num("abc") is None
+
+
+def test_num_dc_is_zero() -> None:
+    """DC-coupled parts list 'DC' as the min frequency -> 0.0 (was dropped before)."""
+    assert _num("DC") == 0.0
+    assert _num("dc") == 0.0
+
+
+def test_num_tolerates_malformed_trailing_dot() -> None:
+    """A malformed '24.0.' cell yields 24.0 instead of being dropped."""
+    assert _num("24.0.") == 24.0
+
+
+def test_vdd_single_and_dual_rail() -> None:
+    assert _vdd("28") == (28.0, 28.0)
+    assert _vdd("+8") == (8.0, 8.0)
+    assert _vdd("+3/-3") == (-3.0, 3.0)   # dual-rail supply -> (min, max)
+
+
+def test_vdd_sentinels_return_none() -> None:
+    assert _vdd("") is None
+    assert _vdd("N/A") is None
