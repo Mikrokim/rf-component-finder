@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define how a retrieved candidate is checked against the user's `QuerySpec`: each constraint is normalized to its canonical unit and compared, producing a per-parameter verdict, an overall outcome, and a confidence label. This spec documents the behavior **as currently implemented** in `rf_finder/verifier.py`, including two current limitations that diverge from the legacy specs (the `between` rule and `eq`/unknown-parameter handling).
+Define how a retrieved candidate is checked against the user's `QuerySpec`: each constraint is normalized to its canonical unit and compared, producing a per-parameter verdict, an overall outcome, and a confidence label. This spec documents the behavior **as currently implemented** in `rf_finder/verifier.py`, including a current limitation in `eq`/unknown-parameter handling.
 
 ## Requirements
 
@@ -88,14 +88,21 @@ The system SHALL set `VerifiedCandidate.confidence` from `candidate.source`: `ta
 - **AND WHEN** the source is `datasheet`, the confidence is `datasheet`
 - **AND WHEN** the source is any unrecognized string, the confidence is `unknown`
 
-### Requirement: Between comparison is currently non-functional (known limitation)
+### Requirement: Between comparison (band membership)
 
-Verifying a `between` constraint SHALL currently raise `NameError`. The ontology declares the `between` comparison for `P1dB`, `Gain`, `NF`, and `OIP3`, but the verifier's `between` branch references an undefined name, so these four amplifier parameters cannot be verified today. This requirement documents the actual current behavior; the intended behavior (PASS when the normalized value falls within the band, with one-sided open bounds) is deferred to a future change.
+For a `between` constraint the candidate carries a single scalar value and the requirement is a `(low, high)` band. The found value and both bounds SHALL be normalized to the parameter's canonical unit, and the verdict SHALL be `PASS` when `low <= value <= high`, otherwise `FAIL`. Either bound MAY be open (`-inf` / `+inf`), giving a one-sided range. Of the current amplifier parameters only `VDD` uses `between`.
 
-#### Scenario: Verifying a between constraint raises NameError
+#### Scenario: Value inside the band passes
 
-- **WHEN** `verify` evaluates a constraint whose `comparison` is `between` (e.g. a `P1dB` band)
-- **THEN** a `NameError` is raised
+- **WHEN** a `between` requirement of `(20.0, 30.0)` is checked against a candidate value of `26`
+- **THEN** the verdict is `PASS`
+- **AND WHEN** the candidate value is `18`, the verdict is `FAIL`
+
+#### Scenario: One-sided band imposes a single bound
+
+- **WHEN** a `between` requirement of `(26.0, +inf)` is checked
+- **THEN** a candidate value of `30` is `PASS`
+- **AND WHEN** the candidate value is `20`, the verdict is `FAIL`
 
 ### Requirement: Equality and unknown-parameter handling (current behavior)
 

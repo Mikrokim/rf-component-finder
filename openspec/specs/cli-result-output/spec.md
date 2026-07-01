@@ -75,9 +75,9 @@ The CLI SHALL sort verified candidates so that `match` precedes `partial` preced
 
 ### Requirement: Verification is not error-isolated (current limitation)
 
-The CLI SHALL verify each candidate without catching verification errors. Because the `between` comparison currently raises `NameError` (see the Result Verification spec), entering any `between` constraint (`P1dB`, `Gain`, `NF`, or `OIP3`) SHALL cause the run to crash during verification after candidates are fetched. This documents actual current behavior; resilient handling is deferred to a future change.
+The CLI SHALL verify each candidate (`verified = [verify(spec, c) for c in candidates]`) without catching verification errors, so any exception raised by `verify` propagates and aborts the run after candidates are fetched. In current operation the only such case is a constraint whose `canonical_name` is not defined in the ontology, which raises `KeyError` (see the Result Verification spec); the `between` comparison itself no longer raises. Resilient per-candidate handling is deferred to a future change.
 
-#### Scenario: A between constraint crashes the run during verification
+#### Scenario: A verification error aborts the run
 
-- **WHEN** the user enters a `P1dB` (or `Gain`/`NF`/`OIP3`) constraint and candidates are fetched
-- **THEN** the run raises `NameError` during the verification step
+- **WHEN** verification of a fetched candidate raises (e.g. a constraint whose `canonical_name` is not in the ontology)
+- **THEN** the error propagates and the run aborts during the verification step

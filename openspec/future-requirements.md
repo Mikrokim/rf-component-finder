@@ -18,11 +18,6 @@
 **Current code:** `form/input.py` validates numeric values, `min ≤ max`, and unit-in-list only. There is no sane-bounds / plausibility check. (The implemented part of REQ-1.7 is documented in `structured-form-input` → "Numeric validation".)
 **Status:** Sane-bounds portion not implemented. Tracked as OQ-4.
 
-### REQ-2.4 / REQ-4.1 (defect) — `between` comparison verification
-**Legacy:** requirements.md §4 REQ-2.4 defines `between` for `P1dB`/`Gain`/`OIP3`/`NF`; REQ-4.1 requires converting and comparing per each rule.
-**Current code:** The ontology declares `between` correctly, but `verifier._compare`'s `between` branch references an undefined name and raises `NameError`, so these four parameters cannot be verified and a `between` constraint crashes a CLI run. This is a **defect** (code exists but is non-functional), documented as current behavior in `result-verification` and `cli-result-output`.
-**Status:** Intended behavior not realized. Tracked as OQ-5 and future change `fix-verifier-between-comparison` (tasks.md §5.1).
-
 ### REQ-3.3 (partial) — adapter source preference (API → parametric → scrape)
 **Legacy:** requirements.md §4 REQ-3.3 — "prefer an official API if one exists; otherwise a parametric search via URL; otherwise scraping the results table."
 **Current code:** The Mini-Circuits adapter only scrapes the results table (single `httpx` GET). No API/parametric-preference decision is implemented. Per `t8-plan.md`, Mini-Circuits exposes no usable public API and no server-side filter, so the scrape path is the only viable one — the practical outcome is satisfied, but the general preference ordering is not implemented.

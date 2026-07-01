@@ -10,25 +10,29 @@ Define the central, code-defined dictionary of measurable RF parameters and the 
 
 The system SHALL maintain a central `PARAMETERS` dictionary keyed by canonical parameter name. Each entry SHALL be an immutable `ParamDef` carrying: `label` (human-readable name), `canonical_unit`, `units` (the accepted unit strings with the canonical unit listed first), `comparison` (the verifier rule), and `applies_to` (the component types the parameter is relevant to).
 
-The dictionary SHALL define exactly these six parameters, each applicable to `amplifier`:
+The dictionary SHALL define exactly these ten parameters, each applicable to `amplifier`:
 
 | name | label | canonical_unit | units | comparison |
 |------|-------|----------------|-------|------------|
 | `freq_range` | `Frequency range` | `GHz` | `["GHz", "MHz"]` | `contains` |
-| `P1dB` | `P1dB (output 1 dB compression)` | `dBm` | `["dBm", "W", "mW"]` | `between` |
-| `Gain` | `Gain` | `dB` | `["dB"]` | `between` |
-| `NF` | `Noise figure` | `dB` | `["dB"]` | `between` |
-| `OIP3` | `OIP3` | `dBm` | `["dBm"]` | `between` |
-| `Pout` | `Saturated power (Psat)` | `dBm` | `["dBm", "W", "mW"]` | `min` |
+| `P1dB` | `P1dB (output 1 dB compression)` | `dBm` | `["dBm", "W", "mW"]` | `min` |
+| `Gain` | `Gain` | `dB` | `["dB"]` | `min` |
+| `NF` | `Noise figure` | `dB` | `["dB"]` | `max` |
+| `IP3` | `IP3` | `dBm` | `["dBm"]` | `min` |
+| `Psat` | `Saturated power (Psat)` | `dBm` | `["dBm", "W", "mW"]` | `min` |
+| `VDD` | `Supply voltage (VDD)` | `V` | `["V"]` | `between` |
+| `Size` | `Size` | `mm` | `["mm"]` | `max` |
+| `MSL` | `MSL level (1–5)` | `""` (dimensionless) | `[""]` | `max` |
+| `Temperature` | `Operating temperature` | `degC` | `["degC"]` | `contains` |
 
 `freq_range.applies_to` SHALL be `["amplifier", "mixer", "filter", "attenuator"]`; all other parameters SHALL apply to `["amplifier"]` only.
 
 #### Scenario: Amplifier parameter set and rules
 
 - **WHEN** the `PARAMETERS` dictionary is read
-- **THEN** it contains exactly the six entries `freq_range`, `P1dB`, `Gain`, `NF`, `OIP3`, `Pout`
-- **AND** their `comparison` values are `contains`, `between`, `between`, `between`, `between`, `min` respectively
-- **AND** their `canonical_unit` values are `GHz`, `dBm`, `dB`, `dB`, `dBm`, `dBm` respectively
+- **THEN** it contains exactly the ten entries `freq_range`, `P1dB`, `Gain`, `NF`, `IP3`, `Psat`, `VDD`, `Size`, `MSL`, `Temperature`
+- **AND** their `comparison` values are `contains`, `min`, `min`, `max`, `min`, `min`, `between`, `max`, `max`, `contains` respectively
+- **AND** their `canonical_unit` values are `GHz`, `dBm`, `dB`, `dB`, `dBm`, `dBm`, `V`, `mm`, `""`, `degC` respectively
 
 #### Scenario: Canonical unit listed first in the units list
 
@@ -49,10 +53,10 @@ The system SHALL maintain a `COMPONENTS` dictionary of known component types, ea
 
 The system SHALL provide `params_for(component_type)` that returns the subset of `PARAMETERS` whose `applies_to` includes `component_type`. For an unknown component type the function SHALL return an empty dictionary (never `None`).
 
-#### Scenario: Amplifier returns its six parameters
+#### Scenario: Amplifier returns its ten parameters
 
 - **WHEN** `params_for("amplifier")` is called
-- **THEN** the returned keys are exactly `{freq_range, P1dB, Gain, NF, OIP3, Pout}`
+- **THEN** the returned keys are exactly `{freq_range, P1dB, Gain, NF, IP3, Psat, VDD, Size, MSL, Temperature}`
 - **AND** every returned value is a `ParamDef`
 
 #### Scenario: Unknown component returns an empty dictionary

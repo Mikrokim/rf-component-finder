@@ -15,7 +15,6 @@
 | OQ-2 | Should `Candidate.url` be the robots-disallowed `modelSearch.html?model=XXX` URL, or the allowed `Amplifiers.html` page? | 🟡 Open | legacy OQ-2 |
 | OQ-3 | Should the adapter warn when the scraped row count changes significantly between runs (possible site redesign)? | 🟡 Open | legacy OQ-3 |
 | OQ-4 | Even when a field value is valid, should the form sanity-check it and warn that it may be a mistake (e.g. unit confusion)? | 🟡 Open | legacy OQ-4 |
-| OQ-5 | When should the `between` comparison `NameError` defect be fixed, and via which follow-up change? | 🟡 Open | migration |
 
 ## Details
 
@@ -39,12 +38,6 @@
 **Question:** When a field value passes validation but looks implausible (e.g. P1dB entered in W instead of dBm, or a frequency off by 10×), should the form warn the user?
 **Why it matters:** The form currently validates only hard validity — numeric, `min ≤ max`, and unit-in-list (see `structured-form-input` → "Numeric validation"). Legacy REQ-1.7 mentioned "value within sane bounds," which is **not** implemented; this question owns whether that behavior is desired.
 **Options (legacy):** (a) none; (b) range-based "unusual value" warning; (c) unit-aware confirmation.
-**Status:** 🟡 Open.
-
-### OQ-5 — `between` `NameError` defect: fix timing
-**Question:** The `between` comparison currently raises `NameError`, so `P1dB`/`Gain`/`NF`/`OIP3` cannot be verified and any `between` constraint crashes a CLI run (documented as current behavior in `result-verification` and `cli-result-output`). When and via which follow-up change should it be fixed?
-**Why it matters:** It blocks verification of 4 of 6 amplifier parameters. The migration only documents current behavior; the rule is to fix it in a separate future change, not during the migration.
-**Recommendation:** Create a future change (e.g. `fix-verifier-between-comparison`) after the migration archives. The intended behavior is well defined (PASS when the normalized value is within the band, one-sided open bounds).
 **Status:** 🟡 Open.
 
 ## Resolved during migration
