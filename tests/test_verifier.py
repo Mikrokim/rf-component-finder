@@ -406,16 +406,16 @@ class TestConfidence:
 
 class TestEqComparison:
     def test_eq_pass_within_tolerance(self):
-        """Float round-off must not break eq: 6.0 + 1e-12 GHz == 6.0 GHz → PASS."""
-        spec = _make_spec(_scalar_constraint("freq_point", "eq", 6.0, "GHz"))
-        cand = _make_candidate({"freq_point": RawValue(6.0 + 1e-12, "GHz")})
+        """Float round-off must not break eq: 6.0 + 1e-12 dBm == 6.0 dBm → PASS."""
+        spec = _make_spec(_scalar_constraint("Psat", "eq", 6.0, "dBm"))
+        cand = _make_candidate({"Psat": RawValue(6.0 + 1e-12, "dBm")})
         result = verify(spec, cand)
         assert result.verdicts[0].status == "PASS"
 
     def test_eq_fail_outside_tolerance(self):
-        """A genuine difference still FAILs: 6.5 GHz != 6.0 GHz → FAIL."""
-        spec = _make_spec(_scalar_constraint("freq_point", "eq", 6.0, "GHz"))
-        cand = _make_candidate({"freq_point": RawValue(6.5, "GHz")})
+        """A genuine difference still FAILs: 6.5 dBm != 6.0 dBm → FAIL."""
+        spec = _make_spec(_scalar_constraint("Psat", "eq", 6.0, "dBm"))
+        cand = _make_candidate({"Psat": RawValue(6.5, "dBm")})
         result = verify(spec, cand)
         assert result.verdicts[0].status == "FAIL"
 

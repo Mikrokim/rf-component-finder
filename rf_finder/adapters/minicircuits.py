@@ -56,8 +56,8 @@ COLUMN_MAP: dict[str, tuple[str, str | None]] = {
     "gain db typ":     ("Gain",      "dB"),
     "nf db typ":       ("NF",        "dB"),
     "p1db dbm typ":    ("P1dB",      "dBm"),
-    "psat dbm typ":    ("Pout",      "dBm"),
-    "oip3 dbm typ":    ("OIP3",      "dBm"),
+    "psat dbm typ":    ("Psat",      "dBm"),
+    "oip3 dbm typ":    ("IP3",       "dBm"),
 }
 
 # ---------------------------------------------------------------------------
