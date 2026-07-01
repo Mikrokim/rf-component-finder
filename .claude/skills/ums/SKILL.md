@@ -25,7 +25,7 @@ site from scratch.
 > Reference implementation: [ums.py](../../../rf_finder/adapters/ums.py)
 > Original investigation: [ums-plan.md](../../../specs/rf-component-finder/iteration2/ums-plan.md)
 > Architecture contracts: [base.py](../../../rf_finder/adapters/base.py), [models.py](../../../rf_finder/models.py)
-> Contrast with the embedded-JSON site: [macom skill](../macom/SKILL.md) · the other server-rendered-table site: [minicircuits skill](../minicircuits/SKILL.md)
+> Contrast with the embedded-JSON site: [macom skill](../macom/SKILL.md) · other server-rendered-table sites: [minicircuits skill](../minicircuits/SKILL.md) · [threerwave skill](../threerwave/SKILL.md) (WordPress/TablePress, PA+LNA on one page)
 
 ---
 
