@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import re
 import time
+from urllib.parse import quote
 
 import httpx
 from selectolax.parser import HTMLParser
@@ -108,6 +109,23 @@ def _parse_float(cell_text: str) -> float | None:
         return float(t)
     except ValueError:
         return None
+
+
+def _highlight_url(part_number: str) -> str:
+    """Build a Scroll-to-Text-Fragment deep link into the shared amplifier page.
+
+    3rwave has no per-part page or datasheet (OQ-3W-6), so a bare ``/amplifier/``
+    link can't tell the user *which* of the 40+ rows a result refers to.  A text
+    fragment directive (``#:~:text=<part number>``) makes Chrome/Edge and other
+    modern browsers scroll to and highlight that exact Part Number on the table
+    page — the same highlight a manual Ctrl+F produces.  Browsers without the
+    feature (e.g. older Firefox) simply ignore the fragment and load the page.
+
+    The part number is percent-encoded; ``-`` is force-encoded to ``%2D`` because
+    a literal ``-`` is the range delimiter in the text-fragment grammar.
+    """
+    encoded = quote(part_number, safe="").replace("-", "%2D")
+    return f"{_AMPLIFIER_URL}#:~:text={encoded}"
 
 
 # ---------------------------------------------------------------------------
@@ -266,11 +284,15 @@ class ThreeRWaveAdapter(Adapter):
             return None
 
         # ---- Product URL (display only; never fetched) ----
+        # Prefer a real per-part anchor when one exists.  When it doesn't (the
+        # common 3rwave case — no per-part page/datasheet), fall back to a text-
+        # fragment deep link that highlights this exact row on the shared
+        # /amplifier/ page, so the link is distinguishable per component.
         href = a_tag.attributes.get("href", "") if a_tag else ""
         if href:
             url = href if href.startswith("http") else _BASE_URL + "/" + href.lstrip("/")
         else:
-            url = _AMPLIFIER_URL
+            url = _highlight_url(model_name)
 
         # ---- raw_params ----
         raw_params: dict[str, RawValue] = {}

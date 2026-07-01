@@ -100,10 +100,11 @@ def test_url_from_anchor_when_present():
     assert c.url == "https://3rwave.com/product/mp020m060gs30b/"
 
 
-def test_url_falls_back_to_page_when_no_anchor():
-    """Rows without a link fall back to the /amplifier/ page URL."""
+def test_url_falls_back_to_highlight_link_when_no_anchor():
+    """Rows without a per-part link get a text-fragment deep link that
+    highlights the exact Part Number on the shared /amplifier/ page."""
     c = next(x for x in _load_candidates() if x.model == "MP37504250CW40B")
-    assert c.url == "https://3rwave.com/amplifier/"
+    assert c.url == "https://3rwave.com/amplifier/#:~:text=MP37504250CW40B"
 
 
 def test_raises_adaptererror_when_no_tablepress():
