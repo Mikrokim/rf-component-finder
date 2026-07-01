@@ -1,0 +1,47 @@
+# Open Questions — RF Component Finder (OpenSpec)
+
+> Active open-questions register for the OpenSpec source of truth. A question lives
+> here while it is **Open** or **Investigating**; once **Resolved** or **Deferred**,
+> record the outcome in the owning spec/change and remove it from this file.
+>
+> Carried forward from the legacy register `specs/rf-component-finder/open-questions.md`
+> as part of the OpenSpec migration. The legacy file is retained read-only for history.
+
+## Register
+
+| ID | Question | Status | Origin |
+|----|----------|--------|--------|
+| OQ-1 | What is the full list of 10 manufacturers the system must support? | 🟡 Open | legacy OQ-1 |
+| OQ-2 | Should `Candidate.url` be the robots-disallowed `modelSearch.html?model=XXX` URL, or the allowed `Amplifiers.html` page? | 🟡 Open | legacy OQ-2 |
+| OQ-3 | Should the adapter warn when the scraped row count changes significantly between runs (possible site redesign)? | 🟡 Open | legacy OQ-3 |
+| OQ-4 | Even when a field value is valid, should the form sanity-check it and warn that it may be a mistake (e.g. unit confusion)? | 🟡 Open | legacy OQ-4 |
+
+## Details
+
+### OQ-1 — Full manufacturer list
+**Question:** What are the 10 manufacturers the full system must eventually support?
+**Why it matters:** Drives the adapter roadmap. Does not block current behavior — only Mini-Circuits (`amplifier`) is implemented today (see `manufacturer-adapters`).
+**Status:** 🟡 Open.
+
+### OQ-2 — `Candidate.url` value choice
+**Question:** Should `Candidate.url` be the disallowed `modelSearch.html?model=XXX` URL (more useful in the report) or the allowed `Amplifiers.html` page?
+**Why it matters:** robots.txt disallows `modelSearch.html`. The adapter currently populates that URL string for display only and never fetches it (see `manufacturer-adapters` → "Candidate URL is populated for display only").
+**Recommendation (legacy):** Use the model-specific URL for report value with a note that it is never fetched; fall back to `Amplifiers.html` if strict policy is required. Needs implementer sign-off.
+**Status:** 🟡 Open.
+
+### OQ-3 — Warn on row-count drift
+**Question:** Should the adapter log a warning when the scraped row count deviates significantly (e.g. >20%) between runs?
+**Why it matters:** A large change can signal a site redesign that breaks scraping. Not implemented today (the adapter does no run-to-run comparison).
+**Status:** 🟡 Open.
+
+### OQ-4 — Sanity-check valid-but-suspicious form input
+**Question:** When a field value passes validation but looks implausible (e.g. P1dB entered in W instead of dBm, or a frequency off by 10×), should the form warn the user?
+**Why it matters:** The form currently validates only hard validity — numeric, `min ≤ max`, and unit-in-list (see `structured-form-input` → "Numeric validation"). Legacy REQ-1.7 mentioned "value within sane bounds," which is **not** implemented; this question owns whether that behavior is desired.
+**Options (legacy):** (a) none; (b) range-based "unusual value" warning; (c) unit-aware confirmation.
+**Status:** 🟡 Open.
+
+## Resolved during migration
+
+### `openspec/` was git-ignored — RESOLVED
+**Issue:** `git status` reported `!! openspec/`; the `.gitignore` (CRLF endings) had an unanchored `config.yaml` rule and a stray CR-only line matching arbitrary directories, which would have prevented the new OpenSpec files from being tracked.
+**Resolution:** `.gitignore` was normalized to LF and the rule anchored to `/config.yaml` (repo root only). `git check-ignore` now reports `openspec/`, `openspec/specs`, and `openspec/open-questions.md` as not ignored. No application code changed. Recorded in the migration change's `proposal.md`/`design.md`.
