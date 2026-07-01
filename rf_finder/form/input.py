@@ -5,6 +5,14 @@ from __future__ import annotations
 from rf_finder.models import ParamConstraint, QuerySpec
 from rf_finder.form.schema import Field, FormSchema
 
+#: Comparison rules collected as a (possibly one-sided) range in the form.
+#: ``contains``/``between`` are inherently range-valued; ``min``/``max`` are
+#: single-bound rules that we also collect as a range so the user may cap the
+#: other side too (e.g. Psat between 20 and 30 dBm, or Gain ≤ 40 dB). All of
+#: them except ``contains`` are emitted as a ``between`` constraint — see
+#: :func:`_build_range_constraint`.
+RANGE_COMPARISONS = ("contains", "between", "min", "max")
+
 
 def collect(
     schema: FormSchema,
@@ -22,9 +30,11 @@ def collect(
         instead of prompting the user interactively.
 
         Key conventions:
-        - range field (``contains`` / ``between``) → ``"<canonical_name>.min"``,
-          ``"<canonical_name>.max"``, ``"<canonical_name>.unit"``
-        - scalar field        → ``"<canonical_name>.value"``, ``"<canonical_name>.unit"``
+        - range field (``contains`` / ``between`` / ``min`` / ``max``) →
+          ``"<canonical_name>.min"``, ``"<canonical_name>.max"``,
+          ``"<canonical_name>.unit"`` (a ``min``/``max`` param may fill just one
+          side — an omitted bound is left open)
+        - scalar field (``eq``) → ``"<canonical_name>.value"``, ``"<canonical_name>.unit"``
 
         Omit a key (or set its value to ``""``) to leave that field empty.
 
@@ -80,13 +90,17 @@ def _build_range_constraint(
 ) -> ParamConstraint | None:
     """Build a range ``ParamConstraint`` from raw min/max/unit strings.
 
-    Shared by both range comparison rules:
+    Shared by every range-collected comparison rule (see ``RANGE_COMPARISONS``):
 
     - ``contains`` (``require_both=True``): a partial range is meaningless, so
-      both bounds must be present — otherwise the field is skipped.
-    - ``between`` (``require_both=False``): either side may be omitted; an
-      omitted ``min`` defaults to ``-inf`` and an omitted ``max`` to ``+inf``,
-      i.e. a one-sided range that imposes no restriction on that side.
+      both bounds must be present — otherwise the field is skipped.  Emitted
+      as a ``contains`` constraint (the candidate itself is a band).
+    - ``between`` / ``min`` / ``max`` (``require_both=False``): either side may
+      be omitted; an omitted ``min`` defaults to ``-inf`` and an omitted
+      ``max`` to ``+inf``, i.e. a one-sided range that imposes no restriction
+      on that side.  All three are emitted as a ``between`` constraint, since a
+      single-bound query (``min``/``max``) is just a one-sided ``between`` —
+      e.g. a ``min`` param with only a min entered means "≥ x" (max = +inf).
 
     Returns ``None`` when the field has no usable input and should be skipped
     (REQ-1.6).  Raises ``ValueError`` on a non-numeric bound, ``min > max``, or
@@ -120,9 +134,12 @@ def _build_range_constraint(
             f"{name}: min ({min_val}) must not be greater than max ({max_val})"
         )
 
+    # A single-bound rule collected as a range is semantically a ``between``;
+    # only ``contains`` (a candidate that is itself a band) keeps its rule.
+    emitted = "contains" if field.comparison == "contains" else "between"
     return ParamConstraint(
         canonical_name=name,
-        comparison=field.comparison,
+        comparison=emitted,
         value=None,
         range=(min_val, max_val),
         unit=_resolve_unit(unit_str, field),
@@ -135,7 +152,7 @@ def _collect_from_answers(schema: FormSchema, answers: dict[str, str]) -> QueryS
     for field in schema.fields:
         name = field.canonical_name
 
-        if field.comparison in ("contains", "between"):
+        if field.comparison in RANGE_COMPARISONS:
             constraint = _build_range_constraint(
                 field,
                 _get_answer(answers, f"{name}.min"),
@@ -147,7 +164,7 @@ def _collect_from_answers(schema: FormSchema, answers: dict[str, str]) -> QueryS
                 constraints.append(constraint)
 
         else:
-            # scalar: min / max / eq
+            # scalar: eq (a single exact value)
             value_str = _get_answer(answers, f"{name}.value")
             if not value_str:
                 continue
@@ -191,7 +208,7 @@ def _collect_interactive(schema: FormSchema) -> QuerySpec:
     for field in schema.fields:
         name = field.canonical_name
 
-        if field.comparison in ("contains", "between"):
+        if field.comparison in RANGE_COMPARISONS:
             require_both = field.comparison == "contains"
             if require_both:
                 print(f"\n{field.label} (range)")
@@ -219,10 +236,12 @@ def _collect_interactive(schema: FormSchema) -> QuerySpec:
                     print("  Min must not be greater than max.")
                     continue
 
+                # min/max collected as a range are one-sided ``between`` queries.
+                emitted = "contains" if require_both else "between"
                 constraints.append(
                     ParamConstraint(
                         canonical_name=name,
-                        comparison=field.comparison,
+                        comparison=emitted,
                         value=None,
                         range=(min_val, max_val),
                         unit=_select_unit(field),

@@ -47,12 +47,15 @@ def _compare(constraint: ParamConstraint, raw: RawValue) -> str:
 
     if constraint.comparison == "between":
         # Candidate has a single value; required is a (low, high) band.
-        # PASS when low <= value <= high (either bound may be 0 / +inf).
+        # PASS when low <= value <= high (either bound may be -inf / +inf).
         req_low, req_high = constraint.range  # type: ignore[misc]
 
         found = to_canonical(raw.value, raw.unit, canonical_unit)  # type: ignore[arg-type]
-        req_low_c = to_canonical(req_low, constraint.unit, canonical_unit)    # identity
-        req_high_c = to_canonical(req_high, constraint.unit, canonical_unit)
+        # An open bound (-inf / +inf) is unit-independent, so it must NOT be run
+        # through to_canonical: converting e.g. -inf from W to dBm would take
+        # log10 of a non-positive number and raise.  Infinity stays infinity.
+        req_low_c = req_low if math.isinf(req_low) else to_canonical(req_low, constraint.unit, canonical_unit)
+        req_high_c = req_high if math.isinf(req_high) else to_canonical(req_high, constraint.unit, canonical_unit)
 
         if req_low_c <= found <= req_high_c:
             return "PASS"

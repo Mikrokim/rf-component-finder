@@ -233,6 +233,22 @@ class TestBetweenComparison:
         cand = _make_candidate({"P1dB": RawValue(1000.0, "mW")})
         assert verify(spec, cand).verdicts[0].status == "PASS"
 
+    def test_between_open_bottom_in_watts_does_not_crash(self):
+        """A one-sided range in W must not convert -inf (log10 of ≤0 would raise).
+
+        Required "≤ 0.4 W" as (-inf, 0.4) W: the -inf floor is unit-independent
+        and left un-converted. 100 mW = 0.1 W ≤ 0.4 W → PASS.
+        """
+        spec = _make_spec(_between_constraint("P1dB", float("-inf"), 0.4, "W"))
+        cand = _make_candidate({"P1dB": RawValue(100.0, "mW")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
+    def test_between_open_top_in_watts_does_not_crash(self):
+        """A one-sided range in W with an open +inf top also stays safe."""
+        spec = _make_spec(_between_constraint("P1dB", 0.1, float("inf"), "W"))
+        cand = _make_candidate({"P1dB": RawValue(1000.0, "mW")})  # 1 W ≥ 0.1 W
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
 
 # ---------------------------------------------------------------------------
 # 8. UNKNOWN — param not in candidate.raw_params

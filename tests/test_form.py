@@ -76,7 +76,7 @@ class TestBuildForm:
 # ---------------------------------------------------------------------------
 
 class TestCollectKeystone:
-    """§5.2 worked example: amplifier, freq 2–6 GHz, P1dB 26 dBm, rest empty."""
+    """§5.2 worked example: amplifier, freq 2–6 GHz, P1dB ≥ 26 dBm, rest empty."""
 
     def test_keystone_exact_query_spec(self):
         schema = _amplifier_schema()
@@ -84,7 +84,7 @@ class TestCollectKeystone:
             "freq_range.min": "2",
             "freq_range.max": "6",
             "freq_range.unit": "GHz",
-            "P1dB.value": "26",
+            "P1dB.min": "26",
             "P1dB.unit": "dBm",
         }
         result = collect(schema, answers=answers)
@@ -99,12 +99,13 @@ class TestCollectKeystone:
                     range=(2.0, 6.0),
                     unit="GHz",
                 ),
-                # P1dB is a "min" param: a single value, no max.
+                # P1dB is a "min" param collected as a one-sided range: entering
+                # only a min means "≥ 26" → a between constraint (26, +inf).
                 ParamConstraint(
                     canonical_name="P1dB",
-                    comparison="min",
-                    value=26.0,
-                    range=None,
+                    comparison="between",
+                    value=None,
+                    range=(26.0, float("inf")),
                     unit="dBm",
                 ),
             ],
@@ -134,7 +135,7 @@ class TestCollectValidation:
     def test_non_numeric_value_raises_value_error(self):
         schema = _amplifier_schema()
         answers = {
-            "P1dB.value": "notanumber",
+            "P1dB.min": "notanumber",
             "P1dB.unit": "dBm",
         }
         with pytest.raises(ValueError):
@@ -153,7 +154,7 @@ class TestCollectValidation:
     def test_invalid_unit_raises_value_error(self):
         schema = _amplifier_schema()
         answers = {
-            "P1dB.value": "26",
+            "P1dB.min": "26",
             "P1dB.unit": "Watts",  # not in field.units
         }
         with pytest.raises(ValueError):
@@ -172,10 +173,10 @@ class TestCollectUnitStored:
         assert len(result.constraints) == 1
         assert result.constraints[0].unit == "MHz"
 
-    def test_scalar_unit_on_constraint_matches_answer(self):
+    def test_min_param_unit_on_constraint_matches_answer(self):
         schema = _amplifier_schema()
         answers = {
-            "P1dB.value": "0.4",
+            "P1dB.min": "0.4",
             "P1dB.unit": "W",
         }
         result = collect(schema, answers=answers)
@@ -233,7 +234,8 @@ class TestCollectEdgeCases:
     def test_empty_string_value_skips_field(self):
         schema = _amplifier_schema()
         answers = {
-            "P1dB.value": "",
+            "P1dB.min": "",
+            "P1dB.max": "",
             "P1dB.unit": "dBm",
         }
         result = collect(schema, answers=answers)
@@ -295,3 +297,60 @@ class TestCollectBetween:
         c = _bw_constraint(collect(_between_schema(), answers=answers))
         assert c.unit == "dBm"  # canonical
         assert c.range == (10.0, 20.0)
+
+
+# ---------------------------------------------------------------------------
+# 4. collect — "min"/"max" params collected as a (possibly one-sided) range.
+#    A single-bound query is emitted as a one-sided "between": a "min" param
+#    with only a min → "≥ x" (max = +inf); a "max" param with only a max →
+#    "≤ x" (min = -inf); either may also be given a full range.
+# ---------------------------------------------------------------------------
+
+def _constraint_for(result: QuerySpec, name: str) -> ParamConstraint:
+    return next(c for c in result.constraints if c.canonical_name == name)
+
+
+class TestCollectMinMaxAsRange:
+    def test_min_param_only_min_is_lower_bound(self):
+        # P1dB is a "min" param; entering only a min means "≥ 26".
+        result = collect(_amplifier_schema(), answers={"P1dB.min": "26", "P1dB.unit": "dBm"})
+        c = _constraint_for(result, "P1dB")
+        assert c.comparison == "between"
+        assert c.value is None
+        assert c.range == (26.0, float("inf"))
+
+    def test_min_param_only_max_is_upper_bound(self):
+        # New capability: cap a "min" param from above ("≤ 30").
+        result = collect(_amplifier_schema(), answers={"P1dB.max": "30", "P1dB.unit": "dBm"})
+        c = _constraint_for(result, "P1dB")
+        assert c.comparison == "between"
+        assert c.range == (float("-inf"), 30.0)
+
+    def test_min_param_full_range(self):
+        result = collect(
+            _amplifier_schema(),
+            answers={"P1dB.min": "20", "P1dB.max": "30", "P1dB.unit": "dBm"},
+        )
+        c = _constraint_for(result, "P1dB")
+        assert c.comparison == "between"
+        assert c.range == (20.0, 30.0)
+
+    def test_max_param_only_max_is_upper_bound(self):
+        # NF is a "max" param; entering only a max means "≤ 3".
+        result = collect(_amplifier_schema(), answers={"NF.max": "3", "NF.unit": "dB"})
+        c = _constraint_for(result, "NF")
+        assert c.comparison == "between"
+        assert c.range == (float("-inf"), 3.0)
+
+    def test_max_param_full_range(self):
+        result = collect(
+            _amplifier_schema(),
+            answers={"NF.min": "1", "NF.max": "3", "NF.unit": "dB"},
+        )
+        c = _constraint_for(result, "NF")
+        assert c.range == (1.0, 3.0)
+
+    def test_min_greater_than_max_raises(self):
+        answers = {"P1dB.min": "30", "P1dB.max": "20", "P1dB.unit": "dBm"}
+        with pytest.raises(ValueError):
+            collect(_amplifier_schema(), answers=answers)

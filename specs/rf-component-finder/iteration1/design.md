@@ -109,7 +109,7 @@ PARAMETERS: dict[str, ParamDef] = {
     "P1dB": ParamDef(
         label="P1dB (output 1 dB compression)",
         canonical_unit="dBm", units=["dBm", "W", "mW"],
-        comparison="min",                 # scalar param → single value field in form
+        comparison="min",                 # bounded scalar → min/max fields in form (min-only ⇒ "≥ value")
         applies_to=["amplifier"],
     ),
     "Gain":  ParamDef("Gain",          "dB",  ["dB"],        "min",     ["amplifier"]),
@@ -127,12 +127,15 @@ PARAMETERS: dict[str, ParamDef] = {
 
 > **Note:** `label` is the human-readable field name shown in the form; `units`
 > is the list offered in the field's unit selector (canonical first, REQ-1.4).
-> A `contains` **or** `between` comparison signals a **range** parameter → the
-> form renders separate min/max inputs (REQ-1.5). `contains` compares a candidate
-> *range* against the required band (frequency); `between` checks that a candidate
-> *scalar* falls within the required band, with one-sided defaults (omitted min→-∞,
-> omitted max→+∞). No aliases are needed: the form presents labels directly, so
-> there is no free text to disambiguate.
+> Any comparison other than `eq` signals a **range**-input parameter → the form
+> renders separate min/max inputs (REQ-1.5). `contains` compares a candidate
+> *range* against the required band (frequency) and requires both bounds; the
+> bounded-scalar rules (`between`, `min`, `max`) check that a candidate *scalar*
+> falls within the required band, with one-sided defaults (omitted min→-∞,
+> omitted max→+∞). A `min`/`max` param is simply a bounded scalar whose natural
+> bound is pre-implied (min-only ⇒ "≥ value", max-only ⇒ "≤ value"); either way
+> it is collected and matched as a (one-sided) `between`. No aliases are needed:
+> the form presents labels directly, so there is no free text to disambiguate.
 
 ### 4.2 `components.py` (REQ-1.2, REQ-1.3)
 
@@ -173,9 +176,12 @@ Given a component type, returns the ordered list of fields to present, computed
 from the ontology (REQ-1.2):
 - For each `param` in `PARAMETERS` where `component_type in param.applies_to`,
   emit a `Field(name, label, units, kind)`.
-- `kind = "range"` if `param.comparison in ("contains", "between")` (renders
-  min + max), else `kind = "scalar"` (renders a single value). Each field carries
-  its `units` list (canonical first) for the unit selector (REQ-1.4, REQ-1.5).
+- A field renders as a **range** (min + max inputs) when
+  `param.comparison != "eq"` — i.e. for `contains`, `between`, `min` and `max`;
+  only `eq` renders as a single value. (`schema.py` still orders the band params
+  `contains`/`between` ahead of the `min`/`max` params; the min/max-vs-single
+  rendering decision lives in `input.py`.) Each field carries its `units` list
+  (canonical first) for the unit selector (REQ-1.4, REQ-1.5).
 
 **`input.py` — `collect(schema) -> QuerySpec`.**
 Drives the interactive form (component selection first, then the parameter
@@ -200,15 +206,16 @@ field-to-constraint logic can be tested without a TTY.
 ### 5.2 Worked example
 
 Form input — component **Amplifier**; `Frequency range` min `2` max `6` unit `GHz`;
-`P1dB` `26` unit `dBm`; all other fields left empty → produces:
+`P1dB` min `26` unit `dBm` (max left blank); all other fields left empty → produces:
 
 ```python
 QuerySpec(
   component_type="amplifier",
   constraints=[
     ParamConstraint("freq_range", "contains", None, (2.0, 6.0),           "GHz"),
-    # P1dB is a "min" param: a single value, no max.
-    ParamConstraint("P1dB",       "min",      26.0, None,                 "dBm"),
+    # P1dB is a "min" param filled on its min side only → one-sided "between"
+    # (26, +∞), i.e. "≥ 26 dBm". Adding a max would bracket it instead.
+    ParamConstraint("P1dB",       "between",  None, (26.0, float("inf")), "dBm"),
   ],
 )
 ```
@@ -306,6 +313,14 @@ def verify(spec: QuerySpec, cand: Candidate) -> VerifiedCandidate:
 | `contains` | `found.min <= required.range.min AND found.max >= required.range.max` |
 | `between`  | `required.range.min <= found <= required.range.max` (scalar `found`; an omitted bound is `-∞` / `+∞`) |
 | `eq`       | `found == required.value` (within tolerance) |
+
+> **Note:** the form emits bounded-scalar `min`/`max` queries as `between`
+> constraints (a one-sided range — see §5.2), so at runtime those params flow
+> through the `between` row. The scalar `min`/`max` rows remain valid for
+> constraints built directly (e.g. programmatically or in tests) and define the
+> semantics the one-sided `between` reproduces. An open bound (`-∞`/`+∞`) is
+> unit-independent and is compared without unit conversion (converting, say, `-∞`
+> from W to dBm would take `log10` of a non-positive number).
 
 **`decide` rules (REQ-4.2, REQ-4.4, REQ-4.5):**
 - any `FAIL` → `overall = "fail"`
