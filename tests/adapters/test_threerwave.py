@@ -14,7 +14,11 @@ from pathlib import Path
 import pytest
 
 from rf_finder.adapters.base import AdapterError
-from rf_finder.adapters.threerwave import ThreeRWaveAdapter
+from rf_finder.adapters.threerwave import (
+    ThreeRWaveAdapter,
+    _normalize_header,
+    _parse_float,
+)
 from rf_finder.models import Candidate, RawValue
 
 # ---------------------------------------------------------------------------
@@ -124,6 +128,38 @@ def test_content_filter_block_stub_is_legible_error():
     adapter = ThreeRWaveAdapter()
     with pytest.raises(AdapterError, match="content filter"):
         adapter._parse_html(block)
+
+
+# ---------------------------------------------------------------------------
+# Helper-level edge cases (B: header normalization, C: numeric parsing)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Gain(dB)", "gain db"),
+    ("Start Freq.(GHz)", "start freq ghz"),
+    ("Gain(dB) ▲", "gain db"),          # trailing DataTables sort caret
+    ("Consumption Current(mA) @ Psat", "consumption current ma psat"),
+    ("  Part   Number  ", "part number"),
+])
+def test_normalize_header_strips_all_symbols(raw, expected):
+    assert _normalize_header(raw) == expected
+
+
+@pytest.mark.parametrize("cell,expected", [
+    ("30", 30.0),
+    ("0.006", 0.006),
+    ("1,500", 1500.0),        # thousands separator
+    ("30 typ", 30.0),         # trailing qualifier
+    ("1.2 max", 1.2),         # trailing qualifier
+    ("1e-3", 0.001),          # scientific notation still parses cleanly
+])
+def test_parse_float_accepts_real_world_numbers(cell, expected):
+    assert _parse_float(cell) == expected
+
+
+@pytest.mark.parametrize("cell", ["-", "", "N/A", "—", "TBD", "Die", "nan", "inf"])
+def test_parse_float_rejects_non_numeric_and_non_finite(cell):
+    assert _parse_float(cell) is None
 
 
 # ---------------------------------------------------------------------------

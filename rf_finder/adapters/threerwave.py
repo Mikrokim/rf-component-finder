@@ -31,6 +31,7 @@ surfaced as AdapterError.  Offline parsing/tests are unaffected.
 
 from __future__ import annotations
 
+import math
 import re
 import time
 from urllib.parse import quote
@@ -91,24 +92,50 @@ _MODEL_HEADER = "part number"
 # ---------------------------------------------------------------------------
 
 def _normalize_header(raw: str) -> str:
-    """Lowercase, remove punctuation characters, collapse whitespace.
+    """Lowercase, replace every non-alphanumeric run with a space, trim.
 
-    e.g. "Start Freq.(GHz)" -> "start freq ghz", "Gain(dB)" -> "gain db".
+    Reducing *any* punctuation or symbol (not just a fixed set) to whitespace
+    keeps header matching robust to DataTables sort carets and other glyphs the
+    live site may inject, e.g. "Gain(dB) ▲" -> "gain db", "Start Freq.(GHz)" ->
+    "start freq ghz".  Only [a-z0-9] and single spaces survive.
     """
-    text = raw.lower()
-    text = re.sub(r"[().,:/\\@%]", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[^a-z0-9]+", " ", raw.lower())
+    return text.strip()
+
+
+_LEADING_NUMBER_RE = re.compile(r"[-+]?\d*\.?\d+")
 
 
 def _parse_float(cell_text: str) -> float | None:
-    """Return None for missing/non-numeric sentinels; float otherwise."""
+    """Return the numeric value of a spec cell, or None if it carries no number.
+
+    Missing sentinels ('-', 'N/A', blank, …) and non-numeric text ('TBD',
+    'Die') return None so the Verifier resolves them to UNKNOWN (a partial
+    match, never a wrong FAIL).
+
+    Beyond a clean number the parser also tolerates:
+      * thousands separators — "1,500" -> 1500.0;
+      * a trailing qualifier — "30 typ", "1.2 max" -> 30.0 / 1.2 (first token);
+    and rejects non-finite results — "nan"/"inf" -> None.
+
+    Caveat: an in-cell range like "28-32" yields its first number (28.0).  The
+    3rwave columns we read are single-valued, so this is not expected to fire.
+    """
     t = cell_text.strip()
     if not t or t in _MISSING_SENTINELS:
         return None
+    t = t.replace(",", "")
     try:
-        return float(t)
+        val = float(t)
     except ValueError:
-        return None
+        match = _LEADING_NUMBER_RE.search(t)
+        if match is None:
+            return None
+        try:
+            val = float(match.group())
+        except ValueError:
+            return None
+    return val if math.isfinite(val) else None
 
 
 def _highlight_url(part_number: str) -> str:
