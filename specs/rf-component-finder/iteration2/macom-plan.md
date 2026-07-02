@@ -189,9 +189,9 @@ the Mini-Circuits adapter skips VSWR/Voltage/Current.
 | `Min Frequency` + `Max Frequency` | MHz | `freq_range` | **1017 (100%)** | Combine into `RawValue((min,max), "MHz")`; Verifier → GHz. |
 | `Gain` | dB | `Gain` | 1008 (99%) | |
 | `Output P1dB` | dBm *(sometimes `dB`)* | `P1dB` | 564 (55%) | Unit noise — see §9 R1. |
-| `OIP3` | dBm *(sometimes `dB`)* | `OIP3` | 528 (52%) | Unit noise — see §9 R1. |
+| `OIP3` | dBm *(sometimes `dB`)* | `IP3` | 528 (52%) | Unit noise — see §9 R1. |
 | `NF`, `Noise Figure` | dB | `NF` | 458 (45%) + 14 | **Synonym pair.** |
-| `PSAT` *(primary)*; `PSAT Watt`/`Pout`/`Peak Output Power`/`Psat`* | dBm; W | `Pout` | 181 dBm + ~415 W-variants | **Multiple power encodings — needs sign-off, §9 OQ-M3.** |
+| `PSAT` *(primary)*; `PSAT Watt`/`Pout`/`Peak Output Power`/`Psat`* | dBm; W | `Psat` | 181 dBm + ~415 W-variants | **Multiple power encodings — needs sign-off, §9 OQ-M3.** |
 
 **Skipped specs** (not in this iteration's ontology): `Bias Voltage`,
 `Bias Current`, `Efficiency`, `Operating Voltage`, `Supply Voltage`,
@@ -215,10 +215,10 @@ BASE = "https://www.macom.com"
 SPEC_MAP = {                       # normalized specName -> (canonical, unit)
     "gain":        ("Gain", "dB"),
     "output p1db": ("P1dB", "dBm"),
-    "oip3":        ("OIP3", "dBm"),
+    "oip3":        ("IP3",  "dBm"),
     "nf":          ("NF",   "dB"),
     "noise figure":("NF",   "dB"),
-    "psat":        ("Pout", "dBm"),
+    "psat":        ("Psat", "dBm"),
     # Min/Max Frequency handled specially (combined into freq_range)
 }
 
@@ -268,7 +268,7 @@ Candidate(
     raw_params={
         "freq_range": RawValue((0.0, 6000.0), "MHz"),
         "Gain":       RawValue(11.0, "dB"),
-        "OIP3":       RawValue(35.0, "dBm"),
+        "IP3":        RawValue(35.0, "dBm"),
         "NF":         RawValue(1.2,  "dB"),
         # P1dB absent for this part -> Verifier marks UNKNOWN -> partial
     },
@@ -287,7 +287,7 @@ live page: the surrounding table markup plus ~8–10 representative
 `<tr data-part="…">` rows covering:
 
 - A part with all six params present.
-- A part with `P1dB`/`OIP3`/`NF` absent (→ must be absent from `raw_params`).
+- A part with `P1dB`/`IP3`/`NF` absent (→ must be absent from `raw_params`).
 - A part with the `Noise Figure` synonym (not `NF`).
 - A part with a noisy `uom` (e.g. `Output P1dB` tagged `dB`) and a stray-space
   `' MHz'`.
@@ -357,11 +357,12 @@ def test_search_live():
   (`/products/product-detail/<PN>`, useful in the report; not fetched) or the
   datasheet PDF, or the listing page? *Recommend:* the detail URL for report
   value (never fetched), mirroring the Mini-Circuits OQ-2 decision.
-- **OQ-M3 — Power-spec encoding for `Pout`.** Power is published in several forms
+- **OQ-M3 — Power-spec encoding for `Psat`.** Power is published in several forms
   (`PSAT` dBm; `PSAT Watt`/`Pout`/`Peak Output Power`/`Psat` in W). Which is
-  authoritative, and do we map the W-variants to `Pout` (Verifier converts W→dBm)
+  authoritative, and do we map the W-variants to `Psat` (Verifier converts W→dBm)
   or only the dBm `PSAT`? *Recommend:* prefer `PSAT` (dBm) when present, else a
-  W-variant via `to_canonical`. Needs sign-off (affects coverage of `Pout`).
+  W-variant via `to_canonical`. Needs sign-off (affects coverage of `Psat`).
+  (Canonical ontology param is `Psat`; the `OIP3` source spec maps to `IP3`.)
 - **OQ-M4 — Datasheet path.** `datasheetHref` gives a direct PDF per part (991/1017).
   Defer PDF parsing to the `datasheet`-confidence iteration (cf. requirements OQ-3),
   but capture the URL now. Confirm deferral.

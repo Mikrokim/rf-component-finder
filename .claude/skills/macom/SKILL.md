@@ -227,10 +227,10 @@ and keyed by the *normalized* `specName`:
 SPEC_MAP = {                       # normalized specName -> (canonical, unit)
     "gain":         ("Gain", "dB"),
     "output p1db":  ("P1dB", "dBm"),
-    "oip3":         ("OIP3", "dBm"),
+    "oip3":         ("IP3",  "dBm"),  # MACOM spec "OIP3" -> ontology param IP3
     "nf":           ("NF",   "dB"),
     "noise figure": ("NF",   "dB"),   # synonym of NF
-    "psat":         ("Pout", "dBm"),
+    "psat":         ("Psat", "dBm"),
 }
 # Min/Max Frequency handled specially → combined into freq_range.
 ```
@@ -279,10 +279,12 @@ items from the plan:
 - **OQ-M2 — `Candidate.url` value.** *Recommend:* per-product detail URL
   (`/products/product-detail/<PN>`, never fetched), mirroring Mini-Circuits OQ-2.
   (Applied.)
-- **OQ-M3 — Power-spec encoding for `Pout`.** Power is published several ways
+- **OQ-M3 — Power-spec encoding for `Psat`.** Power is published several ways
   (`PSAT` dBm; `PSAT Watt`/`Pout`/`Peak Output Power`/`Psat` in W). *Recommend:*
   prefer `PSAT` (dBm) when present, else a W-variant via `to_canonical`. Affects
-  `Pout` coverage — **still needs sign-off.** Current code maps only `psat`→`Pout`.
+  `Psat` coverage — **still needs sign-off.** Current code maps only source
+  `psat`→ ontology `Psat` (dBm). (Canonical param is `Psat`, not `Pout`; the
+  ontology has no `Pout`. Likewise the `OIP3` source spec maps to canonical `IP3`.)
 - **OQ-M4 — Datasheet path.** `datasheetHref` gives a direct PDF per part
   (991/1017). Defer PDF parsing to the `datasheet`-confidence iteration; capture
   the URL now. (Deferred.)
