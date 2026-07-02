@@ -59,3 +59,8 @@
 **Legacy:** t8-plan.md §9 (OQ-2) — log a warning when the scraped row count deviates significantly (e.g. >20%) between runs, as a possible site-redesign signal.
 **Current code:** The adapter performs no run-to-run row-count comparison.
 **Status:** Not implemented. Tracked as OQ-3 in `open-questions.md`.
+
+### Datasheet-only parameters (Size / MSL / Temperature) for the iteration-2 adapters
+**Legacy:** iteration2 adapter plans — `macom-plan.md`, `ums-plan.md`, `threerwave-plan.md`, `microchip-plan.md` (e.g. UMS OQ-U4, 3rWave OQ-3W-1/§6, Microchip OQ-6/OQ-7): `Size`, `MSL`, and `Temperature` live only in per-part datasheet PDFs, to be harvested via a future `datasheet`-confidence path.
+**Current code:** The MACOM, UMS, and 3rWave table adapters do not populate `Size`, `MSL`, or `Temperature`. The Microchip adapter populates `Size`/`MSL` from MCP physical-specs when present but not `Temperature`; 3rWave additionally defers `Size` even though a (free-text) column exists (its decoding is undecided — see 3rWave OQ-3W-1). When a requested parameter is absent, the Verifier marks it UNKNOWN (partial), never a wrongful FAIL.
+**Status:** Not implemented (datasheet-PDF parsing deferred). The implemented per-adapter retrieval is documented in `manufacturer-adapters`.
