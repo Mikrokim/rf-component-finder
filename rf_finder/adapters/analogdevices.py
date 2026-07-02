@@ -13,6 +13,8 @@ Field-id -> ontology mapping confirmed from ADI view metadata:
     2913 Gain typ (dB)               -> Gain
     2921 Noise Figure typ (dB)       -> NF
     4709 Saturated Output Power (dBm)-> Psat
+    1516 Operating supply voltage min (V) -> VDD low
+    1517 Operating supply voltage max (V) -> VDD high
 """
 
 from __future__ import annotations
@@ -22,7 +24,13 @@ import time
 
 import httpx
 
-from rf_finder.adapters.base import Adapter, AdapterError, register
+from rf_finder.adapters.base import (
+    Adapter,
+    AdapterError,
+    drop_paramless,
+    freq_range_from_bandwidth,
+    register,
+)
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
 # ---------------------------------------------------------------------------
@@ -43,6 +51,12 @@ _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA"})
 
 _MIN_DELAY_SECONDS = 5.0
 
+# ADI field-id holding a single -3 dB Bandwidth (Hz). Wideband / differential
+# amplifiers (e.g. AD8131, ADA49xx) carry this instead of a 279/278 frequency
+# band. Used only as a fallback: for true RF parts 1519 merely mirrors the upper
+# freq edge, so 279/278 take precedence when present.
+_BANDWIDTH_FID = "1519"
+
 # ---------------------------------------------------------------------------
 # Field-id -> (canonical_name, unit)
 # ---------------------------------------------------------------------------
@@ -56,6 +70,8 @@ FIELD_MAP: dict[str, tuple[str, str | None]] = {
     "2913": ("Gain",      "dB"),
     "2921": ("NF",        "dB"),
     "4709": ("Psat",      "dBm"),
+    "1516": ("vdd_low",   "V"),
+    "1517": ("vdd_high",  "V"),
 }
 
 
@@ -135,7 +151,7 @@ class AnalogDevicesAdapter(Adapter):
                 cause=exc,
             ) from exc
 
-        return self._parse_json(response.text)
+        return drop_paramless(self._parse_json(response.text))
 
     def _parse_json(self, text: str) -> list[Candidate]:
         """Parse the parametric JSON body into Candidates."""
@@ -170,9 +186,21 @@ class AnalogDevicesAdapter(Adapter):
             f_high = _parse_float(_cell_value(row, "278"))
             if f_low is not None and f_high is not None:
                 raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="Hz")
+            else:
+                # No frequency-response band: fall back to a -3 dB Bandwidth
+                # (wideband / differential parts) and convert it to a range.
+                bw = _parse_float(_cell_value(row, _BANDWIDTH_FID))
+                if bw is not None:
+                    raw_params["freq_range"] = freq_range_from_bandwidth(bw)
+
+            # VDD: combine min (1516) + max (1517) supply-voltage fields into a range.
+            v_low = _parse_float(_cell_value(row, "1516"))
+            v_high = _parse_float(_cell_value(row, "1517"))
+            if v_low is not None and v_high is not None:
+                raw_params["VDD"] = RawValue(value=(v_low, v_high), unit="V")
 
             for fid, (canonical, unit) in FIELD_MAP.items():
-                if canonical in ("model", "freq_low", "freq_high"):
+                if canonical in ("model", "freq_low", "freq_high", "vdd_low", "vdd_high"):
                     continue
                 value = _parse_float(_cell_value(row, fid))
                 if value is not None:

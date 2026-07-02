@@ -242,51 +242,56 @@ class TestCollectEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# 3. collect — "between" param (VDD): min + max with one-sided defaults
-#    (only-min → +inf, only-max → -inf)
+# 3. collect — "between" collection path: one-sided min/max with ±inf defaults.
+#    No ontology param uses "between" anymore (VDD is "contains"), so the path
+#    is exercised with a synthetic schema built directly.
 # ---------------------------------------------------------------------------
 
-def _vdd_constraint(result: QuerySpec) -> ParamConstraint:
-    return next(c for c in result.constraints if c.canonical_name == "VDD")
+def _between_schema() -> FormSchema:
+    field = Field(
+        canonical_name="Bw",
+        label="Synthetic between param",
+        comparison="between",
+        canonical_unit="dBm",
+        units=["dBm", "W", "mW"],
+    )
+    return FormSchema(component_type="amplifier", fields=[field])
+
+
+def _bw_constraint(result: QuerySpec) -> ParamConstraint:
+    return next(c for c in result.constraints if c.canonical_name == "Bw")
 
 
 class TestCollectBetween:
     def test_both_min_and_max(self):
-        schema = _amplifier_schema()
-        answers = {"VDD.min": "3", "VDD.max": "5", "VDD.unit": "V"}
-        c = _vdd_constraint(collect(schema, answers=answers))
+        answers = {"Bw.min": "20", "Bw.max": "30", "Bw.unit": "dBm"}
+        c = _bw_constraint(collect(_between_schema(), answers=answers))
         assert c.comparison == "between"
-        assert c.range == (3.0, 5.0)
+        assert c.range == (20.0, 30.0)
         assert c.value is None
 
     def test_only_min_defaults_max_to_inf(self):
-        schema = _amplifier_schema()
-        answers = {"VDD.min": "3", "VDD.unit": "V"}
-        c = _vdd_constraint(collect(schema, answers=answers))
-        assert c.range == (3.0, float("inf"))
+        answers = {"Bw.min": "26", "Bw.unit": "dBm"}
+        c = _bw_constraint(collect(_between_schema(), answers=answers))
+        assert c.range == (26.0, float("inf"))
 
     def test_only_max_defaults_min_to_neg_inf(self):
-        schema = _amplifier_schema()
-        answers = {"VDD.max": "5", "VDD.unit": "V"}
-        c = _vdd_constraint(collect(schema, answers=answers))
-        assert c.range == (float("-inf"), 5.0)
+        answers = {"Bw.max": "30", "Bw.unit": "dBm"}
+        c = _bw_constraint(collect(_between_schema(), answers=answers))
+        assert c.range == (float("-inf"), 30.0)
 
     def test_neither_side_skips_field(self):
-        schema = _amplifier_schema()
-        result = collect(schema, answers={"VDD.unit": "V"})
+        result = collect(_between_schema(), answers={"Bw.unit": "dBm"})
         names = [c.canonical_name for c in result.constraints]
-        assert "VDD" not in names
+        assert "Bw" not in names
 
     def test_min_greater_than_max_raises(self):
-        schema = _amplifier_schema()
-        answers = {"VDD.min": "5", "VDD.max": "3", "VDD.unit": "V"}
+        answers = {"Bw.min": "30", "Bw.max": "20", "Bw.unit": "dBm"}
         with pytest.raises(ValueError):
-            collect(schema, answers=answers)
+            collect(_between_schema(), answers=answers)
 
     def test_unit_defaults_to_canonical_when_omitted(self):
-        schema = _amplifier_schema()
-        answers = {"VDD.min": "3", "VDD.max": "5"}
-        result = collect(schema, answers=answers)
-        vdd = next(c for c in result.constraints if c.canonical_name == "VDD")
-        assert vdd.unit == "V"  # canonical for VDD
-        assert vdd.range == (3.0, 5.0)
+        answers = {"Bw.min": "10", "Bw.max": "20"}
+        c = _bw_constraint(collect(_between_schema(), answers=answers))
+        assert c.unit == "dBm"  # canonical
+        assert c.range == (10.0, 20.0)

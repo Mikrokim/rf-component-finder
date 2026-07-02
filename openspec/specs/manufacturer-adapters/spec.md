@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the pluggable adapter layer that retrieves candidate components from a manufacturer source and maps them into the tool's canonical model. Adapters only fetch and map raw values; they never judge whether a candidate matches (that is the Verifier's job). This spec documents the behavior **as currently implemented** in `rf_finder/adapters/base.py`, `rf_finder/adapters/minicircuits.py`, `rf_finder/adapters/analogdevices.py`, `rf_finder/adapters/macom.py`, `rf_finder/adapters/ums.py`, `rf_finder/adapters/threerwave.py`, and `rf_finder/adapters/microchip.py`.
+Define the pluggable adapter layer that retrieves candidate components from a manufacturer source and maps them into the tool's canonical model. Adapters only fetch and map raw values; they never judge whether a candidate matches (that is the Verifier's job). This spec documents the behavior **as currently implemented** in `rf_finder/adapters/base.py`, `rf_finder/adapters/minicircuits.py`, `rf_finder/adapters/analogdevices.py`, `rf_finder/adapters/macom.py`, `rf_finder/adapters/ums.py`, `rf_finder/adapters/threerwave.py`, `rf_finder/adapters/microchip.py`, `rf_finder/adapters/qorvo.py`, `rf_finder/adapters/vectrawave.py`, and `rf_finder/adapters/guerrillarf.py`.
 
 ## Requirements
 
@@ -62,7 +62,7 @@ The Mini-Circuits adapter SHALL declare `manufacturer = "Mini-Circuits"` and sup
 
 ### Requirement: Mini-Circuits results-table parsing
 
-The adapter SHALL parse the results table identified by `table#maintable`; IF that table is absent it SHALL raise `AdapterError`. Column headers SHALL be matched by a normalized-header lookup against a fixed column map (`Model Number`, `F Low (MHz)`, `F High (MHz)`, `Gain`, `NF`, `P1dB`, `PSAT`→`Psat`, `OIP3`→`IP3`). The `F Low`/`F High` MHz columns SHALL be combined into a single `freq_range` value `RawValue((low, high), "MHz")`, and only when both bounds are present. A `"DC"` low-band edge SHALL parse as `0.0`. Cells that are empty or a missing-value sentinel (`-`, `n/a`, `N/A`) SHALL cause the parameter to be absent from `raw_params` (not stored as `None`). A cell whose value cannot be parsed as a number — and is neither the `"DC"` low edge nor a known sentinel (e.g. a dual-range string such as `"350/480"`) — SHALL likewise cause the parameter to be absent from `raw_params`. Each parsed row SHALL produce `Candidate(model, manufacturer="Mini-Circuits", url, raw_params, source="table")`.
+The adapter SHALL parse the results table identified by `table#maintable`; IF that table is absent it SHALL raise `AdapterError`. Column headers SHALL be matched by a normalized-header lookup against a fixed column map (`Model Number`, `F Low (MHz)`, `F High (MHz)`, `Gain`, `NF`, `P1dB`, `PSAT`→`Psat`, `OIP3`→`IP3`, `Voltage (V)`→`VDD`). The single-value `Voltage (V)` cell SHALL be stored as a degenerate range `RawValue((v, v), "V")` so `VDD` is a range everywhere (consistent with the other adapters). The `F Low`/`F High` MHz columns SHALL be combined into a single `freq_range` value `RawValue((low, high), "MHz")`, and only when both bounds are present. A `"DC"` low-band edge SHALL parse as `0.0`. Cells that are empty or a missing-value sentinel (`-`, `n/a`, `N/A`) SHALL cause the parameter to be absent from `raw_params` (not stored as `None`). A cell whose value cannot be parsed as a number — and is neither the `"DC"` low edge nor a known sentinel (e.g. a dual-range string such as `"350/480"`) — SHALL likewise cause the parameter to be absent from `raw_params`. Each parsed row SHALL produce `Candidate(model, manufacturer="Mini-Circuits", url, raw_params, source="table")`.
 
 #### Scenario: Fixture parses into candidates with table source
 
@@ -85,6 +85,11 @@ The adapter SHALL parse the results table identified by `table#maintable`; IF th
 
 - **WHEN** the row for `GALI-39+` (DC–8000 MHz) is parsed
 - **THEN** its `raw_params["freq_range"] == RawValue((0.0, 8000.0), "MHz")`
+
+#### Scenario: Voltage column maps to a degenerate VDD range
+
+- **WHEN** a row whose `Voltage (V)` cell holds a single value (e.g. `24`) is parsed
+- **THEN** its `raw_params["VDD"] == RawValue((24.0, 24.0), "V")`
 
 #### Scenario: Unparseable cell yields an absent parameter
 
@@ -231,4 +236,102 @@ The Microchip adapter SHALL declare `manufacturer = "Microchip"` and support the
 #### Scenario: Zero enumerated parts raises AdapterError
 
 - **WHEN** MCP `search_products` returns no parts for any amplifier term
+- **THEN** an `AdapterError` is raised
+
+### Requirement: Qorvo adapter retrieval and parsing
+
+The Qorvo adapter SHALL declare `manufacturer = "Qorvo"` and support the `amplifier` component. On `search`, it SHALL issue a single HTTP GET to the server-rendered product list at `/products/product-list/` (no query string) using a browser-style User-Agent; IF the fetch fails or the product container is absent it SHALL raise `AdapterError` carrying the manufacturer. The adapter SHALL keep only the 12 amplifier categories (by `h3` title) and drop all other category blocks. Columns SHALL be mapped by header title with the unit read per-column from the header subtitle (`Frequency Min`/`Max` in GHz or MHz, `Gain`, `OP1dB`→`P1dB`, `OIP3`→`IP3`, `NF`, `Psat`, `Voltage`/`Vd`→`VDD`); `Vg` (gate) SHALL be ignored. A `Frequency Min` of `"DC"` SHALL parse as `0.0`. A `VDD` cell SHALL parse as a `"X to Y"` range, a single value stored as `(v, v)`, or a comma/slash multi-value list stored as a discrete option list. For Spatium parts, `Small Signal Gain` SHALL map to `Gain`. `Size`, `MSL`, and `Temperature` SHALL never be emitted (listing-page only). Empty or `"N/A"` cells SHALL cause the parameter to be absent. Each row SHALL produce `Candidate(model, manufacturer="Qorvo", url=/products/p/{MODEL}, raw_params, source="table")`.
+
+#### Scenario: Only amplifier categories are kept
+
+- **WHEN** the saved product-list fixture is parsed
+- **THEN** only parts from the 12 amplifier categories are returned
+
+#### Scenario: DC frequency low edge becomes zero
+
+- **WHEN** a row whose `Frequency Min` is `"DC"` is parsed
+- **THEN** its `freq_range` low edge is `0.0`
+
+#### Scenario: VDD parses as range, single value, or discrete list
+
+- **WHEN** a `VDD` cell holds `"3 to 5"`, a single value, or `"3, 5, 8"`
+- **THEN** it is stored as a `(low, high)` range, a `(v, v)` range, or a discrete option list respectively
+
+#### Scenario: Spatium uses small-signal gain
+
+- **WHEN** a Spatium part with both `Small Signal Gain` and `Power Gain` is parsed
+- **THEN** `Gain` is taken from `Small Signal Gain`
+
+#### Scenario: Size, MSL, Temperature never emitted
+
+- **WHEN** any Qorvo row is parsed
+- **THEN** `Size`, `MSL`, and `Temperature` are absent from `raw_params`
+
+#### Scenario: Missing container raises AdapterError
+
+- **WHEN** the product container is absent from the HTML
+- **THEN** an `AdapterError` is raised
+
+### Requirement: VectraWave adapter retrieval and parsing
+
+The VectraWave adapter SHALL declare `manufacturer = "VectraWave"` and support the `amplifier` component. On `search`, it SHALL issue a single HTTP GET to the server-rendered `/search-engine-mmic` page; IF the fetch fails or the expected modules are absent it SHALL raise `AdapterError`. The page tables are **transposed** (each product is a column, each parameter a row); the adapter SHALL parse only the four amplifier sections (High Power, Medium Power, Low Noise, Wideband) and SHALL skip attenuators, phase shifters, and Core Chips (the dual-path T/R modules are deferred — see open question OQ-5). It SHALL map `FrequencyMin`/`Max` (GHz) to `freq_range`, `Pout`→`Psat`, `OP1dB`→`P1dB`, `Gain`, `NF`, and both supply-voltage labels → `VDD` (dual-rail supported); a control-voltage label SHALL NOT map to `VDD`. `IP3`, `MSL`, `Size`, and `Temperature` SHALL NOT be emitted from the table (not published by VectraWave / datasheet-only). Each row SHALL produce `Candidate(model, manufacturer="VectraWave", url=<datasheet PDF or page>, raw_params, source="table")`.
+
+#### Scenario: Only amplifier sections are returned
+
+- **WHEN** the saved MMIC fixture is parsed
+- **THEN** only parts from the four amplifier sections (High Power, Medium Power, Low Noise, Wideband) are returned
+- **AND** attenuators, phase shifters, and Core Chips are excluded
+
+#### Scenario: Transposed products are parsed
+
+- **WHEN** the transposed table is parsed
+- **THEN** each product column becomes a candidate with its per-row parameters
+
+#### Scenario: Pout maps to Psat, not P1dB
+
+- **WHEN** a power-amp row exposes `Pout`
+- **THEN** it is stored under `Psat`
+
+#### Scenario: Control voltage is not VDD
+
+- **WHEN** a control-voltage label is present
+- **THEN** it is not mapped to `VDD`
+
+#### Scenario: IP3/MSL/Size/Temperature absent from table
+
+- **WHEN** any VectraWave row is parsed
+- **THEN** `IP3`, `MSL`, `Size`, and `Temperature` are absent from `raw_params`
+
+#### Scenario: Missing modules raise AdapterError
+
+- **WHEN** the expected modules are absent
+- **THEN** an `AdapterError` is raised
+
+### Requirement: Guerrilla RF adapter retrieval and parsing
+
+The Guerrilla RF adapter SHALL declare `manufacturer = "Guerrilla RF"` and support the `amplifier` component. On `search`, it SHALL issue a single HTTP GET to the server-rendered `/products/amplifiers.html` page and parse both tables (`#genericAmpFunctionTbl` and `#satPATbl`); IF the fetch fails or the tables are absent it SHALL raise `AdapterError`. `Min`/`Max Freq` (GHz) SHALL combine into `freq_range` (a DC-coupled low edge → `0.0`); `Gain`, `NF`, `OP1dB`→`P1dB`, `OIP3`→`IP3`, `Psat`, and `Vdd Range (V)`→`VDD` (a `"low-high"` string) SHALL be mapped. An empty `""` cell SHALL cause the parameter to be absent (including an empty `VDD`). `MSL`, `Temperature`, and exact `Size` SHALL NOT be emitted (datasheet-only). Each row SHALL produce `Candidate(model, manufacturer="Guerrilla RF", url, raw_params, source="table")`.
+
+#### Scenario: Both tables are parsed
+
+- **WHEN** the saved amplifiers fixture is parsed
+- **THEN** candidates come from both `#genericAmpFunctionTbl` and `#satPATbl`
+
+#### Scenario: DC-coupled low edge becomes zero
+
+- **WHEN** a DC-coupled row is parsed
+- **THEN** its `freq_range` low edge is `0.0`
+
+#### Scenario: Vdd Range parses to a VDD range
+
+- **WHEN** a `Vdd Range (V)` cell holds `"low-high"`
+- **THEN** it is stored under `VDD` as a `(low, high)` range
+
+#### Scenario: Empty cells are absent
+
+- **WHEN** a scalar or `VDD` cell is empty
+- **THEN** that parameter is absent from `raw_params`
+
+#### Scenario: Missing tables raise AdapterError
+
+- **WHEN** both tables are absent
 - **THEN** an `AdapterError` is raised

@@ -209,7 +209,7 @@ This confirms and extends the design.md §6.2 table with two additional observed
 | 8 | `OIP3 (dBm) Typ.` | `IP3` | dBm | `RawValue(value, "dBm")` | header reads "OIP3" |
 | 9 | `Input VSWR (:1) Typ.` | — | — | skip | Not in ontology this iter |
 | 10 | `Output VSWR (:1) Typ.` | — | — | skip | Not in ontology this iter |
-| 11 | `Voltage (V)` | `voltage` | V | skip | Not in ontology this iter |
+| 11 | `Voltage (V)` | `VDD` | V | mapped | alias: Voltage → VDD |
 | 12 | `Current (mA)` | `current` | mA | skip | Not in ontology this iter |
 | 13 | `Case Style` | — | — | skip | Metadata only |
 | 14 | `Connector Type` | — | — | skip | Metadata only |

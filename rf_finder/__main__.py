@@ -14,6 +14,9 @@ def main() -> None:
     from rf_finder.adapters.ums import UmsAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.threerwave import ThreeRWaveAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.microchip import MicrochipAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.guerrillarf import GuerrillaRFAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.vectrawave import VectraWaveAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.qorvo import QorvoAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.base import ADAPTERS
     from rf_finder.form import build_form, collect
     from rf_finder.verifier import verify

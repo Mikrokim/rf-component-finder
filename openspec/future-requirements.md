@@ -23,6 +23,11 @@
 **Current code:** The Mini-Circuits adapter only scrapes the results table (single `httpx` GET). No API/parametric-preference decision is implemented. Per `t8-plan.md`, Mini-Circuits exposes no usable public API and no server-side filter, so the scrape path is the only viable one — the practical outcome is satisfied, but the general preference ordering is not implemented.
 **Status:** Not implemented as a general mechanism (resolved as unnecessary for Mini-Circuits). Relevant again only when adding manufacturers that do offer an API (see OQ-1).
 
+### REQ-2.2 (partial) — Size / MSL / Temperature enrichment from datasheets
+**Legacy:** adapter specs QRV-OQ-3, VW-OQ-3, GRF-OQ-2 — `Size`, `MSL`, and `Temperature` are present only in datasheet PDFs, not on the manufacturer listing pages.
+**Current code:** the Qorvo, VectraWave, and Guerrilla RF adapters never emit `Size`, `MSL`, or `Temperature` (verified by `test_size_msl_temperature_never_emitted` and the VectraWave/Guerrilla equivalents); these stay UNKNOWN. (The implemented listing-page behavior is documented in `manufacturer-adapters`.)
+**Status:** Not implemented. Would require a datasheet-PDF fallback layer, owned by a future change — not the listing-page adapters.
+
 ### REQ-5.2 (partial) — display confidence level and manufacturer per result
 **Legacy:** requirements.md §4 REQ-5.2 — display "model, manufacturer, match status per parameter, confidence level, and link."
 **Current code:** `__main__.py` output prints model, per-parameter ✓/✗/? status, and the URL. The **confidence level is computed but not displayed**, and the **manufacturer is not shown** in the result line. (The implemented parts are documented in `cli-result-output`.)

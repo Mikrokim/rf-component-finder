@@ -72,7 +72,7 @@ PARAMETERS: dict[str, ParamDef] = {
         label="Supply voltage (VDD)",
         canonical_unit="V",
         units=["V"],
-        comparison="between",
+        comparison="contains",
         applies_to=["amplifier"],
     ),
     "Size": ParamDef(

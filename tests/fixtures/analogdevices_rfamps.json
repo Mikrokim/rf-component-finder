@@ -8,7 +8,9 @@
       "2922": {"value": ["40"], "displayValue": "40 dBm"},
       "2913": {"value": [""], "displayValue": ""},
       "2921": {"value": ["3.1"], "displayValue": "3.1 dB"},
-      "4709": {"value": [""], "displayValue": ""}
+      "4709": {"value": [""], "displayValue": ""},
+      "1516": {"value": ["4.75"], "displayValue": "4.75 V"},
+      "1517": {"value": ["5.25"], "displayValue": "5.25 V"}
     },
     {
       "0": {"value": ["ADL5320"], "displayValue": "ADL5320"},
