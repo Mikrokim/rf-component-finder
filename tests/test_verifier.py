@@ -168,6 +168,45 @@ class TestContainsComparison:
 
 
 # ---------------------------------------------------------------------------
+# 7a2. contains against a DISCRETE list candidate (e.g. VDD "3, 5, 8"):
+#      PASS iff at least one supported option falls in the requested band.
+# ---------------------------------------------------------------------------
+
+class TestContainsDiscreteList:
+    def test_requested_value_is_a_supported_option(self):
+        """VDD request 5 V, part supports {3, 5, 8} → 5 is offered → PASS."""
+        spec = _make_spec(_range_constraint("VDD", 5.0, 5.0, "V"))
+        cand = _make_candidate({"VDD": RawValue([3.0, 5.0, 8.0], "V")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
+    def test_requested_value_between_options_fails(self):
+        """VDD request 4 V, part supports {3, 5, 8} → 4 is NOT offered → FAIL.
+
+        (A (3, 8) range would have wrongly PASSED — the whole point of the list.)
+        """
+        spec = _make_spec(_range_constraint("VDD", 4.0, 4.0, "V"))
+        cand = _make_candidate({"VDD": RawValue([3.0, 5.0, 8.0], "V")})
+        assert verify(spec, cand).verdicts[0].status == "FAIL"
+
+    def test_requested_band_covers_an_option(self):
+        """A request band 4–6 V catches the 5 V option → PASS."""
+        spec = _make_spec(_range_constraint("VDD", 4.0, 6.0, "V"))
+        cand = _make_candidate({"VDD": RawValue([3.0, 5.0, 8.0], "V")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
+    def test_requested_band_misses_every_option(self):
+        """A request band 9–10 V catches none of {3, 5, 8} → FAIL."""
+        spec = _make_spec(_range_constraint("VDD", 9.0, 10.0, "V"))
+        cand = _make_candidate({"VDD": RawValue([3.0, 5.0, 8.0], "V")})
+        assert verify(spec, cand).verdicts[0].status == "FAIL"
+
+    def test_single_option_list(self):
+        spec = _make_spec(_range_constraint("VDD", 5.0, 5.0, "V"))
+        cand = _make_candidate({"VDD": RawValue([5.0], "V")})
+        assert verify(spec, cand).verdicts[0].status == "PASS"
+
+
+# ---------------------------------------------------------------------------
 # 7b. between comparison — scalar value must fall within [low, high]
 # ---------------------------------------------------------------------------
 

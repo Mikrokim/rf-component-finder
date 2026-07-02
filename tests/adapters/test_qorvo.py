@@ -76,9 +76,12 @@ def test_vdd_single_value() -> None:
     assert _by("QPA2311").raw_params["VDD"] == RawValue((30.0, 30.0), "V")
 
 
-def test_vdd_multi_value_min_max() -> None:
-    """A multi-option supply '3, 5, 8' becomes the (min, max) band."""
-    assert _by("CMDDIE").raw_params["VDD"] == RawValue((3.0, 8.0), "V")
+def test_vdd_multi_value_is_discrete_list() -> None:
+    """A multi-option supply '3, 5, 8' is kept as a discrete list, not a range.
+
+    (A (3, 8) band would wrongly accept 4 V; the part supports 3/5/8 V only.)
+    """
+    assert _by("CMDDIE").raw_params["VDD"] == RawValue([3.0, 5.0, 8.0], "V")
 
 
 # ---------------------------------------------------------------------------
@@ -181,14 +184,17 @@ def test_num_thousands_vs_list() -> None:
 
 
 def test_vdd_range_and_single() -> None:
+    """A 'to' range and a single value are both continuous (low, high) tuples."""
     assert _vdd("2 to 4.5") == (2.0, 4.5)
     assert _vdd("30") == (30.0, 30.0)
+    assert _vdd("18 Vdc") == (18.0, 18.0)
 
 
-def test_vdd_multi_value_and_slash() -> None:
-    assert _vdd("3, 5, 8") == (3.0, 8.0)
-    assert _vdd("5/8") == (5.0, 8.0)
-    assert _vdd("6, 28") == (6.0, 28.0)
+def test_vdd_multi_value_and_slash_are_discrete_lists() -> None:
+    """Comma/slash supplies are discrete options → a list (sorted, de-duped)."""
+    assert _vdd("3, 5, 8") == [3.0, 5.0, 8.0]
+    assert _vdd("5/8") == [5.0, 8.0]
+    assert _vdd("6, 28") == [6.0, 28.0]
 
 
 def test_vdd_sentinels_return_none() -> None:
