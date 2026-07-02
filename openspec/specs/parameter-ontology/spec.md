@@ -20,7 +20,7 @@ The dictionary SHALL define exactly these ten parameters, each applicable to `am
 | `NF` | `Noise figure` | `dB` | `["dB"]` | `max` |
 | `IP3` | `IP3` | `dBm` | `["dBm"]` | `min` |
 | `Psat` | `Saturated power (Psat)` | `dBm` | `["dBm", "W", "mW"]` | `min` |
-| `VDD` | `Supply voltage (VDD)` | `V` | `["V"]` | `between` |
+| `VDD` | `Supply voltage (VDD)` | `V` | `["V"]` | `contains` |
 | `Size` | `Size` | `mm` | `["mm"]` | `max` |
 | `MSL` | `MSL level (1–5)` | `""` (dimensionless) | `[""]` | `max` |
 | `Temperature` | `Operating temperature` | `degC` | `["degC"]` | `contains` |
@@ -31,7 +31,7 @@ The dictionary SHALL define exactly these ten parameters, each applicable to `am
 
 - **WHEN** the `PARAMETERS` dictionary is read
 - **THEN** it contains exactly the ten entries `freq_range`, `P1dB`, `Gain`, `NF`, `IP3`, `Psat`, `VDD`, `Size`, `MSL`, `Temperature`
-- **AND** their `comparison` values are `contains`, `min`, `min`, `max`, `min`, `min`, `between`, `max`, `max`, `contains` respectively
+- **AND** their `comparison` values are `contains`, `min`, `min`, `max`, `min`, `min`, `contains`, `max`, `max`, `contains` respectively
 - **AND** their `canonical_unit` values are `GHz`, `dBm`, `dB`, `dB`, `dBm`, `dBm`, `V`, `mm`, `""`, `degC` respectively
 
 #### Scenario: Canonical unit listed first in the units list

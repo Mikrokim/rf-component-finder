@@ -97,10 +97,10 @@ def test_adapter_raises_adaptererror_on_bad_html():
 
 
 def test_all_params_present_row():
-    """ZX60-P103LN+ has all 6 RF params present in raw_params."""
+    """ZX60-P103LN+ has all RF params plus VDD present in raw_params."""
     candidates = _load_candidates()
     c = next(x for x in candidates if x.model == "ZX60-P103LN+")
-    expected_keys = {"freq_range", "Gain", "NF", "P1dB", "Psat", "IP3"}
+    expected_keys = {"freq_range", "Gain", "NF", "P1dB", "Psat", "IP3", "VDD"}
     assert expected_keys <= c.raw_params.keys(), (
         f"Missing keys: {expected_keys - c.raw_params.keys()}"
     )
@@ -129,6 +129,13 @@ def test_adca3270_nf_present():
     candidates = _load_candidates()
     c = next(x for x in candidates if x.model == "ADCA3270")
     assert c.raw_params["NF"] == RawValue(value=3.0, unit="dB")
+
+
+def test_vdd_parsed_from_voltage_column():
+    """VDD from the 'Voltage (V)' column is stored as a degenerate (v, v) range."""
+    candidates = _load_candidates()
+    c = next(x for x in candidates if x.model == "ADCA3270")
+    assert c.raw_params["VDD"] == RawValue(value=(24.0, 24.0), unit="V")
 
 
 def test_dc_low_freq_parsed_as_zero():

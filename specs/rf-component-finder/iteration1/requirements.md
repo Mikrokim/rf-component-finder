@@ -74,7 +74,7 @@ a single manufacturer (Mini-Circuits).**
 - **REQ-1.2** — WHEN a component type is selected, the system SHALL derive the available parameter fields from the ontology, showing only the parameters that apply to that component type.
 - **REQ-1.3** — The system SHALL present the component type as a selection from the ontology's known component types (the user does not type the type as free text).
 - **REQ-1.4** — For each parameter field, the system SHALL default to the parameter's canonical unit and allow selecting an equivalent unit; the chosen unit SHALL be recorded together with the value.
-- **REQ-1.5** — For range parameters — both `contains` (e.g. `freq_range`, `Temperature`) and bounded-scalar `between` (e.g. `VDD`) — the system SHALL provide separate `min` and `max` input fields. For a `between` parameter either side may be omitted: an omitted `min` defaults to `-∞` and an omitted `max` defaults to `+∞` (a one-sided range — an omitted bound imposes no restriction).
+- **REQ-1.5** — For range parameters — both `contains` (e.g. `freq_range`, `Temperature`, `VDD`) and bounded-scalar `between` — the system SHALL provide separate `min` and `max` input fields. For a `between` parameter either side may be omitted: an omitted `min` defaults to `-∞` and an omitted `max` defaults to `+∞` (a one-sided range — an omitted bound imposes no restriction).
 - **REQ-1.6** — The system SHALL treat empty fields as "no constraint" and include only the filled fields as constraints in the `QuerySpec`.
 - **REQ-1.7** — The system SHALL validate each field (numeric value, `min ≤ max`, value within sane bounds) and reject invalid input with a clear message, producing a valid `QuerySpec` or an explicit validation error.
 
@@ -83,7 +83,7 @@ a single manufacturer (Mini-Circuits).**
 - **REQ-2.1** — The system SHALL maintain a central dictionary defining, per parameter: canonical name, display label, canonical unit, accepted equivalent units, comparison rule, and the component types it applies to.
 - **REQ-2.2** — The system SHALL support at least the following parameters for amplifiers: frequency range (`freq_range`), P1dB, Gain, Noise Figure (NF), IP3, Psat, VDD (supply voltage), Size, MSL (moisture sensitivity level, 1–5), and operating Temperature.
 - **REQ-2.3** — The system SHALL use the ontology's display labels and applicable-parameter lists to build the form fields for the selected component type.
-- **REQ-2.4** — The system SHALL define a comparison rule per parameter: `freq_range`=`contains`, `P1dB`/`Gain`/`IP3`/`Psat`=`min` (candidate must be at least the required value), `NF`/`Size`/`MSL`=`max` (candidate must be at most the required value), `VDD`=`between` (candidate must fall within a min/max band), `Temperature`=`contains` (the part's operating temperature range must contain the required range).
+- **REQ-2.4** — The system SHALL define a comparison rule per parameter: `freq_range`=`contains`, `P1dB`/`Gain`/`IP3`/`Psat`=`min` (candidate must be at least the required value), `NF`/`Size`/`MSL`=`max` (candidate must be at most the required value), `VDD`=`contains` (the part's supply-voltage range must contain the requested voltage), `Temperature`=`contains` (the part's operating temperature range must contain the required range).
 - **REQ-2.5** — The system SHALL convert between equivalent units (MHz↔GHz, dBm↔W, mW↔dBm), and SHALL treat dimensionless ratio units (dB, for Gain/NF) as an identity conversion (dB→dB), through a dedicated conversion module.
 
 ### REQ-3 — Site Adapter (generic)
