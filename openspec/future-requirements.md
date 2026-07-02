@@ -20,8 +20,8 @@
 
 ### REQ-3.3 (partial) — adapter source preference (API → parametric → scrape)
 **Legacy:** requirements.md §4 REQ-3.3 — "prefer an official API if one exists; otherwise a parametric search via URL; otherwise scraping the results table."
-**Current code:** The Mini-Circuits adapter only scrapes the results table (single `httpx` GET). No API/parametric-preference decision is implemented. Per `t8-plan.md`, Mini-Circuits exposes no usable public API and no server-side filter, so the scrape path is the only viable one — the practical outcome is satisfied, but the general preference ordering is not implemented.
-**Status:** Not implemented as a general mechanism (resolved as unnecessary for Mini-Circuits). Relevant again only when adding manufacturers that do offer an API (see OQ-1).
+**Current code:** Each adapter hardcodes the single best source for its own site rather than performing a general API→parametric→scrape fallback: Mini-Circuits, AmcomUSA, and Marki scrape server-rendered HTML tables, while Analog Devices and RWM read the site's JSON endpoint/API directly. The practical outcome (use the API where one exists, otherwise scrape) is therefore realized per-adapter, but no general preference-ordering mechanism exists.
+**Status:** Not implemented as a general mechanism (each adapter chooses its own source). Now exercised across both API and scrape sources; a dynamic preference layer remains unbuilt (see OQ-1).
 
 ### REQ-5.2 (partial) — display confidence level and manufacturer per result
 **Legacy:** requirements.md §4 REQ-5.2 — display "model, manufacturer, match status per parameter, confidence level, and link."

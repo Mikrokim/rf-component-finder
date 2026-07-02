@@ -20,7 +20,7 @@
 
 ### OQ-1 — Full manufacturer list
 **Question:** What are the 10 manufacturers the full system must eventually support?
-**Why it matters:** Drives the adapter roadmap. Does not block current behavior — only Mini-Circuits (`amplifier`) is implemented today (see `manufacturer-adapters`).
+**Why it matters:** Drives the adapter roadmap. Does not block current behavior — five `amplifier` adapters are implemented today (Mini-Circuits, Analog Devices, AmcomUSA, Marki, RWM; see `manufacturer-adapters`).
 **Status:** 🟡 Open.
 
 ### OQ-2 — `Candidate.url` value choice
