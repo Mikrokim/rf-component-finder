@@ -18,18 +18,18 @@ result title alone.
 
 The full system is designed around two search paths: (a) adapters for the
 manufacturers on the list, (b) smart free-form search across additional
-manufacturers. **In this iteration we build path (a) only, for amplifiers only, with
-a single manufacturer (Mini-Circuits).**
+manufacturers. **In this iteration we build path (a) only, for amplifiers only,
+starting with two manufacturers (Mini-Circuits and AmcomUSA).**
 
 ### Scope
 
 **In scope for this iteration:**
 - Single component type: **amplifier**
-- Single manufacturer: **Mini-Circuits**
+- Manufacturers: **Mini-Circuits** and **AmcomUSA**
 - Structured form input → structured data (`QuerySpec`)
 - Ontology of parameters relevant to amplifiers (drives the form fields)
-- Real search against Mini-Circuits and verification of parameters against the request
-- Verification source is the manufacturer parametric **table only** (PDF datasheet parsing deferred — see OQ-3)
+- Real search against Mini-Circuits and AmcomUSA and verification of parameters against the request
+- Verification source is primarily the manufacturer parametric **table**; for a parameter a table omits (e.g. OIP3 on AmcomUSA), an adapter MAY recover it from the product **PDF datasheet** (optional, targeted enrichment — see REQ-3.7/3.8)
 - Clean CLI output
 
 **Out of scope (future phases, documented to prevent ambiguity):**
@@ -86,7 +86,7 @@ a single manufacturer (Mini-Circuits).**
 - **REQ-2.4** — The system SHALL define a comparison rule per parameter: `freq_range`=`contains`, `P1dB`/`Gain`/`IP3`/`Psat`=`min` (candidate must be at least the required value), `NF`/`Size`/`MSL`=`max` (candidate must be at most the required value), `VDD`=`between` (candidate must fall within a min/max band), `Temperature`=`contains` (the part's operating temperature range must contain the required range).
 - **REQ-2.5** — The system SHALL convert between equivalent units (MHz↔GHz, dBm↔W, mW↔dBm), and SHALL treat dimensionless ratio units (dB, for Gain/NF) as an identity conversion (dB→dB), through a dedicated conversion module.
 
-### REQ-3 — Site Adapter (generic)
+### REQ-3 — Site Adapters (generic; Mini-Circuits, AmcomUSA, Analog Devices)
 
 > Manufacturer-specific refinements live in that adapter's own spec — e.g.
 > [adapters/minicircuits/requirements.md](../adapters/minicircuits/requirements.md).
@@ -97,6 +97,8 @@ a single manufacturer (Mini-Circuits).**
 - **REQ-3.4** — WHEN a results table is received, a site adapter SHALL map the manufacturer's column headers to the canonical parameter names in the ontology.
 - **REQ-3.5** — A site adapter SHALL return a list of candidate components, each with a model number, manufacturer, link, and raw parameter values + units.
 - **REQ-3.6** — IF the search fails (network/site structure change), a site adapter SHALL return a clear error with context, and not crash silently.
+- **REQ-3.7** — The AmcomUSA adapter SHALL scrape every amplifier category table (`table#allPnTable`, plus the card-only Rackmount HPAs page), normalising MHz/GHz frequency and mapping per-category headers (e.g. `Pout`→`Psat`, `Vd`/`Bias`→`VDD`) to canonical names. A single category-page failure SHALL be skipped so the remaining categories still return (NFR-4).
+- **REQ-3.8** — Every parameter a manufacturer's table omits but its product datasheet carries SHALL be recoverable from the PDF (on AmcomUSA: IP3, Size, MSL and operating Temperature). An adapter declares these in `datasheet_params`; the shared engine recovers them, supporting both scalar parameters (e.g. IP3, MSL, Size) and range parameters parsed as `(low, high)` for the `contains` rule (e.g. Temperature), and MAY read a value's unit inline (e.g. Size in mm vs inches) for the Verifier to normalise. The SearchManager SHALL load a datasheet only when the search constrains such a parameter (`needs_datasheet`) and only for candidates whose other required parameters already `PASS`; recovered values SHALL NOT overwrite table values and SHALL raise the candidate's confidence source to `datasheet`.
 
 ### REQ-4 — Result Verification (Verifier)
 

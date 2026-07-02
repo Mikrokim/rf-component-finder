@@ -140,6 +140,26 @@ class TestIdentityConversion:
         assert to_canonical(0.0, "dBm", "dBm") == pytest.approx(0.0)
 
 
+class TestLengthToMm:
+    """Length → mm: mm identity, plus inch/cm/mil for datasheet Size values."""
+
+    def test_mm_identity(self):
+        assert to_canonical(4.0, "mm", "mm") == pytest.approx(4.0)
+
+    def test_inch_to_mm(self):
+        assert to_canonical(1.0, "in", "mm") == pytest.approx(25.4)
+
+    def test_cm_to_mm(self):
+        assert to_canonical(2.0, "cm", "mm") == pytest.approx(20.0)
+
+    def test_mil_to_mm(self):
+        assert to_canonical(100.0, "mil", "mm") == pytest.approx(2.54)
+
+    def test_unknown_length_unit_raises(self):
+        with pytest.raises(ValueError, match="Unknown length unit"):
+            to_canonical(1.0, "furlong", "mm")
+
+
 class TestUnsupportedCanonical:
     def test_unknown_canonical_raises(self):
         with pytest.raises(ValueError, match="Unsupported canonical unit"):

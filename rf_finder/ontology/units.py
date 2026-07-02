@@ -11,6 +11,10 @@ Power canonical unit: dBm
 
 Ratio canonical unit: dB
     dB → dB            (identity; dB is a dimensionless ratio, e.g. gain, NF)
+
+Length canonical unit: mm
+    mm, cm, in, mil → mm   (the form offers mm; a datasheet may report inches,
+                            which the Verifier normalises here for Size)
 """
 
 import math
@@ -24,6 +28,17 @@ _FREQ_TO_GHZ: dict[str, float] = {
     "kHz": 1e-6,
     "MHz": 1e-3,
     "GHz": 1.0,
+}
+
+# ---------------------------------------------------------------------------
+# Length: all → mm
+# ---------------------------------------------------------------------------
+
+_LENGTH_TO_MM: dict[str, float] = {
+    "mm":  1.0,
+    "cm":  10.0,
+    "in":  25.4,
+    "mil": 0.0254,
 }
 
 # ---------------------------------------------------------------------------
@@ -93,6 +108,15 @@ def to_canonical(value: float, from_unit: str, canonical: str) -> float:
             )
         return value
 
+    if canonical == "mm":
+        factor = _LENGTH_TO_MM.get(from_unit)
+        if factor is None:
+            raise ValueError(
+                f"Unknown length unit '{from_unit}'; "
+                f"expected one of: {', '.join(_LENGTH_TO_MM)}"
+            )
+        return value * factor
+
     raise ValueError(
-        f"Unsupported canonical unit '{canonical}'; expected 'GHz', 'dBm', or 'dB'"
+        f"Unsupported canonical unit '{canonical}'; expected 'GHz', 'dBm', 'dB', or 'mm'"
     )

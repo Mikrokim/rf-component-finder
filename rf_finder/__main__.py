@@ -9,10 +9,11 @@ from __future__ import annotations
 
 def main() -> None:
     from rf_finder.adapters.minicircuits import MiniCircuitsAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.amcomusa import AmcomUSAAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.analogdevices import AnalogDevicesAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.base import ADAPTERS
     from rf_finder.form import build_form, collect
-    from rf_finder.verifier import verify
+    from rf_finder.manager import SearchManager
 
     # ── 1. Form ──────────────────────────────────────────────────────────────
     print("\n=== RF Component Finder ===\n")
@@ -47,26 +48,22 @@ def main() -> None:
     if not spec.constraints:
         print("  (no filters — returning all results)")
 
-    # ── 2. Search ─────────────────────────────────────────────────────────────
-    print("\nFetching from Mini-Circuits… (this may take a few seconds)\n")
+    # ── 2. Search + enrich + verify (delegated to the manager) ────────────────
+    # The SearchManager owns the whole flow: run each applicable adapter, recover
+    # datasheet-only params where that can complete a match, and verify. Per-
+    # adapter failures come back as `errors` so one site going down isn't fatal.
+    print("\nFetching from manufacturers… (this may take a few seconds)\n")
 
-    candidates = []
-    for adapter in ADAPTERS.values():
-        if spec.component_type not in adapter.supported_components:
-            continue
-        try:
-            candidates.extend(adapter.search(spec))
-        except Exception as e:
-            print(f"  [!] {adapter.manufacturer}: {e}")
+    verified, errors = SearchManager(list(ADAPTERS.values())).run(spec)
 
-    if not candidates:
+    for err in errors:
+        print(f"  [!] {err}")
+
+    if not verified:
         print("No candidates returned.")
         return
 
-    print(f"Retrieved {len(candidates)} raw candidates.")
-
-    # ── 3. Verify ─────────────────────────────────────────────────────────────
-    verified = [verify(spec, c) for c in candidates]
+    print(f"Retrieved {len(verified)} candidates.")
 
     # ── 4. Simple output ──────────────────────────────────────────────────────
     order = {"match": 0, "partial": 1, "fail": 2}
