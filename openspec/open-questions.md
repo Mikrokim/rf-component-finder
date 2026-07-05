@@ -21,7 +21,7 @@
 
 ### OQ-1 — Full manufacturer list
 **Question:** What are the 10 manufacturers the full system must eventually support?
-**Why it matters:** Drives the adapter roadmap. Does not block current behavior — five amplifier adapters are implemented today (Mini-Circuits, Analog Devices, Qorvo, VectraWave, Guerrilla RF); the full manufacturer target list is still undetermined (see `manufacturer-adapters`).
+**Why it matters:** Drives the adapter roadmap. Does not block current behavior — several `amplifier` adapters are implemented today (Mini-Circuits, Analog Devices, AmcomUSA, Marki, RWM, Qorvo, VectraWave, Guerrilla RF,macom, 3rwaves, microchip, ums; see `manufacturer-adapters` for the full list); the full manufacturer target list is still undetermined.
 **Status:** 🟡 Open.
 
 ### OQ-2 — `Candidate.url` value choice

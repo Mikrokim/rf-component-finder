@@ -1,0 +1,507 @@
+{
+ "success": true,
+ "data": [
+  {
+   "category": {
+    "id": 67,
+    "name": "Low Noise Amplifiers (bare die)"
+   },
+   "field_definitions": [
+    {
+     "id": 10,
+     "name": "Type"
+    },
+    {
+     "id": 11,
+     "name": "PN"
+    },
+    {
+     "id": 1,
+     "name": "Freq Low (GHz)"
+    },
+    {
+     "id": 2,
+     "name": "Freq High (GHz)"
+    },
+    {
+     "id": 3,
+     "name": "Gain (dB)"
+    },
+    {
+     "id": 4,
+     "name": "NF (dB)"
+    },
+    {
+     "id": 5,
+     "name": "P1dB (dBm)"
+    },
+    {
+     "id": 6,
+     "name": "Voltage (V)"
+    },
+    {
+     "id": 7,
+     "name": "Current (mA)"
+    },
+    {
+     "id": 8,
+     "name": "Package"
+    },
+    {
+     "id": 9,
+     "name": "Datasheet"
+    }
+   ],
+   "products": [
+    {
+     "id": 64,
+     "name": "RWLA1001",
+     "field_values": [
+      {
+       "field_id": 10,
+       "field_name": "Type",
+       "value": "Low Noise Amplifier"
+      },
+      {
+       "field_id": 11,
+       "field_name": "PN",
+       "value": "RWLA1001"
+      },
+      {
+       "field_id": 1,
+       "field_name": "Freq Low (GHz)",
+       "value": "0.01"
+      },
+      {
+       "field_id": 2,
+       "field_name": "Freq High (GHz)",
+       "value": "3.5"
+      },
+      {
+       "field_id": 3,
+       "field_name": "Gain (dB)",
+       "value": "30.5"
+      },
+      {
+       "field_id": 4,
+       "field_name": "NF (dB)",
+       "value": "0.6"
+      },
+      {
+       "field_id": 5,
+       "field_name": "P1dB (dBm)",
+       "value": "18"
+      },
+      {
+       "field_id": 6,
+       "field_name": "Voltage (V)",
+       "value": "5"
+      },
+      {
+       "field_id": 7,
+       "field_name": "Current (mA)",
+       "value": "70"
+      },
+      {
+       "field_id": 8,
+       "field_name": "Package",
+       "value": "die"
+      },
+      {
+       "field_id": 9,
+       "field_name": "Datasheet",
+       "value": "https://www.rwmmic.com/index.php?r=pdf%2Fdownload&filename=RWLA1001.pdf"
+      }
+     ]
+    },
+    {
+     "id": 65,
+     "name": "RWLA1002",
+     "field_values": [
+      {
+       "field_id": 10,
+       "field_name": "Type",
+       "value": "Low Noise Amplifier"
+      },
+      {
+       "field_id": 11,
+       "field_name": "PN",
+       "value": "RWLA1002"
+      },
+      {
+       "field_id": 1,
+       "field_name": "Freq Low (GHz)",
+       "value": "2.7"
+      },
+      {
+       "field_id": 2,
+       "field_name": "Freq High (GHz)",
+       "value": "3.5"
+      },
+      {
+       "field_id": 3,
+       "field_name": "Gain (dB)",
+       "value": "28"
+      },
+      {
+       "field_id": 4,
+       "field_name": "NF (dB)",
+       "value": "0.6"
+      },
+      {
+       "field_id": 5,
+       "field_name": "P1dB (dBm)",
+       "value": "12.5"
+      },
+      {
+       "field_id": 6,
+       "field_name": "Voltage (V)",
+       "value": "5"
+      },
+      {
+       "field_id": 7,
+       "field_name": "Current (mA)",
+       "value": "38"
+      },
+      {
+       "field_id": 8,
+       "field_name": "Package",
+       "value": "die"
+      },
+      {
+       "field_id": 9,
+       "field_name": "Datasheet",
+       "value": "https://www.rwmmic.com/index.php?r=pdf%2Fdownload&filename=RWLA1002.pdf"
+      }
+     ]
+    }
+   ],
+   "product_count": 2
+  },
+  {
+   "category": {
+    "id": 76,
+    "name": "GaN Power Amplifiers (bare die)"
+   },
+   "field_definitions": [
+    {
+     "id": 58,
+     "name": "Type"
+    },
+    {
+     "id": 59,
+     "name": "PN"
+    },
+    {
+     "id": 60,
+     "name": "Freq Low (GHz)"
+    },
+    {
+     "id": 61,
+     "name": "Freq High (GHz)"
+    },
+    {
+     "id": 62,
+     "name": "Small Signal Gain (dB)"
+    },
+    {
+     "id": 63,
+     "name": "Power Gain (dB)"
+    },
+    {
+     "id": 64,
+     "name": "Psat (dBm)"
+    },
+    {
+     "id": 65,
+     "name": "PAE"
+    },
+    {
+     "id": 66,
+     "name": "Vd (V)"
+    },
+    {
+     "id": 67,
+     "name": "Id (mA)"
+    },
+    {
+     "id": 68,
+     "name": "Package"
+    },
+    {
+     "id": 69,
+     "name": "Datasheet"
+    }
+   ],
+   "products": [
+    {
+     "id": 382,
+     "name": "RW5001",
+     "field_values": [
+      {
+       "field_id": 58,
+       "field_name": "Type",
+       "value": "GaN Power Amplifier"
+      },
+      {
+       "field_id": 59,
+       "field_name": "PN",
+       "value": "RW5001"
+      },
+      {
+       "field_id": 60,
+       "field_name": "Freq Low (GHz)",
+       "value": "0.8"
+      },
+      {
+       "field_id": 61,
+       "field_name": "Freq High (GHz)",
+       "value": "2"
+      },
+      {
+       "field_id": 62,
+       "field_name": "Small Signal Gain (dB)",
+       "value": "29.5"
+      },
+      {
+       "field_id": 63,
+       "field_name": "Power Gain (dB)",
+       "value": "19.5"
+      },
+      {
+       "field_id": 64,
+       "field_name": "Psat (dBm)",
+       "value": "44.5"
+      },
+      {
+       "field_id": 65,
+       "field_name": "PAE",
+       "value": "55%"
+      },
+      {
+       "field_id": 66,
+       "field_name": "Vd (V)",
+       "value": "28"
+      },
+      {
+       "field_id": 67,
+       "field_name": "Id (mA)",
+       "value": "2300"
+      },
+      {
+       "field_id": 68,
+       "field_name": "Package",
+       "value": "die"
+      },
+      {
+       "field_id": 69,
+       "field_name": "Datasheet",
+       "value": "https://www.rwmmic.com/index.php?r=pdf%2Fdownload&filename=RW5001.pdf"
+      }
+     ]
+    },
+    {
+     "id": 383,
+     "name": "RW5002",
+     "field_values": [
+      {
+       "field_id": 58,
+       "field_name": "Type",
+       "value": "GaN Power Amplifier"
+      },
+      {
+       "field_id": 59,
+       "field_name": "PN",
+       "value": "RW5002"
+      },
+      {
+       "field_id": 60,
+       "field_name": "Freq Low (GHz)",
+       "value": "2.7"
+      },
+      {
+       "field_id": 61,
+       "field_name": "Freq High (GHz)",
+       "value": "3.5"
+      },
+      {
+       "field_id": 62,
+       "field_name": "Small Signal Gain (dB)",
+       "value": "31"
+      },
+      {
+       "field_id": 63,
+       "field_name": "Power Gain (dB)",
+       "value": "21"
+      },
+      {
+       "field_id": 64,
+       "field_name": "Psat (dBm)",
+       "value": "44"
+      },
+      {
+       "field_id": 65,
+       "field_name": "PAE",
+       "value": "62%"
+      },
+      {
+       "field_id": 66,
+       "field_name": "Vd (V)",
+       "value": "28"
+      },
+      {
+       "field_id": 67,
+       "field_name": "Id (mA)",
+       "value": "1750"
+      },
+      {
+       "field_id": 68,
+       "field_name": "Package",
+       "value": "die"
+      },
+      {
+       "field_id": 69,
+       "field_name": "Datasheet",
+       "value": "https://www.rwmmic.com/index.php?r=pdf%2Fdownload&filename=RW5002.pdf"
+      }
+     ]
+    }
+   ],
+   "product_count": 2
+  },
+  {
+   "category": {
+    "id": 79,
+    "name": "PIN Switches"
+   },
+   "field_definitions": [
+    {
+     "id": 115,
+     "name": "Type"
+    },
+    {
+     "id": 116,
+     "name": "PN"
+    },
+    {
+     "id": 117,
+     "name": "Description"
+    },
+    {
+     "id": 118,
+     "name": "Path"
+    },
+    {
+     "id": 119,
+     "name": "Freq Low (GHz)"
+    },
+    {
+     "id": 120,
+     "name": "Freq High (GHz)"
+    },
+    {
+     "id": 121,
+     "name": "Insertion Loss (dB)"
+    },
+    {
+     "id": 122,
+     "name": "Isolation (dB)"
+    },
+    {
+     "id": 123,
+     "name": "P1dB (dBm)"
+    },
+    {
+     "id": 124,
+     "name": "Switching Speed (ns)"
+    },
+    {
+     "id": 125,
+     "name": "Control Voltage (V)"
+    },
+    {
+     "id": 126,
+     "name": "Package"
+    },
+    {
+     "id": 127,
+     "name": "Datasheet"
+    }
+   ],
+   "products": [
+    {
+     "id": 480,
+     "name": "RWSWP1001",
+     "field_values": [
+      {
+       "field_id": 115,
+       "field_name": "Type",
+       "value": "PIN Switches"
+      },
+      {
+       "field_id": 116,
+       "field_name": "PN",
+       "value": "RWSWP1001"
+      },
+      {
+       "field_id": 117,
+       "field_name": "Description",
+       "value": "Reflective"
+      },
+      {
+       "field_id": 118,
+       "field_name": "Path",
+       "value": "SP4T"
+      },
+      {
+       "field_id": 119,
+       "field_name": "Freq Low (GHz)",
+       "value": "0.05"
+      },
+      {
+       "field_id": 120,
+       "field_name": "Freq High (GHz)",
+       "value": "20"
+      },
+      {
+       "field_id": 121,
+       "field_name": "Insertion Loss (dB)",
+       "value": "0.7"
+      },
+      {
+       "field_id": 122,
+       "field_name": "Isolation (dB)",
+       "value": "54"
+      },
+      {
+       "field_id": 123,
+       "field_name": "P1dB (dBm)",
+       "value": "30"
+      },
+      {
+       "field_id": 124,
+       "field_name": "Switching Speed (ns)",
+       "value": "20"
+      },
+      {
+       "field_id": 125,
+       "field_name": "Control Voltage (V)",
+       "value": "+5/-5"
+      },
+      {
+       "field_id": 126,
+       "field_name": "Package",
+       "value": "die"
+      },
+      {
+       "field_id": 127,
+       "field_name": "Datasheet",
+       "value": "https://www.rwmmic.com/index.php?r=pdf%2Fdownload&filename=RWSWP1001.pdf"
+      }
+     ]
+    }
+   ],
+   "product_count": 1
+  }
+ ]
+}

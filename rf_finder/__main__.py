@@ -9,6 +9,10 @@ from __future__ import annotations
 
 def main() -> None:
     from rf_finder.adapters.minicircuits import MiniCircuitsAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.amcomusa import AmcomUSAAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.analogdevices import AnalogDevicesAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.marki import MarkiMicrowaveAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.rwmmic import RwmmicAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.macom import MacomAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.analogdevices import AnalogDevicesAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.ums import UmsAdapter  # noqa: F401 (triggers @register)
