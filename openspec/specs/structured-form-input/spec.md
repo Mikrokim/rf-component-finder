@@ -10,11 +10,11 @@ Define how the tool turns a structured, ontology-driven form into a `QuerySpec`.
 
 The system SHALL provide `build_form(component_type) -> FormSchema`. It SHALL emit one `Field` per ontology parameter that applies to `component_type` (via `params_for`), each carrying `canonical_name`, `label`, `comparison`, `canonical_unit`, and `units` (canonical unit first). Range parameters (`comparison` in `contains` or `between`) SHALL be ordered before scalar parameters; within each group the ontology iteration order is preserved. IF `component_type` is not a registered component, the system SHALL raise `ValueError`.
 
-#### Scenario: Amplifier form has six fields, range first
+#### Scenario: Amplifier form has ten fields, contains first
 
 - **WHEN** `build_form("amplifier")` is called
-- **THEN** the returned `FormSchema.component_type` is `"amplifier"` and it has exactly 6 fields
-- **AND** the first field is `freq_range` with `comparison == "contains"`
+- **THEN** the returned `FormSchema.component_type` is `"amplifier"` and it has exactly 10 fields
+- **AND** the first three fields are the `contains` parameters `freq_range`, `VDD`, `Temperature` (in that order)
 - **AND** every remaining field has `comparison != "contains"`
 
 #### Scenario: Each field exposes canonical-first units and a label
@@ -47,15 +47,26 @@ The system SHALL provide `collect(schema, *, answers=None) -> QuerySpec`. When `
 - **WHEN** `collect` runs with `P1dB.min=""`, `P1dB.max=""`, `P1dB.unit="dBm"`
 - **THEN** no constraint with `canonical_name == "P1dB"` is present
 
-### Requirement: Range collection for contains and between rules
+### Requirement: Range collection for contains, between, min, and max rules
 
-For a `contains` field the system SHALL require both bounds: if only one of min/max is supplied, the field SHALL be skipped (a partial `contains` range is not a constraint). For a `between` field either side MAY be omitted: an omitted min SHALL default to `-inf` and an omitted max to `+inf` (a one-sided, open range). In all range cases, IF the parsed min is greater than the parsed max, the system SHALL raise `ValueError`.
+Every parameter except `eq` SHALL be collected as a min/max range field, so the user MAY enter a min, a max, or both. For a `contains` field the system SHALL require both bounds: if only one of min/max is supplied, the field SHALL be skipped (a partial `contains` range is not a constraint). For a `between`, `min`, or `max` field either side MAY be omitted: an omitted min SHALL default to `-inf` and an omitted max to `+inf` (a one-sided, open range) — filling only the natural side of a `min`/`max` parameter reproduces its namesake bound (a `min` param with only a min ⇒ "≥ x"; a `max` param with only a max ⇒ "≤ x"), while supplying the other side caps or brackets the value. A `contains` field is emitted as a `contains` constraint; every `between`/`min`/`max` field is emitted as a (possibly one-sided) `between` constraint. In all range cases, IF the parsed min is greater than the parsed max, the system SHALL raise `ValueError`.
 
 #### Scenario: Between with one open side
 
 - **WHEN** `collect` runs with `P1dB.min=26`, `P1dB.unit=dBm` (no max)
 - **THEN** the `P1dB` constraint has `range == (26.0, inf)`
 - **AND WHEN** instead `P1dB.max=30` is given with no min, the `P1dB` constraint has `range == (-inf, 30.0)`
+
+#### Scenario: A min-rule parameter is collected as a min/max range
+
+- **WHEN** `collect` runs with `Gain.min=20`, `Gain.max=30`, `Gain.unit=dB`
+- **THEN** the `Gain` constraint has `comparison == "between"` and `range == (20.0, 30.0)`
+- **AND WHEN** only `Gain.min=20` is given, the constraint's `range == (20.0, inf)`
+
+#### Scenario: A max-rule parameter is collected as a min/max range
+
+- **WHEN** `collect` runs with `NF.max=3`, `NF.unit=dB` (no min)
+- **THEN** the `NF` constraint has `comparison == "between"` and `range == (-inf, 3.0)`
 
 #### Scenario: Between with neither side is skipped
 

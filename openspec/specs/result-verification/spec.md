@@ -90,7 +90,7 @@ The system SHALL set `VerifiedCandidate.confidence` from `candidate.source`: `ta
 
 ### Requirement: Between comparison (band membership)
 
-For a `between` constraint the candidate carries a single scalar value and the requirement is a `(low, high)` band. The found value and both bounds SHALL be normalized to the parameter's canonical unit, and the verdict SHALL be `PASS` when `low <= value <= high`, otherwise `FAIL`. Either bound MAY be open (`-inf` / `+inf`), giving a one-sided range. Of the current amplifier parameters only `VDD` uses `between`.
+For a `between` constraint the candidate carries a single scalar value and the requirement is a `(low, high)` band. The found value and both bounds SHALL be normalized to the parameter's canonical unit, and the verdict SHALL be `PASS` when `low <= value <= high`, otherwise `FAIL`. Either bound MAY be open (`-inf` / `+inf`), giving a one-sided range; an open bound is unit-independent and SHALL NOT be run through unit conversion (converting e.g. `-inf` from watts to dBm would take `log10` of a non-positive number and raise). No ontology parameter's comparison *rule* is `between`; instead `between` constraints are produced at query time whenever a bounded-scalar parameter (`min`/`max`) is collected through the form as a range (see `structured-form-input`).
 
 #### Scenario: Value inside the band passes
 
