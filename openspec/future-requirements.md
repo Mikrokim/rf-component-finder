@@ -20,8 +20,8 @@
 
 ### REQ-3.3 (partial) — adapter source preference (API → parametric → scrape)
 **Legacy:** requirements.md §4 REQ-3.3 — "prefer an official API if one exists; otherwise a parametric search via URL; otherwise scraping the results table."
-**Current code:** The Mini-Circuits adapter only scrapes the results table (single `httpx` GET). No API/parametric-preference decision is implemented. Per `t8-plan.md`, Mini-Circuits exposes no usable public API and no server-side filter, so the scrape path is the only viable one — the practical outcome is satisfied, but the general preference ordering is not implemented.
-**Status:** Not implemented as a general mechanism (resolved as unnecessary for Mini-Circuits). Relevant again only when adding manufacturers that do offer an API (see OQ-1).
+**Current code:** Each adapter hardcodes the single best source for its own site rather than performing a general API→parametric→scrape fallback: Mini-Circuits, AmcomUSA, and Marki scrape server-rendered HTML tables, while Analog Devices and RWM read the site's JSON endpoint/API directly. The practical outcome (use the API where one exists, otherwise scrape) is therefore realized per-adapter, but no general preference-ordering mechanism exists.
+**Status:** Not implemented as a general mechanism (each adapter chooses its own source). Now exercised across both API and scrape sources; a dynamic preference layer remains unbuilt (see OQ-1).
 
 ### REQ-2.2 (partial) — Size / MSL / Temperature enrichment from datasheets
 **Legacy:** adapter specs QRV-OQ-3, VW-OQ-3, GRF-OQ-2 — `Size`, `MSL`, and `Temperature` are present only in datasheet PDFs, not on the manufacturer listing pages.
@@ -64,3 +64,8 @@
 **Legacy:** t8-plan.md §9 (OQ-2) — log a warning when the scraped row count deviates significantly (e.g. >20%) between runs, as a possible site-redesign signal.
 **Current code:** The adapter performs no run-to-run row-count comparison.
 **Status:** Not implemented. Tracked as OQ-3 in `open-questions.md`.
+
+### Datasheet-only parameters (Size / MSL / Temperature) for the iteration-2 adapters
+**Legacy:** iteration2 adapter plans — `macom-plan.md`, `ums-plan.md`, `threerwave-plan.md`, `microchip-plan.md` (e.g. UMS OQ-U4, 3rWave OQ-3W-1/§6, Microchip OQ-6/OQ-7): `Size`, `MSL`, and `Temperature` live only in per-part datasheet PDFs, to be harvested via a future `datasheet`-confidence path.
+**Current code:** The MACOM, UMS, and 3rWave table adapters do not populate `Size`, `MSL`, or `Temperature`. The Microchip adapter populates `Size`/`MSL` from MCP physical-specs when present but not `Temperature`; 3rWave additionally defers `Size` even though a (free-text) column exists (its decoding is undecided — see 3rWave OQ-3W-1). When a requested parameter is absent, the Verifier marks it UNKNOWN (partial), never a wrongful FAIL.
+**Status:** Not implemented (datasheet-PDF parsing deferred). The implemented per-adapter retrieval is documented in `manufacturer-adapters`.
