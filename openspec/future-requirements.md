@@ -23,6 +23,11 @@
 **Current code:** Each adapter hardcodes the single best source for its own site rather than performing a general API→parametric→scrape fallback: Mini-Circuits, AmcomUSA, and Marki scrape server-rendered HTML tables, while Analog Devices and RWM read the site's JSON endpoint/API directly. The practical outcome (use the API where one exists, otherwise scrape) is therefore realized per-adapter, but no general preference-ordering mechanism exists.
 **Status:** Not implemented as a general mechanism (each adapter chooses its own source). Now exercised across both API and scrape sources; a dynamic preference layer remains unbuilt (see OQ-1).
 
+### REQ-2.2 (partial) — Size / MSL / Temperature enrichment from datasheets
+**Legacy:** adapter specs QRV-OQ-3, VW-OQ-3, GRF-OQ-2 — `Size`, `MSL`, and `Temperature` are present only in datasheet PDFs, not on the manufacturer listing pages.
+**Current code:** the Qorvo, VectraWave, and Guerrilla RF adapters never emit `Size`, `MSL`, or `Temperature` (verified by `test_size_msl_temperature_never_emitted` and the VectraWave/Guerrilla equivalents); these stay UNKNOWN. (The implemented listing-page behavior is documented in `manufacturer-adapters`.)
+**Status:** Not implemented. Would require a datasheet-PDF fallback layer, owned by a future change — not the listing-page adapters.
+
 ### REQ-5.2 (partial) — display confidence level and manufacturer per result
 **Legacy:** requirements.md §4 REQ-5.2 — display "model, manufacturer, match status per parameter, confidence level, and link."
 **Current code:** `__main__.py` output prints model, per-parameter ✓/✗/? status, and the URL. The **confidence level is computed but not displayed**, and the **manufacturer is not shown** in the result line. (The implemented parts are documented in `cli-result-output`.)
@@ -59,3 +64,8 @@
 **Legacy:** t8-plan.md §9 (OQ-2) — log a warning when the scraped row count deviates significantly (e.g. >20%) between runs, as a possible site-redesign signal.
 **Current code:** The adapter performs no run-to-run row-count comparison.
 **Status:** Not implemented. Tracked as OQ-3 in `open-questions.md`.
+
+### Datasheet-only parameters (Size / MSL / Temperature) for the iteration-2 adapters
+**Legacy:** iteration2 adapter plans — `macom-plan.md`, `ums-plan.md`, `threerwave-plan.md`, `microchip-plan.md` (e.g. UMS OQ-U4, 3rWave OQ-3W-1/§6, Microchip OQ-6/OQ-7): `Size`, `MSL`, and `Temperature` live only in per-part datasheet PDFs, to be harvested via a future `datasheet`-confidence path.
+**Current code:** The MACOM, UMS, and 3rWave table adapters do not populate `Size`, `MSL`, or `Temperature`. The Microchip adapter populates `Size`/`MSL` from MCP physical-specs when present but not `Temperature`; 3rWave additionally defers `Size` even though a (free-text) column exists (its decoding is undecided — see 3rWave OQ-3W-1). When a requested parameter is absent, the Verifier marks it UNKNOWN (partial), never a wrongful FAIL.
+**Status:** Not implemented (datasheet-PDF parsing deferred). The implemented per-adapter retrieval is documented in `manufacturer-adapters`.

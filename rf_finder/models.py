@@ -60,7 +60,9 @@ class QuerySpec:
 class RawValue:
     """A value exactly as found on a manufacturer source, before unit normalization."""
 
-    value: float | tuple[float, float]   # scalar, or (low, high) for a range
+    value: float | tuple[float, float] | list[float]
+    # scalar; a (low, high) continuous range; or a list of discrete options
+    # (e.g. a VDD supporting 3, 5 or 8 V exactly — NOT the whole 3–8 V continuum).
     unit: str                            # source unit, pre-normalization (e.g. "MHz")
 
 

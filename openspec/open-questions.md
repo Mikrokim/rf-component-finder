@@ -15,12 +15,13 @@
 | OQ-2 | Should `Candidate.url` be the robots-disallowed `modelSearch.html?model=XXX` URL, or the allowed `Amplifiers.html` page? | 🟡 Open | legacy OQ-2 |
 | OQ-3 | Should the adapter warn when the scraped row count changes significantly between runs (possible site redesign)? | 🟡 Open | legacy OQ-3 |
 | OQ-4 | Even when a field value is valid, should the form sanity-check it and warn that it may be a mistake (e.g. unit confusion)? | 🟡 Open | legacy OQ-4 |
+| OQ-5 | How should VectraWave "Core Chips" (T/R modules with split Tx/Rx specs) map onto the single-amplifier ontology? | 🟡 Open | legacy VW-OQ-2 |
 
 ## Details
 
 ### OQ-1 — Full manufacturer list
 **Question:** What are the 10 manufacturers the full system must eventually support?
-**Why it matters:** Drives the adapter roadmap. Does not block current behavior — five `amplifier` adapters are implemented today (Mini-Circuits, Analog Devices, AmcomUSA, Marki, RWM; see `manufacturer-adapters`).
+**Why it matters:** Drives the adapter roadmap. Does not block current behavior — several `amplifier` adapters are implemented today (Mini-Circuits, Analog Devices, AmcomUSA, Marki, RWM, Qorvo, VectraWave, Guerrilla RF,macom, 3rwaves, microchip, ums; see `manufacturer-adapters` for the full list); the full manufacturer target list is still undetermined.
 **Status:** 🟡 Open.
 
 ### OQ-2 — `Candidate.url` value choice
@@ -39,6 +40,12 @@
 **Why it matters:** The form currently validates only hard validity — numeric, `min ≤ max`, and unit-in-list (see `structured-form-input` → "Numeric validation"). Legacy REQ-1.7 mentioned "value within sane bounds," which is **not** implemented; this question owns whether that behavior is desired.
 **Options (legacy):** (a) none; (b) range-based "unusual value" warning; (c) unit-aware confirmation.
 **Status:** 🟡 Open.
+
+### OQ-5 — VectraWave "Core Chips" dual-path mapping
+**Question:** How should a VectraWave "Core Chip" (a T/R front-end module with split `Tx Gain`, `Tx Pout`, `Rx Gain`, `Rx NF`) map onto the single-amplifier ontology, which assumes one gain / one NF per part?
+**Why it matters:** A Core Chip carries two signal paths (transmit and receive), so it has two gains, an NF only on the receive path, and a Pout only on the transmit path — forcing it into the ontology's single `Gain`/`NF`/`Psat` slots would misrepresent the part. Candidate mappings (all undecided): pick one path, emit two candidates (one per path), extend the ontology for dual-path parts, or keep skipping Core Chips.
+**Current behavior:** the adapter **skips Core Chips entirely** — it parses only the four amplifier sections (High Power, Medium Power, Low Noise, Wideband) and does not emit Core Chip candidates (see `manufacturer-adapters` → "VectraWave adapter retrieval and parsing").
+**Status:** 🟡 Open (may be deferred).
 
 ## Resolved during migration
 

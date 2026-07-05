@@ -117,7 +117,7 @@ PARAMETERS: dict[str, ParamDef] = {
     "IP3":   ParamDef("IP3",           "dBm", ["dBm"],       "min",     ["amplifier"]),
     "Psat":  ParamDef("Saturated power (Psat)",
                                        "dBm", ["dBm","W","mW"], "min", ["amplifier"]),
-    "VDD":   ParamDef("Supply voltage (VDD)", "V", ["V"],       "between",  ["amplifier"]),
+    "VDD":   ParamDef("Supply voltage (VDD)", "V", ["V"],       "contains", ["amplifier"]),
     "Size":  ParamDef("Size",          "mm",  ["mm"],          "max",      ["amplifier"]),
     "MSL":   ParamDef("MSL level (1–5)", "",  [""],            "max",      ["amplifier"]),
     "Temperature": ParamDef("Operating temperature",
@@ -255,7 +255,7 @@ task), but the **results table schema is already confirmed**:
 | `P1dB (dBm) Typ.`            | `P1dB`          | dBm            | target param |
 | `PSAT (dBm) Typ.`            | `Psat`          | dBm            | header reads "PSAT" |
 | `OIP3 (dBm) Typ.`            | `IP3`           | dBm            | header reads "OIP3" |
-| `Voltage (V)`                | `voltage`       | V              | not used this iter |
+| `Voltage (V)`                | `VDD`           | V              | alias: Voltage → VDD; single value stored as a `(v, v)` range |
 | `Current (mA)`               | `current`       | mA             | not used this iter |
 | `Case Style`, `Connector Type` | —             | —              | metadata |
 

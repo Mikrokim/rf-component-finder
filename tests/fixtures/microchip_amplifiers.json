@@ -1,0 +1,135 @@
+[
+  {
+    "note": "LNA, Bias string, OIP3 + P1dB, no NF; real capture",
+    "product": {
+      "partNumber": "MMA044AA",
+      "productUrl": "https://www.microchipdirect.com/product/MMA044AA"
+    },
+    "physical": {
+      "packageWidthOrSize": "1.351 x 1.121 x 0.1 mm",
+      "msl": null,
+      "parametricData": "https://www.microchipdirect.com/feed/json/MMA044AA-LOW-NOISE-AMPLIFIER.json"
+    },
+    "feed": {
+      "Bias": "4V,102mA",
+      "Freq Max GHz": "18",
+      "Freq Min GHz": "6",
+      "Gain (dB)": "21",
+      "OIP3 (dBm)": "30",
+      "p1db(dBM)": "16",
+      "Package (mm)": "Die",
+      "product_type": "Wideband Low Noise Amplifier"
+    }
+  },
+  {
+    "note": "Wideband, Freq Min = DC (-> 0), NF present, Bias has a space; real capture",
+    "product": {
+      "partNumber": "MMA015AA",
+      "productUrl": "https://www.microchipdirect.com/product/MMA015AA"
+    },
+    "physical": {
+      "packageWidthOrSize": "0.66 x 0.76 x 0.1 mm",
+      "msl": null,
+      "parametricData": "https://www.microchipdirect.com/feed/json/MMA015AA-AMPLIFIER-WIDEBAND.json"
+    },
+    "feed": {
+      "Bias": "4V, 80mA",
+      "Freq Max GHz": "14",
+      "Freq Min GHz": "DC",
+      "Gain (dB)": "14",
+      "NF (dB)": "2.6",
+      "OIP3 (dBm)": "29",
+      "p1db(dBM)": "19",
+      "Package (mm)": "Die",
+      "product_type": "Wideband Amplifier"
+    }
+  },
+  {
+    "note": "Power amp (driver); product_type has the misspelling 'Amplifer' -> 'amplif' marker; extra device-family keys; real capture",
+    "product": {
+      "partNumber": "MMA052AA",
+      "productUrl": "https://www.microchipdirect.com/product/MMA052AA"
+    },
+    "physical": {
+      "packageWidthOrSize": "3 x 1.5 x 0.1 mm",
+      "msl": null,
+      "parametricData": "https://www.microchipdirect.com/feed/json/MMA052AA-POWER-AMPLIFIER.json"
+    },
+    "feed": {
+      "DeviceFamilyName": "MMA052AA-Power-Amplifier",
+      "IDtblSGAnaMMIC": "25",
+      "Bias": "10V, 235mA",
+      "Freq Max GHz": "26",
+      "Freq Min GHz": "0",
+      "Gain (dB)": "15",
+      "NF (dB)": "4",
+      "OIP3 (dBm)": "35",
+      "p1db(dBM)": "27",
+      "Package (mm)": "3x1.5x0.07mm",
+      "product_type": "Distributed Power-Amplifer (Driver)",
+      "tblDeviceFamilyID": "21988"
+    }
+  },
+  {
+    "note": "Power amp with Pout/Voltage/Current/PAE schema (no Bias, no NF); synthetic, matches observed census key-set",
+    "product": {
+      "partNumber": "SYNTH-PA1",
+      "productUrl": "https://www.microchipdirect.com/product/SYNTH-PA1"
+    },
+    "physical": {
+      "packageWidthOrSize": "5x5x1mm",
+      "msl": "MSL-3",
+      "parametricData": "https://www.microchipdirect.com/feed/json/SYNTH-PA1-POWER-AMPLIFIER.json"
+    },
+    "feed": {
+      "Voltage (V)": "28",
+      "Current (mA)": "500",
+      "PAE % (percent)": "40",
+      "Freq Min GHz": "2",
+      "Freq Max GHz": "6",
+      "Gain (dB)": "25",
+      "Pout (dBm)": "40",
+      "Package (mm)": "QFN",
+      "Package Type": "QFN",
+      "product_type": "Power Amplifier",
+      "tblDeviceFamilyID": "99999"
+    }
+  },
+  {
+    "note": "Op-amp feed: NO product_type -> gate rejects (text-search pollution); synthetic from observed op-amp schema",
+    "product": {
+      "partNumber": "MCP664",
+      "productUrl": "https://www.microchipdirect.com/product/MCP664"
+    },
+    "physical": {
+      "packageWidthOrSize": "3 x 3 x 0.9 mm",
+      "msl": "MSL-1",
+      "parametricData": "https://www.microchipdirect.com/feed/json/MCP664-OPAMP.json"
+    },
+    "feed": {
+      "Aol (dB)": "120",
+      "Slew Rate (V/us)": "5",
+      "Gain Bandwidth Product kHz (kilohertz)": "60000",
+      "Vos Max": "1"
+    }
+  },
+  {
+    "note": "Control product with a non-amplifier product_type -> gate rejects; synthetic",
+    "product": {
+      "partNumber": "MASW-EXAMPLE",
+      "productUrl": "https://www.microchipdirect.com/product/MASW-EXAMPLE"
+    },
+    "physical": {
+      "packageWidthOrSize": "2 x 2 x 0.1 mm",
+      "msl": null,
+      "parametricData": "https://www.microchipdirect.com/feed/json/MASW-EXAMPLE-SWITCH.json"
+    },
+    "feed": {
+      "Freq Min GHz": "0",
+      "Freq Max GHz": "20",
+      "Insertion Loss (dB)": "1.5",
+      "Isolation": "35",
+      "product_type": "SP4T Switch"
+    }
+  }
+]
