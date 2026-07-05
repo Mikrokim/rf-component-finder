@@ -9,7 +9,11 @@ from __future__ import annotations
 
 def main() -> None:
     from rf_finder.adapters.minicircuits import MiniCircuitsAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.macom import MacomAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.analogdevices import AnalogDevicesAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.ums import UmsAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.threerwave import ThreeRWaveAdapter  # noqa: F401 (triggers @register)
+    from rf_finder.adapters.microchip import MicrochipAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.guerrillarf import GuerrillaRFAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.vectrawave import VectraWaveAdapter  # noqa: F401 (triggers @register)
     from rf_finder.adapters.qorvo import QorvoAdapter  # noqa: F401 (triggers @register)
@@ -51,14 +55,16 @@ def main() -> None:
         print("  (no filters — returning all results)")
 
     # ── 2. Search ─────────────────────────────────────────────────────────────
-    print("\nFetching from Mini-Circuits… (this may take a few seconds)\n")
+    sources = [a for a in ADAPTERS.values() if spec.component_type in a.supported_components]
+    names = ", ".join(a.manufacturer for a in sources) or "(none)"
+    print(f"\nFetching from {len(sources)} source(s): {names}… (this may take a few seconds)\n")
 
     candidates = []
-    for adapter in ADAPTERS.values():
-        if spec.component_type not in adapter.supported_components:
-            continue
+    for adapter in sources:
         try:
-            candidates.extend(adapter.search(spec))
+            found = adapter.search(spec)
+            candidates.extend(found)
+            print(f"  • {adapter.manufacturer}: {len(found)} candidates")
         except Exception as e:
             print(f"  [!] {adapter.manufacturer}: {e}")
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the pluggable adapter layer that retrieves candidate components from a manufacturer source and maps them into the tool's canonical model. Adapters only fetch and map raw values; they never judge whether a candidate matches (that is the Verifier's job). This spec documents the behavior **as currently implemented** in `rf_finder/adapters/base.py`, `rf_finder/adapters/minicircuits.py`, `rf_finder/adapters/analogdevices.py`, `rf_finder/adapters/qorvo.py`, `rf_finder/adapters/vectrawave.py`, and `rf_finder/adapters/guerrillarf.py`.
+Define the pluggable adapter layer that retrieves candidate components from a manufacturer source and maps them into the tool's canonical model. Adapters only fetch and map raw values; they never judge whether a candidate matches (that is the Verifier's job). This spec documents the behavior **as currently implemented** in `rf_finder/adapters/base.py`, `rf_finder/adapters/minicircuits.py`, `rf_finder/adapters/analogdevices.py`, `rf_finder/adapters/macom.py`, `rf_finder/adapters/ums.py`, `rf_finder/adapters/threerwave.py`, `rf_finder/adapters/microchip.py`, `rf_finder/adapters/qorvo.py`, `rf_finder/adapters/vectrawave.py`, and `rf_finder/adapters/guerrillarf.py`.
 
 ## Requirements
 
@@ -141,6 +141,102 @@ The Analog Devices adapter SHALL declare `manufacturer = "Analog Devices"` and s
 
 - **WHEN** a data row has no model field (`0`)
 - **THEN** it produces no candidate
+
+### Requirement: MACOM adapter retrieval
+
+The MACOM adapter SHALL declare `manufacturer = "MACOM"` and support the `amplifier` component. On `search`, it SHALL issue a single HTTP GET to the all-amplifiers page (`https://www.macom.com/products/rf-microwave-mmwave/amplifiers/all-amplifiers`) using a browser-style User-Agent, enforcing a minimum inter-request delay of at least 60 seconds between consecutive live fetches. The numeric specs SHALL be read from each product row's HTML-entity-encoded `data-part` JSON attribute (not from rendered table cells): every `data-part` blob SHALL be regex-extracted, HTML-unescaped, and parsed with `json.loads(..., strict=False)`, and a blob that fails to parse SHALL be skipped rather than aborting the run. IF the HTTP request fails it SHALL raise `AdapterError` carrying the manufacturer and a context describing the failed fetch; IF no `data-part` rows are found it SHALL raise `AdapterError`. Each `specName` SHALL be normalized (lowercased, whitespace-collapsed) and mapped to canonical parameters (`gain`→`Gain` dB, `output p1db`→`P1dB` dBm, `oip3`→`IP3` dBm, `nf`/`noise figure`→`NF` dB, `psat`→`Psat` dBm); `Min Frequency` + `Max Frequency` SHALL be combined into `freq_range` as `RawValue((low, high), "MHz")` only when both bounds are present; empty or non-numeric specs SHALL cause that parameter to be absent from `raw_params`. The adapter SHALL apply no server-side filtering: every part carrying a `partNumber` becomes `Candidate(model, manufacturer="MACOM", url, raw_params, source="table")` where `url` is the `macom.com` product-detail page; a part without a `partNumber` is skipped.
+
+#### Scenario: data-part JSON parses into candidates
+
+- **WHEN** the saved all-amplifiers fixture is parsed
+- **THEN** each candidate has `manufacturer == "MACOM"`, `source == "table"`, and a non-empty `model`
+
+#### Scenario: Noise Figure synonym maps to NF
+
+- **WHEN** a part's specs use the `Noise Figure` name rather than `NF`
+- **THEN** its value is stored under `raw_params["NF"]`
+
+#### Scenario: Missing spec is absent, not None
+
+- **WHEN** a part omits `P1dB`/`IP3`/`NF` specs
+- **THEN** those parameters are absent from the candidate's `raw_params`
+
+#### Scenario: No data-part rows raises AdapterError
+
+- **WHEN** the HTML contains no `data-part` product rows
+- **THEN** an `AdapterError` is raised
+
+### Requirement: UMS adapter retrieval
+
+The UMS adapter SHALL declare `manufacturer = "UMS"` and support the `amplifier` component. On `search`, it SHALL issue one HTTP GET per amplifier sub-type slug (`amplifier-lna`, `amplifier-hpa`, `amplifier-mpa`, `amplifier-analogvga`, `amplifier-digitalvga`) to the parametric `?function=<slug>` URL, always sending the full default frequency/power range (the site's server-side numeric filter is broken and narrowing it returns zero rows), using a browser-style User-Agent and enforcing a minimum inter-request delay of at least 3 seconds between consecutive live fetches. IF an HTTP request fails, IF no product table is found, or IF the table has no `<thead>` column labels, it SHALL raise `AdapterError`. The parametric table SHALL be located via its `tr.product-row` rows; header labels SHALL be read nested-tolerantly and mapped by **normalized label** (not by column position): `gain db`→`Gain` dB, `noise figure db`→`NF` dB, `p 1db out dbm`→`P1dB` dBm, `ip3 dbm`→`IP3` dBm, `sat output power dbm`→`Psat` dBm, `bias v`→`VDD` V; the `rf bandwidth ghz` min and max headers SHALL be combined into `freq_range` as `RawValue((low, high), "GHz")`. Empty, dash, or sentinel cells SHALL cause that parameter to be absent from `raw_params`. The adapter SHALL apply no server-side filtering: each row becomes `Candidate(model, manufacturer="UMS", url, raw_params, source="table")` where `model` comes from the `a.product-link` text and `url` is that link (or a `/products/<model>/` fallback).
+
+#### Scenario: Per-category columns are mapped by label
+
+- **WHEN** an LNA table (with a Noise Figure column and no IP3) and an HPA table (with IP3 and Sat. Output Power columns and no NF) are parsed
+- **THEN** LNA candidates expose `NF` and not `IP3`, and HPA candidates expose `IP3`/`Psat` and not `NF`
+
+#### Scenario: Frequency range combined in GHz
+
+- **WHEN** a row's RF Bandwidth min/max cells are parsed
+- **THEN** its `raw_params["freq_range"]` is `RawValue((low, high), "GHz")`
+
+#### Scenario: Empty or dash cell drops the parameter
+
+- **WHEN** a mapped cell is empty, `-`, or a known sentinel
+- **THEN** that parameter is absent from the candidate's `raw_params`
+
+#### Scenario: Missing product table raises AdapterError
+
+- **WHEN** the fetched HTML contains no parametric product table
+- **THEN** an `AdapterError` is raised
+
+### Requirement: 3rWave adapter retrieval
+
+The 3rWave adapter SHALL declare `manufacturer = "3rWave"` and support the `amplifier` component (covering both the PA and LNA sub-types). On `search`, it SHALL issue a single HTTP GET to `https://3rwave.com/amplifier/` using a browser-style User-Agent, enforcing a minimum inter-request delay of at least 1 second between consecutive live fetches. It SHALL parse **all** `table.tablepress` tables on the page (never hard-coding a TablePress id), locate each table's header row by a cell that normalizes to `part number`, and build a normalized-header→column-index map with a positional fallback. Columns SHALL be mapped as: Start Freq. + Stop Freq. (GHz)→`freq_range` `RawValue((low, high), "GHz")`, `gain db`→`Gain` dB, `psat dbm`→`Psat` dBm, `nf db`→`NF` dB, `drain voltage v`→`VDD` V. `Size` and `P1dB`/`IP3`/`MSL`/`Temperature` SHALL NOT be populated by this adapter (deferred, or absent as a column). Rows without a Part Number, and empty or sentinel cells, SHALL be skipped or cause the parameter to be absent. IF the HTTP request fails, IF the response is intercepted by a content filter, or IF no `table.tablepress` is found, it SHALL raise `AdapterError`. The adapter SHALL apply no server-side filtering: each row becomes `Candidate(model, manufacturer="3rWave", url, raw_params, source="table")` where `url` is the per-part link or an amplifier-page fallback.
+
+#### Scenario: PA and LNA rows parse into candidates
+
+- **WHEN** the saved amplifier-page fixture (PA + LNA tables) is parsed
+- **THEN** each candidate has `manufacturer == "3rWave"`, `source == "table"`, and a non-empty `model`
+
+#### Scenario: Frequency range combined in GHz
+
+- **WHEN** a row's Start Freq. and Stop Freq. (GHz) cells are parsed
+- **THEN** its `raw_params["freq_range"]` is `RawValue((low, high), "GHz")`
+
+#### Scenario: Size is not emitted
+
+- **WHEN** any row is parsed
+- **THEN** `Size` is absent from the candidate's `raw_params` (Size parsing is deferred)
+
+#### Scenario: No tablepress table raises AdapterError
+
+- **WHEN** the fetched HTML contains no `table.tablepress`
+- **THEN** an `AdapterError` is raised
+
+### Requirement: Microchip adapter retrieval (JSON API)
+
+The Microchip adapter SHALL declare `manufacturer = "Microchip"` and support the `amplifier` component. On `search`, it SHALL source data entirely from the Microchip MCP server (`https://api.microchip.com/mcp/resources`) and the `microchipdirect.com` per-part JSON feeds, and SHALL NOT access `www.microchip.com`. Retrieval SHALL be a three-step chain: (1) MCP `tools/call` `search_products` over a union of amplifier search terms, paginated on `hasMore` and de-duplicated by part number; (2) per part, run concurrently in a bounded `ThreadPoolExecutor` (max 8 workers), MCP `search_product_physical_specs` to obtain the `parametricData` feed URL plus package size and MSL; (3) an HTTP GET of that feed for the electrical specs. MCP responses are SSE-framed JSON-RPC whose payload is double-encoded (parse the `data:` line → `result.content[0].text` → `json.loads`). Only feeds whose `product_type` marks an amplifier SHALL be kept (text-search pollution is dropped). Feed fields SHALL be mapped as: `Gain (dB)`→`Gain`, `NF (dB)`→`NF`, `OIP3 (dBm)`→`IP3`, `p1db(dBM)`→`P1dB`, `Pout (dBm)`→`Psat`; `Freq Min GHz`/`Freq Max GHz`→`freq_range` in GHz (`"DC"`→`0.0`); the `Bias` string→`VDD` (leading volts); `Size`→largest edge of `packageWidthOrSize`; `MSL`→the digit of `MSL-n`. Missing or non-numeric values SHALL cause the parameter to be absent. Per-part failures SHALL return `None` and be skipped; MCP transport or response-shape errors SHALL raise `AdapterError`; IF enumeration yields zero parts across all terms it SHALL raise `AdapterError`. The adapter SHALL apply no server-side filtering: each amplifier becomes `Candidate(model, manufacturer="Microchip", url, raw_params, source="table")` where `url` is the part's `productUrl`.
+
+#### Scenario: Feed fixtures parse into candidates
+
+- **WHEN** the saved feed fixtures are parsed
+- **THEN** each candidate has `manufacturer == "Microchip"`, `source == "table"`, and a non-empty `model`
+
+#### Scenario: product_type gate drops non-amplifiers
+
+- **WHEN** a feed's `product_type` does not mark an amplifier (or is absent)
+- **THEN** that part produces no candidate
+
+#### Scenario: Bias string yields VDD in volts
+
+- **WHEN** a feed's `Bias` is a compound string such as `"4V, 80mA"`
+- **THEN** `raw_params["VDD"]` is the leading voltage in volts
+
+#### Scenario: Zero enumerated parts raises AdapterError
+
+- **WHEN** MCP `search_products` returns no parts for any amplifier term
+- **THEN** an `AdapterError` is raised
 
 ### Requirement: Qorvo adapter retrieval and parsing
 
