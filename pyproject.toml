@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+llm = ["genaifabric"]
 
 [project.scripts]
 rf-finder = "rf_finder.__main__:main"
