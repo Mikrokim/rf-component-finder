@@ -17,7 +17,6 @@ import pytest
 from rf_finder.datasheet import (
     EXTRACT_RF_PARAMETERS_INSTRUCTION,
     extract_rf_parameters,
-    split_tunable,
 )
 
 
@@ -78,7 +77,8 @@ def _runtime(canned_output: str = "", fail_with: str | None = None) -> MockRunti
 
 
 _FOUND_GAIN = {
-    "unit": "dB", "min": 20.5, "typ": 22, "max": 23.5, "condition": "@ 2 GHz",
+    "unit": "dB", "min": 20.5, "typ": 22, "max": 23.5, "value": None,
+    "condition": "@ 2 GHz",
 }
 
 
@@ -101,7 +101,7 @@ def test_run_receives_instruction_and_both_context_keys():
 
     (call,) = rt.calls
     assert call["instruction"] == EXTRACT_RF_PARAMETERS_INSTRUCTION
-    assert call["provider"] == "openai"
+    assert call["provider"] == "local"          # from DATASHEET_PROVIDER
     assert call["input"] == {
         "datasheet": "DATASHEET TEXT",
         "requested_parameters": ["gain"],
@@ -153,15 +153,14 @@ def test_discrete_supply_list_value_passes_through():
     assert out["vdd"]["value"] == [3, 5, 8]
 
 
-def test_model_is_passed_through_to_runtime():
+def test_model_comes_from_config_variable_not_a_parameter():
+    # The model is read from DATASHEET_MODEL in rf_finder.config (qwen3:8b),
+    # not passed as an argument.
     rt = _runtime(json.dumps({"gain": None}))
 
-    extract_rf_parameters(
-        "...", ["gain"], provider="local", model="qwen3:8b", runtime=rt
-    )
+    extract_rf_parameters("...", ["gain"], runtime=rt)
 
     (call,) = rt.calls
-    assert call["provider"] == "local"
     assert call["model"] == "qwen3:8b"
 
 
@@ -188,38 +187,6 @@ def test_extra_key_the_model_invented_is_dropped():
 # ---------------------------------------------------------------------------
 # Error paths
 # ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# split_tunable — parking multi-option parameters
-# ---------------------------------------------------------------------------
-
-def test_split_tunable_routes_list_values_to_deferred():
-    range_spec = {"unit": "V", "min": 18, "typ": 24, "max": 26,
-                  "value": None, "condition": None}
-    tunable = {"unit": "V", "min": None, "typ": None, "max": None,
-               "value": [3, 5, 8], "condition": None}
-    params = {"gain": _FOUND_GAIN, "vcc": range_spec, "vdd": tunable}
-
-    resolved, deferred = split_tunable(params)
-
-    assert resolved == {"gain": _FOUND_GAIN, "vcc": range_spec}
-    assert deferred == {"vdd": tunable}
-
-
-def test_split_tunable_keeps_none_in_resolved():
-    # A not-found parameter (None) is not tunable — it stays resolved.
-    resolved, deferred = split_tunable({"nf": None})
-
-    assert resolved == {"nf": None}
-    assert deferred == {}
-
-
-def test_split_tunable_nothing_deferred_when_no_lists():
-    resolved, deferred = split_tunable({"gain": _FOUND_GAIN})
-
-    assert resolved == {"gain": _FOUND_GAIN}
-    assert deferred == {}
-
 
 def test_provider_failure_raises_runtime_error():
     rt = _runtime(fail_with="quota exceeded")

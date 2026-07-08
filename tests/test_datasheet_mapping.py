@@ -36,7 +36,8 @@ def _spec_obj(**kw):
 # ---------------------------------------------------------------------------
 
 def test_min_comparison_takes_guaranteed_min():
-    # Gain (comparison "min"): guaranteed value is the smallest stated figure.
+    # Gain (comparison "min"): the guaranteed value is the stated min, preferred
+    # over typ/max.
     params = {"Gain": _spec_obj(unit="dB", min=22.0, typ=23.6, max=25.0)}
 
     raw = to_raw_params(params)
@@ -45,12 +46,34 @@ def test_min_comparison_takes_guaranteed_min():
 
 
 def test_max_comparison_takes_guaranteed_max():
-    # NF (comparison "max"): guaranteed value is the largest stated figure.
+    # NF (comparison "max"): with no stated max, typ is used as the guaranteed
+    # value.
     params = {"NF": _spec_obj(unit="dB", typ=3.0)}
 
     raw = to_raw_params(params)
 
     assert raw["NF"] == RawValue(value=3.0, unit="dB")
+
+
+def test_min_comparison_ignores_opposite_end_max():
+    # Gain (comparison "min"): a stated max must NOT be borrowed as the
+    # guaranteed floor (that would be optimistic). With only max, the parameter
+    # is left unresolved so the Verifier reports it UNKNOWN.
+    params = {"Gain": _spec_obj(unit="dB", max=25.0)}
+
+    raw = to_raw_params(params)
+
+    assert "Gain" not in raw
+
+
+def test_max_comparison_ignores_opposite_end_min():
+    # NF (comparison "max"): a stated min must NOT be borrowed as the guaranteed
+    # ceiling. With only min, the parameter is left unresolved -> UNKNOWN.
+    params = {"NF": _spec_obj(unit="dB", min=1.0)}
+
+    raw = to_raw_params(params)
+
+    assert "NF" not in raw
 
 
 def test_contains_range_becomes_low_high_tuple():

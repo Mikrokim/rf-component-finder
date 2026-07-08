@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 
+from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER
+
 EXTRACT_RF_PARAMETERS_INSTRUCTION = """\
 You are an RF component datasheet parameter extraction engine.
 
@@ -139,31 +141,36 @@ def _extract_json_object(text: str) -> str:
 def extract_rf_parameters(
     datasheet_text: str,
     requested_parameters: list[str],
-    provider: str = "openai",
-    model: str | None = None,
+    provider: str | None = None,
     runtime=None,
 ) -> dict:
     """Extract the requested parameters from an RF component datasheet's text.
 
     Returns a dict with exactly one key per requested parameter name: either a
-    ``{unit, min, typ, max, condition}`` dict, or ``None`` when the datasheet
-    does not state that parameter.
+    full ``{unit, min, typ, max, value, condition}`` dict, or ``None`` when the
+    datasheet does not state that parameter.  A found parameter always carries
+    all six fields (missing ones as ``None``), normalised so the shape is
+    uniform regardless of how much of the schema the model spelled out.
 
-    ``provider`` selects the GenAIFabric provider: ``"openai"`` (default),
-    ``"local"`` (Ollama — pass e.g. ``model="qwen3:8b"``), or ``"mock"``.
-    ``model`` overrides the provider's model; it is REQUIRED for ``"local"``.
-    ``runtime`` lets callers/tests supply their own GenAIFabric instance (e.g.
-    one whose provider_map holds a MockProvider); default is the shared runtime.
+    The model is taken from the ``DATASHEET_MODEL`` variable in
+    ``rf_finder.config``, not passed in.  ``provider`` defaults to
+    ``DATASHEET_PROVIDER`` (``"local"``/``"openai"``/``"mock"``) and may be
+    overridden per call.  ``runtime`` lets callers/tests supply their own
+    GenAIFabric instance (e.g. one whose provider_map holds a MockProvider);
+    default is the shared runtime.
 
     Raises ``RuntimeError`` when the LLM run itself fails and ``ValueError``
     when the model's output is not valid JSON.
     """
+    if provider is None:
+        provider = DATASHEET_PROVIDER
+
     if runtime is None:
         runtime = _get_runtime()
     result = runtime.run(
         instruction=EXTRACT_RF_PARAMETERS_INSTRUCTION,
         provider=provider,
-        model=model,
+        model=DATASHEET_MODEL,
         input={
             "datasheet": datasheet_text,
             "requested_parameters": requested_parameters,
@@ -181,35 +188,24 @@ def extract_rf_parameters(
         raise ValueError(f"LLM returned invalid JSON: {e}\nRaw output:\n{raw}")
 
     # Enforce the contract regardless of what the model returned: exactly the
-    # requested keys, missing ones as None, extras dropped.
-    return {name: data.get(name) for name in requested_parameters}
+    # requested keys, missing ones as None, extras dropped.  For each FOUND
+    # parameter, also normalise its inner shape to the full six-field schema so
+    # the output is uniform no matter how compliant the model was — a terse
+    # model that omits null fields and a chatty one that spells them out yield
+    # the same dict.  Not-found parameters stay ``None``, not ``{}``.
+    return {name: _normalize_spec(data.get(name)) for name in requested_parameters}
 
 
-def _is_tunable(spec) -> bool:
-    """True when a parameter spec is a tunable / multi-option value.
+# The full per-parameter field set the extraction contract promises.
+_SPEC_FIELDS = ("unit", "min", "typ", "max", "value", "condition")
 
-    Tunable parameters carry several selectable operating points (e.g. a supply
-    that supports 3 V, 5 V, 8 V), which the extractor represents as a LIST in the
-    ``value`` field.  Single values and min/typ/max ranges are not tunable.
+
+def _normalize_spec(spec):
+    """Fill any missing field with ``None`` so every found spec has all six keys.
+
+    ``None`` (parameter not found in the datasheet) passes through unchanged; a
+    non-dict value is left as-is rather than being coerced.
     """
-    return isinstance(spec, dict) and isinstance(spec.get("value"), list)
-
-
-def split_tunable(params: dict) -> tuple[dict, dict]:
-    """Park tunable / multi-option parameters so the rest can be used as-is.
-
-    Returns ``(resolved, deferred)``:
-      - ``resolved`` — single values, ranges, and not-found (``None``) params,
-        ready for downstream use now.
-      - ``deferred`` — tunable multi-option params (``value`` is a list), set
-        aside intact for later handling.
-
-    Deferring is a temporary seam: resolving tunable parameters (choosing an
-    operating point, or emitting one candidate per option) is future work — see
-    ``openspec/future-requirements.md``.  Nothing is dropped; the split is purely
-    a routing step, so a caller that ignores ``deferred`` simply skips tunables.
-    """
-    resolved, deferred = {}, {}
-    for name, spec in params.items():
-        (deferred if _is_tunable(spec) else resolved)[name] = spec
-    return resolved, deferred
+    if not isinstance(spec, dict):
+        return spec
+    return {field: spec.get(field) for field in _SPEC_FIELDS}

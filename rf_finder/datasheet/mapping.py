@@ -19,15 +19,18 @@ The shape is chosen from each parameter's ``comparison``:
     range, or a list of discrete options — matching the two ``contains``
     branches in ``verifier._compare``.
   - ``min`` / ``max`` / ``eq`` (Gain, NF, P1dB, Size, MSL, ...): a single scalar,
-    picked as the candidate's GUARANTEED value — the smallest stated figure for
-    ``min`` ("at least"), the largest for ``max`` ("at most"), the typical for
-    ``eq``.
+    picked as the candidate's GUARANTEED value by comparison direction — the
+    stated ``min`` (falling back to ``typ``) for a ``min`` rule ("at least"), the
+    stated ``max`` (falling back to ``typ``) for a ``max`` rule ("at most"), the
+    ``typ`` for ``eq``.  The fallback never borrows the OPPOSITE end (``max`` for
+    a ``min`` rule, or ``min`` for a ``max`` rule), which would be optimistic; a
+    parameter with neither the matching field nor ``typ`` is left UNKNOWN.
 
 Parameters the ontology does not define, and not-found params (``None``), are
 skipped so the Verifier reports them as ``UNKNOWN`` rather than mis-comparing.
-Tunable multi-option params (``value`` is a list) map to a list ``RawValue``,
-which ``contains`` supports; a caller that wants to defer them can run
-``split_tunable`` first and map only the resolved bucket.
+Multi-option params (``value`` is a list, e.g. a supply with several selectable
+voltages) map to a list ``RawValue``, which ``contains`` supports — they are
+verified like any other parameter.
 """
 
 from __future__ import annotations
@@ -90,15 +93,20 @@ def _to_value(spec: dict, comparison: str):
         return None
 
     # Scalar comparisons: pick the guaranteed figure by comparison direction.
+    # The fallback stops at ``typ`` and never borrows the OPPOSITE end: for a
+    # "min" ("at least") rule, using a stated ``max`` as the guaranteed floor
+    # would be badly optimistic, so ``max`` is not a fallback here (and vice
+    # versa for "max"). When neither the ideal field nor ``typ`` is stated, the
+    # parameter is left unresolved -> UNKNOWN rather than guessed.
     if comparison == "min":
-        for cand in (spec.get("min"), spec.get("typ"), spec.get("max")):
+        for cand in (spec.get("min"), spec.get("typ")):
             if cand is not None:
                 return float(cand)
         nums = _numbers(val)
         return min(nums) if nums else None
 
     if comparison == "max":
-        for cand in (spec.get("max"), spec.get("typ"), spec.get("min")):
+        for cand in (spec.get("max"), spec.get("typ")):
             if cand is not None:
                 return float(cand)
         nums = _numbers(val)
