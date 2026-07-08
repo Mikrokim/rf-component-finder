@@ -2,17 +2,16 @@
 
 ### Requirement: Response-cache provider interface
 
-The system SHALL provide a single response-cache component (the "provider") that mediates all adapter network access. It SHALL expose a method `fetch(manufacturer, url, *, mode)` that returns the source document text for `url`, or `None` when no document can be served. Adapters SHALL obtain source documents only through this method and SHALL NOT open network connections directly. The provider SHALL be constructed with a cache directory path and configuration, and a single instance SHALL be shared across all adapters for a given run.
+The system SHALL provide a single response-cache component (the "provider") that mediates all adapter network access. It SHALL expose a method `fetch(manufacturer, url, ...)` that resolves the source document for `url` cache-first and returns its text, or `None` when no document can be served. Adapters SHALL obtain source documents only through this method and SHALL NOT open network connections directly. The provider SHALL be constructed with a cache directory path and configuration, and a single instance SHALL be shared across all adapters for a given run.
 
-#### Scenario: Fetch returns stored content for a known URL
+#### Scenario: Fetch returns a served document
 
-- **WHEN** a page for `(manufacturer, url)` is stored and `fetch(manufacturer, url, mode=cache_only)` is called
-- **THEN** the stored document text is returned
-- **AND** no network request is made
+- **WHEN** `fetch(manufacturer, url)` resolves a page that can be served (from cache or a successful live fetch)
+- **THEN** the document text is returned
 
 #### Scenario: Fetch returns None when nothing can be served
 
-- **WHEN** `fetch(manufacturer, url, mode=cache_only)` is called for a URL with no stored copy
+- **WHEN** `fetch(manufacturer, url)` finds no cached copy and the live fetch fails
 - **THEN** `None` is returned
 - **AND** no exception is raised
 
@@ -36,45 +35,61 @@ The provider SHALL persist responses as plain files under a local cache director
 - **WHEN** two `POST` requests to the same URL carry different bodies
 - **THEN** each is stored in its own file and neither overwrites the other
 
-### Requirement: cache_only mode never touches the network
+### Requirement: Cache-first resolution — fresh, expired, missing
 
-In `cache_only` mode the provider SHALL serve only from storage and SHALL NOT make any network request, regardless of the stored copy's age. IF a stored copy exists it SHALL be returned even when older than the TTL; IF no stored copy exists `fetch` SHALL return `None`. This is the mode used by interactive search so that a search never blocks on, or fails because of, a live fetch.
+The provider SHALL resolve each request against the local cache first, using the file `mtime` age against the configured TTL:
 
-#### Scenario: Stale copy is still served in cache_only mode
+- **Fresh** (age ≤ TTL): the cached file SHALL be returned and NO network request SHALL be made.
+- **Expired** (age > TTL): the provider SHALL attempt a live fetch and wait for it (using a generous per-site timeout so a slow-but-valid site is not cut off). On success it SHALL store and return the fresh copy. On failure it SHALL return the stale cached copy.
+- **Missing** (no cached file): the provider SHALL attempt a live fetch and wait for it; on success it SHALL store and return the response, and on failure it SHALL return `None`.
 
-- **WHEN** a stored page is older than the configured TTL and `fetch(..., mode=cache_only)` is called
-- **THEN** the stale content is returned
+#### Scenario: Fresh page is served without a network request
+
+- **WHEN** a cached page's age is within the TTL
+- **THEN** the cached content is returned
 - **AND** no network request is made
 
-#### Scenario: Missing copy yields None, not a fetch
+#### Scenario: Expired page is fetched fresh
 
-- **WHEN** no page is stored and `fetch(..., mode=cache_only)` is called
-- **THEN** `None` is returned and no network request is made
-
-### Requirement: refresh mode fetches live and serves stale on failure
-
-In `refresh` mode the provider SHALL fetch the URL live from the site, and on success SHALL store the fresh response and return it. On a failed live fetch (transport error, non-success status, or empty body), the provider SHALL retain the previously stored response and return it (serve-stale) rather than raising; the stored file's modification time SHALL NOT advance on a failed refresh. IF the live fetch fails AND no previously stored response exists, `fetch` SHALL return `None` (the source is then skipped by the caller).
-
-#### Scenario: Successful refresh stores and returns fresh content
-
-- **WHEN** `fetch(..., mode=refresh)` succeeds against the live site
+- **WHEN** a cached page is older than the TTL and the live fetch succeeds
 - **THEN** the fresh content is stored and returned
-- **AND** the stored fetch timestamp is updated
+- **AND** the stored file's modification time is updated
 
-#### Scenario: Failed refresh serves the last good copy
+#### Scenario: Expired page falls back to stale on fetch failure
 
-- **WHEN** a live fetch fails but a previously stored copy exists
-- **THEN** the previously stored content is returned
-- **AND** the stored fetch timestamp is unchanged
+- **WHEN** a cached page is older than the TTL and the live fetch fails
+- **THEN** the stale cached content is returned
+- **AND** the stored file is left unchanged
 
-#### Scenario: Failed refresh with no prior copy returns None
+#### Scenario: Missing page is fetched, or skipped on failure
 
-- **WHEN** a live fetch fails and no copy was ever stored
-- **THEN** `None` is returned and no exception propagates to abort the run
+- **WHEN** no page is cached and the live fetch succeeds
+- **THEN** the response is stored and returned
+- **AND WHEN** no page is cached and the live fetch fails, `None` is returned
+
+### Requirement: Background revalidate after a stale fallback
+
+After serving a stale copy because an expired page's live fetch failed, the provider SHALL keep retrying the fetch on a background thread (single-flight per URL) and update the stored file when it eventually succeeds. Because the tool is a short-lived CLI, the CLI SHALL wait for outstanding background revalidations after displaying results and before the process exits, bounded by a maximum wait so a dead site cannot hang the process. A fresh cache hit or a successful fetch SHALL NOT start a background revalidation.
+
+#### Scenario: Stale fallback triggers a background revalidate
+
+- **WHEN** an expired page is served stale because the live fetch failed
+- **THEN** a background revalidation of that page is started
+- **AND** on its success the stored file is updated
+
+#### Scenario: Fresh hit starts no revalidation
+
+- **WHEN** a fresh page is served from cache
+- **THEN** no background revalidation is started
+
+#### Scenario: CLI waits for revalidations before exiting
+
+- **WHEN** background revalidations are outstanding after results are displayed
+- **THEN** the process waits for them (up to the maximum wait) before exiting
 
 ### Requirement: Provider owns rate-limiting and retries
 
-The provider SHALL apply a browser-style User-Agent and a per-manufacturer minimum inter-request delay to all live fetches, seeded from each adapter's existing delay so site-facing behavior is unchanged, and SHALL retry transient failures up to a configured maximum before treating the fetch as failed. This cross-cutting behavior SHALL live in the provider, so individual adapters do not implement their own delay/retry loops. Rate-limiting and retries SHALL apply only to live fetches (`refresh` mode); `cache_only` reads SHALL incur no delay. Per-request options — HTTP method, query params, request body, header overrides, and TLS-verification disable (for RWM's self-signed certificate) — SHALL be honored.
+The provider SHALL apply a browser-style User-Agent and a per-manufacturer minimum inter-request delay to all live fetches, seeded from each adapter's existing delay so site-facing behavior is unchanged, and SHALL use a generous per-site timeout so a slow-but-valid page (e.g. Qorvo's large page) is not cut off early. It SHALL retry transient failures up to a configured maximum before treating the fetch as failed. This cross-cutting behavior SHALL live in the provider, so individual adapters do not implement their own delay/retry loops. Per-request options — HTTP method, query params, request body, header overrides, and TLS-verification disable (for RWM's self-signed certificate) — SHALL be honored. A fresh cache hit SHALL incur no delay.
 
 #### Scenario: Minimum delay enforced between live fetches to a manufacturer
 
@@ -86,28 +101,14 @@ The provider SHALL apply a browser-style User-Agent and a per-manufacturer minim
 - **WHEN** a live fetch fails transiently and then succeeds within the retry budget
 - **THEN** the provider returns the successful response without surfacing the transient failure
 
-#### Scenario: cache_only reads incur no delay
+#### Scenario: Fresh cache hits incur no delay
 
-- **WHEN** many `cache_only` reads occur in succession
+- **WHEN** many fresh cache hits occur in succession
 - **THEN** no inter-request delay is applied
 
-### Requirement: TTL and lazy refresh on stale pages
+### Requirement: Manual refresh command
 
-The provider SHALL treat a stored page as fresh while its age is within the configured TTL (default 7 days) and stale beyond it. During interactive search, a stale page SHALL be served immediately (never blocking the search) and MAY trigger a background refresh so the next search sees fresh data. Missing pages SHALL NOT trigger a blocking inline fetch during search; they are skipped and left to the refresh job.
-
-#### Scenario: Stale page is served immediately during search
-
-- **WHEN** search reads a page older than the TTL
-- **THEN** the stale content is returned immediately without blocking on a live fetch
-
-#### Scenario: Fresh page is served without any refresh
-
-- **WHEN** search reads a page whose age is within the TTL
-- **THEN** the content is returned and no refresh is initiated
-
-### Requirement: Refresh command
-
-The system SHALL provide a `refresh` CLI entry point (`python -m rf_finder refresh`) that drives every registered adapter's retrieval in `refresh` mode, storing fresh copies of all their source pages. It SHALL accept an optional `--adapter NAME` to refresh a single manufacturer and an optional `--force` to refresh regardless of current freshness. A failure fetching one source SHALL NOT abort the whole refresh; the command SHALL continue with the remaining sources and report a per-source outcome (refreshed, served-stale, or failed).
+The system SHALL provide a manual `refresh` CLI entry point (`python -m rf_finder refresh`) that forces a live fetch and store of every registered adapter's source pages. It SHALL accept an optional `--adapter NAME` to refresh a single manufacturer. It SHALL NOT be scheduled or run automatically — the cache updates only from a user page request or this command. A failure fetching one source SHALL NOT abort the whole refresh; the command SHALL continue with the remaining sources and report a per-source outcome (refreshed, failed).
 
 #### Scenario: Refresh updates all adapters' stored pages
 
@@ -118,7 +119,7 @@ The system SHALL provide a `refresh` CLI entry point (`python -m rf_finder refre
 #### Scenario: One failing source does not abort the refresh
 
 - **WHEN** one adapter's live fetch fails during a full refresh
-- **THEN** that adapter is reported as failed or served-stale
+- **THEN** that adapter is reported as failed
 - **AND** the other adapters are still refreshed
 
 #### Scenario: Single-adapter refresh
@@ -128,12 +129,12 @@ The system SHALL provide a `refresh` CLI entry point (`python -m rf_finder refre
 
 ### Requirement: Cache-scoped configuration
 
-The system SHALL load cache configuration — at least the cache directory path, the TTL, and an enable/disable flag — from an optional `config.yaml`, falling back to committed defaults when the file is absent. When the cache is disabled by configuration, `fetch` SHALL behave as a direct pass-through to a live fetch in every mode (no storage read or write), preserving today's behavior.
+The system SHALL load cache configuration — at least the cache directory path, the TTL (default 30 days), and an enable/disable flag — from an optional `config.yaml`, falling back to committed defaults when the file is absent. When the cache is disabled by configuration, `fetch` SHALL behave as a direct pass-through to a live fetch (no storage read or write), preserving today's behavior.
 
 #### Scenario: Defaults apply when config file is absent
 
 - **WHEN** no `config.yaml` is present
-- **THEN** the provider uses the default cache path and a 7-day TTL
+- **THEN** the provider uses the default cache directory and a 30-day TTL
 
 #### Scenario: Disabled cache falls back to direct fetching
 
