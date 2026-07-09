@@ -6,12 +6,10 @@ file that exists but is malformed, or carries an out-of-range value, raises
 ``ConfigError`` rather than silently falling back to a default.
 """
 
-<<<<<<< HEAD
 # LLM used to extract parameters from datasheet PDFs.
 # Edit these to change the model/provider — no config file, no arguments.
 DATASHEET_PROVIDER = "local"   # "local" (Ollama) | "openai" | "mock"
 DATASHEET_MODEL = "qwen3:8b"   # model name for the chosen provider
-=======
 from __future__ import annotations
 
 from pathlib import Path
@@ -47,4 +45,3 @@ def load_max_results(path: str | Path | None = None) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ConfigError(f"max_results must be a positive integer, got {value!r}")
     return value
->>>>>>> 10b479622ddf3ccc3cbff1b9eb6650d72630af61
