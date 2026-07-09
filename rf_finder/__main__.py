@@ -1,29 +1,28 @@
 """CLI entry point: run form → search → report (REQ-1.1, REQ-5).
 
-# TODO(T12): replace with full CLI wire-up (flags, per-adapter error isolation,
-#             proper Reporter) once T11 and T12 are implemented.
+The interactive search flow below is the original CLI. The response-cache feature
+adds only: a provider configured up front (``main``), a per-source snapshot-age
+note and a bounded join of background revalidations (both via ``rf_finder.cli``),
+and a manual ``refresh`` subcommand (``rf_finder.cli.run_refresh``).
+
+  python -m rf_finder                     interactive cache-first search
+  python -m rf_finder refresh [--adapter NAME]
+                                          manual cache warm/refresh (never scheduled)
 """
 
 from __future__ import annotations
 
+import argparse
+import sys
 
-def main() -> None:
-    from rf_finder.adapters.minicircuits import MiniCircuitsAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.amcomusa import AmcomUSAAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.analogdevices import AnalogDevicesAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.marki import MarkiMicrowaveAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.rwmmic import RwmmicAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.macom import MacomAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.analogdevices import AnalogDevicesAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.ums import UmsAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.threerwave import ThreeRWaveAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.microchip import MicrochipAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.guerrillarf import GuerrillaRFAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.vectrawave import VectraWaveAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.qorvo import QorvoAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.base import ADAPTERS
+
+def run_search(provider) -> None:
     from rf_finder.form import build_form, collect
-    from rf_finder.verifier import verify
+    from rf_finder.search import search_and_verify
+    from rf_finder.config import load_max_results
+    from rf_finder import cli   # cache-feature helpers (snapshot note, join)
+
+    max_results = load_max_results()
 
     # ── 1. Form ──────────────────────────────────────────────────────────────
     print("\n=== RF Component Finder ===\n")
@@ -58,33 +57,30 @@ def main() -> None:
     if not spec.constraints:
         print("  (no filters — returning all results)")
 
-    # ── 2. Search ─────────────────────────────────────────────────────────────
-    sources = [a for a in ADAPTERS.values() if spec.component_type in a.supported_components]
+    # ── 2. Search + verify (shared headless core) ─────────────────────────────
+    from rf_finder.search import _sources_for
+    sources = _sources_for(spec)
     names = ", ".join(a.manufacturer for a in sources) or "(none)"
     print(f"\nFetching from {len(sources)} source(s): {names}… (this may take a few seconds)\n")
 
-    candidates = []
-    for adapter in sources:
-        try:
-            found = adapter.search(spec)
-            candidates.extend(found)
-            print(f"  • {adapter.manufacturer}: {len(found)} candidates")
-        except Exception as e:
-            print(f"  [!] {adapter.manufacturer}: {e}")
+    def _note(outcome, adapter, payload):
+        if outcome == "error":
+            print(f"  [!] {adapter.manufacturer}: {payload}")
+        elif outcome == "empty":
+            print(f"  – {adapter.manufacturer}: no data (source skipped){cli._snapshot_note(provider, adapter.manufacturer)}")
+        else:  # "ok"
+            print(f"  • {adapter.manufacturer}: {len(payload)} candidates{cli._snapshot_note(provider, adapter.manufacturer)}")
 
-    if not candidates:
+    verified = search_and_verify(spec, on_source=_note)
+
+    if not verified:
         print("No candidates returned.")
+        cli._join_cache(provider)
         return
 
-    print(f"Retrieved {len(candidates)} raw candidates.")
+    print(f"Retrieved {len(verified)} raw candidates.")
 
-    # ── 3. Verify ─────────────────────────────────────────────────────────────
-    verified = [verify(spec, c) for c in candidates]
-
-    # ── 4. Simple output ──────────────────────────────────────────────────────
-    order = {"match": 0, "partial": 1, "fail": 2}
-    verified.sort(key=lambda v: order.get(v.overall, 9))
-
+    # ── 3. Output (already sorted match→partial→fail by the core) ──────────────
     matches  = [v for v in verified if v.overall == "match"]
     partials = [v for v in verified if v.overall == "partial"]
     fails    = [v for v in verified if v.overall == "fail"]
@@ -108,7 +104,9 @@ def main() -> None:
 
     if matches:
         print(f"── MATCHES ({len(matches)}) ──")
-        _show(matches)
+        _show(matches, max_results)
+        if len(matches) > max_results:
+            print(f"  … showing top {max_results} of {len(matches)} — refine the filters to narrow down")
         print()
 
     if partials:
@@ -125,6 +123,32 @@ def main() -> None:
             print()
             _show(fails, limit=50)
             print()
+
+    cli._join_cache(provider)
+
+
+def main(argv: list[str] | None = None) -> None:
+    from rf_finder import cache, cli
+    from rf_finder.config import load_cache_config
+
+    parser = argparse.ArgumentParser(
+        prog="rf_finder", description="RF component finder (cache-first)."
+    )
+    sub = parser.add_subparsers(dest="command")
+    refresh_p = sub.add_parser(
+        "refresh", help="Re-fetch and store every source's pages (manual)."
+    )
+    refresh_p.add_argument(
+        "--adapter", metavar="NAME", default=None,
+        help="Refresh only this manufacturer (default: all).",
+    )
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+
+    provider = cache.configure(load_cache_config())
+    if args.command == "refresh":
+        cli.run_refresh(provider, args.adapter)
+    else:
+        run_search(provider)
 
 
 if __name__ == "__main__":

@@ -19,11 +19,10 @@ specs/.../adapters/vectrawave/t8-plan.md.
 from __future__ import annotations
 
 import re
-import time
 
-import httpx
 from selectolax.parser import HTMLParser
 
+from rf_finder import cache
 from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
@@ -34,15 +33,7 @@ from rf_finder.models import Candidate, QuerySpec, RawValue
 _BASE = "https://vectrawave.com"
 _PAGE_URL = _BASE + "/search-engine-mmic"
 
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA", "TBD", "tbd"})
-
-_MIN_DELAY_SECONDS = 2.0
 
 # A section heading is one of the catalogue's component categories.
 _SECTION_KEYWORDS = ("amplifier", "attenuator", "phase shifter", "core chip")
@@ -136,42 +127,28 @@ class VectraWaveAdapter(Adapter):
     manufacturer = "VectraWave"
     supported_components = {"amplifier"}
 
-    def __init__(self) -> None:
-        self._last_fetch_time: float = 0.0
-
     def search(self, spec: QuerySpec) -> list[Candidate]:
-        """Fetch the MMIC page and return amplifier candidates."""
-        elapsed = time.time() - self._last_fetch_time
-        if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
-            time.sleep(_MIN_DELAY_SECONDS - elapsed)
+        """Fetch the MMIC page (cache-first) and return amplifier candidates.
 
-        last_exc: Exception | None = None
-        for _attempt in range(2):  # one retry for the site's intermittent TLS/connect errors
-            try:
-                response = httpx.get(
-                    _PAGE_URL,
-                    headers={
-                        "User-Agent": _USER_AGENT,
-                        "Accept": (
-                            "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                            "*/*;q=0.8"
-                        ),
-                        "Accept-Language": "en-US,en;q=0.5",
-                    },
-                    follow_redirects=True,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                self._last_fetch_time = time.time()
-                return drop_paramless(self._parse_html(response.text))
-            except httpx.HTTPError as exc:
-                last_exc = exc
+        The shared provider owns the User-Agent, delay, timeout and retries (it
+        covers the site's intermittent TLS/connect errors); a ``None`` body means
+        unreachable with no cached copy → skip this source.
+        """
+        result = cache.fetch(
+            self.manufacturer,
+            _PAGE_URL,
+            headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        if result.text is None:
+            return []
 
-        raise AdapterError(
-            manufacturer=self.manufacturer,
-            context=f"HTTP error fetching {_PAGE_URL}",
-            cause=last_exc,
-        ) from last_exc
+        return drop_paramless(self._parse_html(result.text))
 
     def _parse_html(self, html: str) -> list[Candidate]:
         """Parse all amplifier-section tables; return combined Candidates.

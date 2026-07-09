@@ -50,10 +50,8 @@ from __future__ import annotations
 
 import json
 import re
-import time
 
-import httpx
-
+from rf_finder import cache
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
@@ -64,17 +62,7 @@ from rf_finder.models import Candidate, QuerySpec, RawValue
 _BASE_URL = "https://www.rwmmic.com/"
 _ALL_PRODUCTS_URL = _BASE_URL + "index.php?r=api/all-products"
 
-# Browser-style User-Agent (plain bot UAs may be rejected by the CDN)
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A"})
-
-# Minimum seconds between consecutive live HTTP fetches
-_MIN_DELAY_SECONDS = 1.0
 
 # rwmmic.com serves a self-signed cert in its chain; strict verification fails.
 _VERIFY_TLS = False
@@ -158,51 +146,38 @@ class RwmmicAdapter(Adapter):
     manufacturer = "RWM"
     supported_components = {"amplifier"}
 
-    def __init__(self) -> None:
-        self._last_fetch_time: float = 0.0
-
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
 
     def search(self, spec: QuerySpec) -> list[Candidate]:
-        """Fetch the full catalogue and return every amplifier row as a Candidate.
+        """Fetch the full catalogue (cache-first) and return every amplifier row.
 
         No server-side filtering is applied — the API always returns the whole
         catalogue.  The Verifier applies all constraints (REQ-4.1).
         """
-        return self._parse_json(self._fetch_json())
+        text = self._fetch_json()
+        if text is None:
+            return []
+        return self._parse_json(text)
 
-    def _fetch_json(self) -> str:
-        """GET the all-products API and return the response text, rate-limited."""
-        # Enforce minimum inter-request delay
-        elapsed = time.time() - self._last_fetch_time
-        if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
-            time.sleep(_MIN_DELAY_SECONDS - elapsed)
+    def _fetch_json(self) -> str | None:
+        """GET the all-products API (cache-first); return the body, ``None`` on miss.
 
-        try:
-            response = httpx.get(
-                _ALL_PRODUCTS_URL,
-                headers={
-                    "User-Agent": _USER_AGENT,
-                    "Accept": "application/json, text/javascript, */*;q=0.1",
-                    "Accept-Language": "en-US,en;q=0.5",
-                    "Referer": _BASE_URL + "product.html",
-                },
-                follow_redirects=True,
-                timeout=30.0,
-                verify=_VERIFY_TLS,
-            )
-            response.raise_for_status()
-            self._last_fetch_time = time.time()
-        except httpx.HTTPError as exc:
-            raise AdapterError(
-                manufacturer=self.manufacturer,
-                context=f"HTTP error fetching {_ALL_PRODUCTS_URL}",
-                cause=exc,
-            ) from exc
-
-        return response.text
+        The self-signed cert is tolerated via ``verify=_VERIFY_TLS``. The shared
+        provider owns the User-Agent, delay, timeout and retries.
+        """
+        result = cache.fetch(
+            self.manufacturer,
+            _ALL_PRODUCTS_URL,
+            headers={
+                "Accept": "application/json, text/javascript, */*;q=0.1",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Referer": _BASE_URL + "product.html",
+            },
+            verify=_VERIFY_TLS,
+        )
+        return result.text
 
     # ------------------------------------------------------------------
     # Internal parse method (exposed for tests to call directly)
