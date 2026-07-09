@@ -54,7 +54,7 @@ def test_fresh_search_makes_no_network_call(tmp_path, monkeypatch):
 
     fake = _FakeAdapter("https://fake/x")
     # Replace the whole adapter loader so the real adapters never register/fetch.
-    monkeypatch.setattr(entry, "_load_adapters", lambda: {"FakeCo": fake})
+    monkeypatch.setattr("rf_finder.search._load_adapters", lambda: {"FakeCo": fake})
     monkeypatch.setattr("rf_finder.form.build_form", lambda ct: object())
     monkeypatch.setattr("rf_finder.form.collect", lambda schema: QuerySpec("amplifier", []))
     monkeypatch.setattr("builtins.input", lambda *a: "")   # default component, don't show fails
@@ -83,7 +83,7 @@ def test_refresh_continues_past_failure(tmp_path, monkeypatch, capsys):
             raise RuntimeError("boom")
 
     good = _FakeAdapter("https://fake/good")
-    monkeypatch.setattr(entry, "_load_adapters", lambda: {"BadCo": _BadAdapter(), "FakeCo": good})
+    monkeypatch.setattr("rf_finder.search._load_adapters", lambda: {"BadCo": _BadAdapter(), "FakeCo": good})
 
     class _Resp:
         text = "<html/>"

@@ -1,9 +1,14 @@
-"""Loads cache-scoped config from config.yaml: cache directory, TTL, enable flag (NFR-5).
+"""Loads settings from an optional ``config.yaml`` in the working directory.
 
-Only the cache settings are implemented here; the full T9 config (manufacturer
-site list, rate limits) remains future work. Defaults apply when ``config.yaml``
-is absent, so the cache works with no configuration. A file that exists but is
-malformed raises ``ConfigError`` rather than silently falling back to defaults.
+Two independent slices are read here:
+- **Cache settings** (``cache_dir``, ``ttl_days``, ``enabled``) — used by the HTTP
+  service / storage layer (NFR-5). Only these cache keys of the planned T9 config
+  are implemented; the full site list / rate limits remain future work.
+- **The result-display cap** (``max_results``) — how many matches a front-end lists.
+
+Defaults apply when ``config.yaml`` (or a key) is absent, so the tool works with no
+configuration. A file that exists but is malformed, or carries an out-of-range
+value, raises ``ConfigError`` rather than silently falling back to a default.
 """
 
 from __future__ import annotations
@@ -18,6 +23,10 @@ from pathlib import Path
 _DEFAULT_CACHE_DIR = Path(".cache/responses")
 _DEFAULT_TTL_DAYS = 30
 _DEFAULT_ENABLED = True
+
+
+#: Default cap on how many matching results a front-end lists; override in config.yaml.
+DEFAULT_MAX_RESULTS = 10
 
 _CONFIG_FILENAME = "config.yaml"   # looked up relative to the working directory
 
@@ -78,3 +87,30 @@ def load_cache_config(path: str | Path | None = None) -> CacheConfig:
         raise ConfigError(f"enabled must be a boolean, got {enabled!r}")
 
     return CacheConfig(cache_dir=cache_dir, ttl_days=ttl_days, enabled=enabled)
+    
+def load_max_results(path: str | Path | None = None) -> int:
+    """Load the ``max_results`` display cap from ``config.yaml`` (top-level key).
+
+    A missing file or key yields ``DEFAULT_MAX_RESULTS`` (10). A present value
+    must be a positive integer, else ``ConfigError``.
+    """
+    config_path = Path(path) if path is not None else Path(_CONFIG_FILENAME)
+    if not config_path.is_file():
+        return DEFAULT_MAX_RESULTS
+
+    import yaml  # lazy: only imported when a config file is actually present
+
+    try:
+        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Malformed {config_path}: {exc}") from exc
+
+    value = (loaded or {}).get("max_results", DEFAULT_MAX_RESULTS)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ConfigError(f"max_results must be a positive integer, got {value!r}")
+    return value
+
+# LLM used to extract parameters from datasheet PDFs.
+# Edit these to change the model/provider — no config file, no arguments.
+DATASHEET_PROVIDER = "local"   # "local" (Ollama) | "openai" | "mock"
+DATASHEET_MODEL = "qwen3:8b"   # model name for the chosen provider

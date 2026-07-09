@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+from rf_finder.ontology.units import units_for
+
 
 class ParamDef(NamedTuple):
     """Immutable definition of one measurable parameter.
@@ -25,77 +27,36 @@ class ParamDef(NamedTuple):
     applies_to: list[str]
 
 
+def _param(
+    label: str, canonical_unit: str, comparison: str, applies_to: list[str]
+) -> ParamDef:
+    """Build a ``ParamDef`` whose accepted ``units`` are *derived* from its
+    canonical unit via ``units_for`` — so the form always offers exactly the
+    units the converters support, with no hand-maintained list to drift.
+    """
+    return ParamDef(
+        label=label,
+        canonical_unit=canonical_unit,
+        units=units_for(canonical_unit),
+        comparison=comparison,
+        applies_to=applies_to,
+    )
+
+
 PARAMETERS: dict[str, ParamDef] = {
-    "freq_range": ParamDef(
-        label="Frequency range",
-        canonical_unit="GHz",
-        units=["GHz", "MHz"],
-        comparison="contains",
-        applies_to=["amplifier", "mixer", "filter", "attenuator"],
+    "freq_range": _param(
+        "Frequency range", "GHz", "contains",
+        ["amplifier", "mixer", "filter", "attenuator"],
     ),
-    "P1dB": ParamDef(
-        label="P1dB (output 1 dB compression)",
-        canonical_unit="dBm",
-        units=["dBm", "W", "mW"],
-        comparison="min",
-        applies_to=["amplifier"],
-    ),
-    "Gain": ParamDef(
-        label="Gain",
-        canonical_unit="dB",
-        units=["dB"],
-        comparison="min",
-        applies_to=["amplifier"],
-    ),
-    "NF": ParamDef(
-        label="Noise figure",
-        canonical_unit="dB",
-        units=["dB"],
-        comparison="max",
-        applies_to=["amplifier"],
-    ),
-    "IP3": ParamDef(
-        label="IP3",
-        canonical_unit="dBm",
-        units=["dBm"],
-        comparison="min",
-        applies_to=["amplifier"],
-    ),
-    "Psat": ParamDef(
-        label="Saturated power (Psat)",
-        canonical_unit="dBm",
-        units=["dBm", "W", "mW"],
-        comparison="min",
-        applies_to=["amplifier"],
-    ),
-    "VDD": ParamDef(
-        label="Supply voltage (VDD)",
-        canonical_unit="V",
-        units=["V"],
-        comparison="contains",
-        applies_to=["amplifier"],
-    ),
-    "Size": ParamDef(
-        label="Size",
-        canonical_unit="mm",
-        units=["mm"],
-        comparison="max",
-        applies_to=["amplifier"],
-    ),
-    "MSL": ParamDef(
-        label="MSL level (1–5)",
-        canonical_unit="",
-        units=[""],
-        comparison="max",
-        applies_to=["amplifier"],
-    ),
-    "Temperature": ParamDef(
-        label="Operating temperature",
-        canonical_unit="degC",
-        units=["degC"],
-        comparison="contains",
-        applies_to=["amplifier"],
-    ),
+    "P1dB": _param("P1dB (output 1 dB compression)", "dBm", "min", ["amplifier"]),
+    "Gain": _param("Gain", "dB", "min", ["amplifier"]),
+    "NF": _param("Noise figure", "dB", "max", ["amplifier"]),
+    "IP3": _param("IP3", "dBm", "min", ["amplifier"]),
+    "Psat": _param("Saturated power (Psat)", "dBm", "min", ["amplifier"]),
+    "VDD": _param("Supply voltage (VDD)", "V", "contains", ["amplifier"]),
+    "Size": _param("Size", "mm", "max", ["amplifier"]),
+    "MSL": _param("MSL level (1–5)", "", "max", ["amplifier"]),
+    "Temperature": _param("Operating temperature", "degC", "contains", ["amplifier"]),
 }
 
 

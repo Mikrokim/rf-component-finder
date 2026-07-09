@@ -13,10 +13,13 @@ dependencies = [
     "pdfplumber",
     "pyyaml",
     "questionary",
+    "ttkbootstrap",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+llm = ["genai-fabric>=0.1.1"]
 
 [project.scripts]
 rf-finder = "rf_finder.__main__:main"
+rf-finder-gui = "rf_finder.ui.gui:main"
