@@ -6,13 +6,14 @@ file that exists but is malformed, or carries an out-of-range value, raises
 ``ConfigError`` rather than silently falling back to a default.
 """
 
+from __future__ import annotations
+
+from pathlib import Path
+
 # LLM used to extract parameters from datasheet PDFs.
 # Edit these to change the model/provider — no config file, no arguments.
 DATASHEET_PROVIDER = "local"   # "local" (Ollama) | "openai" | "mock"
 DATASHEET_MODEL = "qwen3:8b"   # model name for the chosen provider
-from __future__ import annotations
-
-from pathlib import Path
 
 #: Default cap on how many matching results a front-end lists; override in config.yaml.
 DEFAULT_MAX_RESULTS = 10
