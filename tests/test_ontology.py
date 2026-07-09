@@ -89,11 +89,33 @@ class TestCanonicalUnits:
 
 class TestFreqRangeUnits:
     def test_freq_range_units_list(self):
-        assert PARAMETERS["freq_range"].units == ["GHz", "MHz"]
+        # Derived from the converters: every frequency unit, canonical first.
+        assert PARAMETERS["freq_range"].units == ["GHz", "MHz", "kHz", "Hz"]
 
     def test_freq_range_canonical_is_first_unit(self):
         units = PARAMETERS["freq_range"].units
         assert units[0] == PARAMETERS["freq_range"].canonical_unit
+
+    def test_power_params_offer_every_convertible_unit(self):
+        # Every dBm parameter (incl. IP3) offers the full power unit set.
+        for name in ("P1dB", "Psat", "IP3"):
+            assert PARAMETERS[name].units == ["dBm", "W", "mW"]
+
+    def test_params_without_a_converter_offer_only_their_canonical(self):
+        for name in ("Gain", "NF", "VDD", "Size", "Temperature", "MSL"):
+            p = PARAMETERS[name]
+            assert p.units == [p.canonical_unit]
+
+    def test_every_offered_unit_is_convertible(self):
+        # The invariant that makes deriving units safe: every unit the form
+        # offers must actually convert to that parameter's canonical unit, so a
+        # user can never pick a unit the verifier then chokes on.
+        from rf_finder.ontology.units import to_canonical
+
+        for name, p in PARAMETERS.items():
+            for unit in p.units:
+                # value=2.0 (positive) so power conversions don't reject it.
+                to_canonical(2.0, unit, p.canonical_unit)   # must not raise
 
 
 # ---------------------------------------------------------------------------
