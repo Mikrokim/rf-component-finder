@@ -26,11 +26,10 @@ Compliance: browser User-Agent + a minimum delay between live fetches.
 from __future__ import annotations
 
 import re
-import time
 
-import httpx
 from selectolax.parser import HTMLParser
 
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
@@ -40,21 +39,7 @@ from rf_finder.models import Candidate, QuerySpec, RawValue
 
 _BASE_URL = "https://www.amcomusa.com"
 
-# Browser-style User-Agent (plain bot UAs may be rejected by the CDN)
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "TBD", "tbd"})
-
-# Minimum seconds between consecutive live HTTP fetches (site asks for ~1.5s)
-_MIN_DELAY_SECONDS = 1.5
-
-# Transient network errors (e.g. SSL UNEXPECTED_EOF) are retried per request.
-_MAX_ATTEMPTS = 3
-_RETRY_BACKOFF_SECONDS = 1.0
 
 _TABLE_SELECTOR = "table#allPnTable"
 
@@ -151,9 +136,6 @@ class AmcomUSAAdapter(Adapter):
     manufacturer = "AmcomUSA"
     supported_components = {"amplifier"}
 
-    def __init__(self) -> None:
-        self._last_fetch_time: float = 0.0
-
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -199,52 +181,31 @@ class AmcomUSAAdapter(Adapter):
     # HTTP
     # ------------------------------------------------------------------
 
-    def _request(self, url: str) -> httpx.Response:
-        """GET *url* with the browser headers, rate-limited and retried.
-
-        Enforces ``_MIN_DELAY_SECONDS`` between requests and retries transient
-        failures (e.g. SSL ``UNEXPECTED_EOF``) up to ``_MAX_ATTEMPTS`` times.
-        Raises ``AdapterError`` only after every attempt fails.
-        """
-        last_exc: httpx.HTTPError | None = None
-
-        for attempt in range(_MAX_ATTEMPTS):
-            elapsed = time.time() - self._last_fetch_time
-            if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
-                time.sleep(_MIN_DELAY_SECONDS - elapsed)
-
-            try:
-                response = httpx.get(
-                    url,
-                    headers={
-                        "User-Agent": _USER_AGENT,
-                        "Accept": (
-                            "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                            "image/webp,*/*;q=0.8"
-                        ),
-                        "Accept-Language": "en-US,en;q=0.5",
-                    },
-                    follow_redirects=True,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                self._last_fetch_time = time.time()
-                return response
-            except httpx.HTTPError as exc:
-                last_exc = exc
-                self._last_fetch_time = time.time()  # keep the rate limit honest before retry
-                if attempt < _MAX_ATTEMPTS - 1:
-                    time.sleep(_RETRY_BACKOFF_SECONDS)
-
-        raise AdapterError(
-            manufacturer=self.manufacturer,
-            context=f"HTTP error fetching {url} (after {_MAX_ATTEMPTS} attempts)",
-            cause=last_exc,
-        )
-
     def _fetch(self, path: str) -> str:
-        """GET ``_BASE_URL + path`` and return the response text."""
-        return self._request(_BASE_URL + path).text
+        """GET ``_BASE_URL + path`` (cache-first) and return the response text.
+
+        The shared provider owns the User-Agent, the 1.5 s delay, the timeout and
+        retries. Raises ``AdapterError`` when the page is unreachable with no
+        cached copy, so the caller skips that one category and keeps the others.
+        """
+        url = _BASE_URL + path
+        result = http.fetch(
+            self.manufacturer,
+            url,
+            headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/webp,*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        if result.text is None:
+            raise AdapterError(
+                manufacturer=self.manufacturer,
+                context=f"HTTP error fetching {url}",
+            )
+        return result.text
 
     # ------------------------------------------------------------------
     # Parsing (exposed for tests to call directly with fixtures)

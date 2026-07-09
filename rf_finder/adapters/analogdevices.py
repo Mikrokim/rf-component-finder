@@ -20,10 +20,8 @@ Field-id -> ontology mapping confirmed from ADI view metadata:
 from __future__ import annotations
 
 import json
-import time
 
-import httpx
-
+from rf_finder import http
 from rf_finder.adapters.base import (
     Adapter,
     AdapterError,
@@ -41,15 +39,7 @@ _CAT_ID = 3003
 _DATA_URL = f"https://www.analog.com/cdp/pst2/data/standard/{_CAT_ID}.js"
 _PRODUCT_URL = "https://www.analog.com/en/products/{model}.html"
 
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA"})
-
-_MIN_DELAY_SECONDS = 5.0
 
 # ADI field-id holding a single -3 dB Bandwidth (Hz). Wideband / differential
 # amplifiers (e.g. AD8131, ADA49xx) carry this instead of a 279/278 frequency
@@ -119,39 +109,27 @@ class AnalogDevicesAdapter(Adapter):
     manufacturer = "Analog Devices"
     supported_components = {"amplifier"}
 
-    def __init__(self) -> None:
-        self._last_fetch_time: float = 0.0
-
     def search(self, spec: QuerySpec) -> list[Candidate]:
-        """Fetch the full RF-amplifier dataset and return all rows as Candidates."""
-        elapsed = time.time() - self._last_fetch_time
-        if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
-            time.sleep(_MIN_DELAY_SECONDS - elapsed)
+        """Fetch the full RF-amplifier dataset (cache-first) and return all rows.
 
-        try:
-            response = httpx.get(
-                _DATA_URL,
-                headers={
-                    "User-Agent": _USER_AGENT,
-                    "Accept": (
-                        "application/javascript,application/json,text/javascript,"
-                        "*/*;q=0.1"
-                    ),
-                    "Accept-Language": "en-US,en;q=0.5",
-                },
-                follow_redirects=True,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            self._last_fetch_time = time.time()
-        except httpx.HTTPError as exc:
-            raise AdapterError(
-                manufacturer=self.manufacturer,
-                context=f"HTTP error fetching {_DATA_URL}",
-                cause=exc,
-            ) from exc
+        The shared provider owns the User-Agent, delay, timeout and retries; a
+        ``None`` body means unreachable with no cached copy → skip this source.
+        """
+        result = http.fetch(
+            self.manufacturer,
+            _DATA_URL,
+            headers={
+                "Accept": (
+                    "application/javascript,application/json,text/javascript,"
+                    "*/*;q=0.1"
+                ),
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        if result.text is None:
+            return []
 
-        return drop_paramless(self._parse_json(response.text))
+        return drop_paramless(self._parse_json(result.text))
 
     def _parse_json(self, text: str) -> list[Candidate]:
         """Parse the parametric JSON body into Candidates."""

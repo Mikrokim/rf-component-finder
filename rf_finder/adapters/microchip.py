@@ -31,8 +31,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-import httpx
-
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
@@ -232,29 +231,29 @@ class MicrochipAdapter(Adapter):
 
         The per-part fetches (physical-specs + feed) run concurrently in a
         bounded thread pool — the MCP tools are documented read-only / stateless
-        / PARALLEL-SAFE, and ``httpx.Client`` is safe to share across threads.
-        No query-side filtering is applied (Microchip exposes none via this
-        path); the Verifier applies all constraints (REQ-4.1).
+        / PARALLEL-SAFE, and the shared cache provider is thread-safe (distinct
+        URLs → distinct files; Microchip has no politeness delay so its fetches
+        aren't serialized). No query-side filtering is applied (Microchip exposes
+        none via this path); the Verifier applies all constraints (REQ-4.1).
         """
-        with httpx.Client(follow_redirects=True, timeout=60.0) as client:
-            products = self._enumerate(client)
-            if not products:
-                # Tripwire: the MCP enumeration returned nothing for every term
-                # → API change / outage.  Fail loudly, don't return empty.
-                raise AdapterError(
-                    manufacturer=self.manufacturer,
-                    context="MCP search_products returned no parts for any amplifier term",
-                )
+        products = self._enumerate()
+        if not products:
+            # Tripwire: the MCP enumeration returned nothing for every term
+            # → API change / outage.  Fail loudly, don't return empty.
+            raise AdapterError(
+                manufacturer=self.manufacturer,
+                context="MCP search_products returned no parts for any amplifier term",
+            )
 
-            with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
-                built = pool.map(
-                    lambda item: self._process_part(client, item[0], item[1]),
-                    products.items(),
-                )
-            return [c for c in built if c is not None]
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+            built = pool.map(
+                lambda item: self._process_part(item[0], item[1]),
+                products.items(),
+            )
+        return [c for c in built if c is not None]
 
     def _process_part(
-        self, client: httpx.Client, model: str, product: dict
+        self, model: str, product: dict
     ) -> Candidate | None:
         """One part's fetch chain: physical-specs -> feed -> gated Candidate.
 
@@ -263,11 +262,11 @@ class MicrochipAdapter(Adapter):
         part must never abort the whole manufacturer's result set.
         """
         try:
-            physical = self._fetch_physical(client, model)
+            physical = self._fetch_physical(model)
             feed_url = physical.get("parametricData")
             if not feed_url:
                 return None  # not a parametric RF part
-            feed = self._fetch_feed(client, feed_url)
+            feed = self._fetch_feed(feed_url)
             if feed is None or not _is_amplifier(feed):
                 return None  # fetch failed, or text-search pollution (non-amplifier)
             return self._build_candidate(model, product, physical, feed)
@@ -278,7 +277,7 @@ class MicrochipAdapter(Adapter):
     # Retrieval steps
     # ------------------------------------------------------------------
 
-    def _enumerate(self, client: httpx.Client) -> dict[str, dict]:
+    def _enumerate(self) -> dict[str, dict]:
         """Union of ``search_products`` over every amplifier term, de-duped by part.
 
         Per-term failures are tolerated (transient API errors observed); only if
@@ -290,7 +289,6 @@ class MicrochipAdapter(Adapter):
             while True:
                 try:
                     inner = self._mcp_call(
-                        client,
                         "search_products",
                         {"searchTerm": term, "limit": _SEARCH_LIMIT, "offset": offset},
                     )
@@ -310,32 +308,34 @@ class MicrochipAdapter(Adapter):
                     break
         return products
 
-    def _fetch_physical(self, client: httpx.Client, part_number: str) -> dict:
+    def _fetch_physical(self, part_number: str) -> dict:
         """Return the ``search_product_physical_specs`` data for a part ({} on failure)."""
         try:
             inner = self._mcp_call(
-                client, "search_product_physical_specs", {"partNumber": part_number}
+                "search_product_physical_specs", {"partNumber": part_number}
             )
         except AdapterError:
             return {}
         data = inner.get("data") if isinstance(inner, dict) else None
         return data if isinstance(data, dict) else {}
 
-    def _fetch_feed(self, client: httpx.Client, url: str) -> dict | None:
-        """GET one microchipdirect parametric feed; None on any error (skip the part)."""
+    def _fetch_feed(self, url: str) -> dict | None:
+        """GET one microchipdirect parametric feed (cache-first); None on any error."""
+        result = http.fetch(self.manufacturer, url, headers=_FEED_HEADERS)
+        if result.text is None:
+            return None
         try:
-            response = client.get(url, headers=_FEED_HEADERS)
-            response.raise_for_status()
-            feed = response.json()
-        except (httpx.HTTPError, json.JSONDecodeError, ValueError):
+            feed = json.loads(result.text)
+        except (json.JSONDecodeError, ValueError):
             return None
         return feed if isinstance(feed, dict) else None
 
-    def _mcp_call(self, client: httpx.Client, tool: str, arguments: dict) -> dict:
-        """Call one MCP tool and return its unwrapped inner JSON payload.
+    def _mcp_call(self, tool: str, arguments: dict) -> dict:
+        """Call one MCP tool (cache-first POST) and return its unwrapped inner JSON.
 
-        Raises AdapterError on transport error, JSON-RPC error, or an
-        unexpected response shape (the site-change tripwire).
+        Raises AdapterError on transport failure, JSON-RPC error, or an
+        unexpected response shape (the site-change tripwire). The POST body feeds
+        the cache key, so each distinct call maps to its own file.
         """
         body = {
             "jsonrpc": "2.0",
@@ -343,16 +343,16 @@ class MicrochipAdapter(Adapter):
             "method": "tools/call",
             "params": {"name": tool, "arguments": arguments},
         }
-        try:
-            response = client.post(_MCP_URL, headers=_MCP_HEADERS, json=body)
-            response.raise_for_status()
-            rpc = _sse_json(response.text)
-        except httpx.HTTPError as exc:
+        result = http.fetch(
+            self.manufacturer, _MCP_URL, method="POST", json=body, headers=_MCP_HEADERS
+        )
+        if result.text is None:
             raise AdapterError(
                 manufacturer=self.manufacturer,
                 context=f"HTTP error calling MCP {tool}",
-                cause=exc,
-            ) from exc
+            )
+        try:
+            rpc = _sse_json(result.text)
         except (json.JSONDecodeError, ValueError) as exc:
             raise AdapterError(
                 manufacturer=self.manufacturer,

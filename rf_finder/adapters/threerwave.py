@@ -33,12 +33,11 @@ from __future__ import annotations
 
 import math
 import re
-import time
 from urllib.parse import quote
 
-import httpx
 from selectolax.parser import HTMLParser
 
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
@@ -49,23 +48,12 @@ from rf_finder.models import Candidate, QuerySpec, RawValue
 _BASE_URL = "https://3rwave.com"
 _AMPLIFIER_URL = _BASE_URL + "/amplifier/"
 
-# Browser-style User-Agent (plain bot UAs may be rejected; same string the other
-# adapters use).
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA", "—"})
 
 # Markers of a content-filter block stub returned instead of the real page
 # (e.g. the Etrog/safepage filter — see threerwave-plan.md OQ-3W-10).  Detected
 # so the failure is legible instead of a confusing "no table" error.
 _BLOCK_MARKERS = ("safepage.etrog", "block/block1", "cause=url_level")
-
-# Minimum seconds between consecutive live HTTP fetches (single light page).
-_MIN_DELAY_SECONDS = 1.0
 
 # ---------------------------------------------------------------------------
 # Column mapping: normalised header text -> (canonical_name, unit | None)
@@ -166,48 +154,33 @@ class ThreeRWaveAdapter(Adapter):
     manufacturer = "3rWave"
     supported_components = {"amplifier"}
 
-    def __init__(self) -> None:
-        self._last_fetch_time: float = 0.0
-
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
 
     def search(self, spec: QuerySpec) -> list[Candidate]:
-        """Fetch the amplifier page and return every PA + LNA row as Candidates.
+        """Fetch the amplifier page (cache-first); return every PA + LNA row.
 
         No server-side filtering exists (DataTables filters client-side only);
-        all rows are returned and the Verifier applies all constraints.
+        all rows are returned and the Verifier applies all constraints. The
+        shared provider owns the User-Agent, delay, timeout and retries; a
+        ``None`` body means unreachable with no cached copy → skip this source.
         """
-        # Enforce minimum inter-request delay (only paid on a live fetch).
-        elapsed = time.time() - self._last_fetch_time
-        if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
-            time.sleep(_MIN_DELAY_SECONDS - elapsed)
+        result = http.fetch(
+            self.manufacturer,
+            _AMPLIFIER_URL,
+            headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/webp,*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        if result.text is None:
+            return []
 
-        try:
-            response = httpx.get(
-                _AMPLIFIER_URL,
-                headers={
-                    "User-Agent": _USER_AGENT,
-                    "Accept": (
-                        "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                        "image/webp,*/*;q=0.8"
-                    ),
-                    "Accept-Language": "en-US,en;q=0.5",
-                },
-                follow_redirects=True,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            self._last_fetch_time = time.time()
-        except httpx.HTTPError as exc:
-            raise AdapterError(
-                manufacturer=self.manufacturer,
-                context=f"HTTP error fetching {_AMPLIFIER_URL}",
-                cause=exc,
-            ) from exc
-
-        return self._parse_html(response.text)
+        return self._parse_html(result.text)
 
     # ------------------------------------------------------------------
     # Internal parse method (exposed for tests to call directly)
