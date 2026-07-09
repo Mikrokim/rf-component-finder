@@ -137,7 +137,17 @@ The system SHALL provide `to_raw_params(params)` converting extractor output (ke
 
 ### Requirement: Unit reconciliation and number parsing in mapping
 
-`to_raw_params` SHALL reconcile emitted units to the ontology's canonical spelling — `C`/`°C`/`degrees C` become `degC` and `Ohms` becomes `Ohm` — and an empty or missing unit SHALL fall back to the parameter's canonical unit. Numbers SHALL be parsed out of free-text `value` strings; for a `max`-rule dimension string the worst-case (largest) number SHALL be used.
+`to_raw_params` SHALL reconcile stated units to the ontology's canonical spelling — `C`/`°C`/`degrees C` become `degC` and `Ohms` becomes `Ohm`. When a `value` carries no unit (empty or missing), `to_raw_params` SHALL fill the parameter's canonical unit ONLY when the parameter is unambiguous — it has a single accepted unit (`len(units) == 1`), which covers dimensionless parameters (e.g. MSL, canonical `""`) and single-unit ones (e.g. Gain → `dB`). For a multi-unit parameter (e.g. `freq_range` GHz/MHz, `P1dB`/`Psat` dBm/W/mW) a missing unit is ambiguous, so `to_raw_params` SHALL NOT guess the unit — it SHALL omit the parameter (leaving it UNKNOWN) rather than assume the canonical unit. Numbers SHALL be parsed out of free-text `value` strings; for a `max`-rule dimension string the worst-case (largest) number SHALL be used.
+
+#### Scenario: A single-unit parameter's missing unit is filled with the canonical unit
+
+- **WHEN** a Gain spec (accepted units `["dB"]`) has `min=22.0` and no unit
+- **THEN** the mapped `RawValue` is `RawValue(value=22.0, unit="dB")` (unambiguous, so filled)
+
+#### Scenario: A multi-unit parameter's missing unit is not guessed
+
+- **WHEN** a `freq_range` spec (accepted units `["GHz", "MHz"]`) has a value but no unit
+- **THEN** `freq_range` is absent from the mapped result (left UNKNOWN, not assumed `GHz`)
 
 #### Scenario: Size string parses to the largest dimension
 

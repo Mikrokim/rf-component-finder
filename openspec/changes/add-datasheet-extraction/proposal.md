@@ -2,7 +2,7 @@
 
 The datasheet-fallback layer (`future-requirements.md` REQ-2.2) — enriching parameters that manufacturer listing pages don't publish (Size, MSL, Temperature, ...) by reading the part's datasheet PDF with `source="datasheet"` — was **built and tested ahead of having an OpenSpec spec**. The code already exists in `rf_finder/datasheet/` and is fully covered by `tests/test_datasheet_{pdf,extractor,mapping}.py`, but it has no source-of-truth requirements. This change retroactively captures the already-implemented, already-verified module so `openspec/specs/` reflects reality.
 
-This is a **documentation/capture** change: no feature code is written or modified. Every requirement and scenario below is grounded in existing code and mirrors an existing passing test.
+This is primarily a **documentation/capture** change: almost every requirement and scenario below is grounded in pre-existing code and mirrors an existing passing test. It additionally includes **one deliberate hardening** of `mapping.py`: when a `value` arrives without a unit, the canonical unit is now filled only for unambiguous (single-accepted-unit) parameters; for a multi-unit parameter (e.g. `freq_range` GHz/MHz) a missing unit is left UNKNOWN instead of being guessed as the canonical unit — consistent with the module's existing "never guess an optimistic value" rule.
 
 ## What Changes
 
@@ -10,7 +10,8 @@ This is a **documentation/capture** change: no feature code is written or modifi
   - **PDF → text** (`pdf.py`): `datasheet_text_from_pdf` / `_join_page_text` — open a datasheet PDF with `pdfplumber` and return its joined page text.
   - **LLM extraction contract** (`extractor.py`): the published `EXTRACT_RF_PARAMETERS_INSTRUCTION` and `extract_rf_parameters`, which run a config-selected LLM and return a normalized `{unit, min, typ, max, value, condition}` object (or `None`) per requested parameter, enforcing the contract on the model's reply.
   - **Extractor-output → Verifier mapping** (`mapping.py`): `to_raw_params`, which converts extractor output into `{canonical_name: RawValue}` shaped by each parameter's ontology `comparison` rule, with unit reconciliation and skipping of unmappable specs.
-- **NOT breaking.** No code changes; no behavior changes. The `source="datasheet"` / `confidence="datasheet"` enum slots already exist in `core-data-models` and `result-verification` and are unchanged, so those capabilities are **not** modified by this change.
+- **One behavior change (not breaking):** `to_raw_params` no longer assumes the canonical unit for a multi-unit parameter whose `value` lacks a unit — it omits the parameter (Verifier reports UNKNOWN) rather than risk a wrong-by-1000x assumption. This tightens (never loosens) matching: a value that would have been guessed is now honestly UNKNOWN. All other module behavior is captured as-is.
+- The `source="datasheet"` / `confidence="datasheet"` enum slots already exist in `core-data-models` and `result-verification` and are unchanged, so those capabilities are **not** modified by this change.
 
 ## Capabilities
 

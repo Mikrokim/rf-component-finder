@@ -114,6 +114,30 @@ def test_msl_string_parses_to_number_with_canonical_unit():
 
 
 # ---------------------------------------------------------------------------
+# Missing unit: fill the canonical unit only when it is unambiguous
+# ---------------------------------------------------------------------------
+
+def test_single_unit_missing_unit_fills_canonical():
+    # Gain accepts only dB, so a value with no unit unambiguously means dB.
+    params = {"Gain": _spec_obj(min=22.0)}  # unit omitted
+
+    raw = to_raw_params(params)
+
+    assert raw["Gain"] == RawValue(value=22.0, unit="dB")
+
+
+def test_multi_unit_missing_unit_is_not_guessed():
+    # freq_range accepts GHz/MHz — a value with no unit is ambiguous, so the
+    # mapping must NOT assume the canonical GHz; it omits the parameter (UNKNOWN)
+    # rather than risk a 1000x error.
+    params = {"freq_range": _spec_obj(min=2.0, max=6.0)}  # unit omitted
+
+    raw = to_raw_params(params)
+
+    assert "freq_range" not in raw
+
+
+# ---------------------------------------------------------------------------
 # Skipping
 # ---------------------------------------------------------------------------
 

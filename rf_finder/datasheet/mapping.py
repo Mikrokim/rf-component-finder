@@ -26,8 +26,9 @@ The shape is chosen from each parameter's ``comparison``:
     a ``min`` rule, or ``min`` for a ``max`` rule), which would be optimistic; a
     parameter with neither the matching field nor ``typ`` is left UNKNOWN.
 
-Parameters the ontology does not define, and not-found params (``None``), are
-skipped so the Verifier reports them as ``UNKNOWN`` rather than mis-comparing.
+Parameters the ontology does not define, not-found params (``None``), and specs
+whose unit is missing on a multi-unit parameter (ambiguous) are skipped so the
+Verifier reports them as ``UNKNOWN`` rather than mis-comparing or guessing.
 Multi-option params (``value`` is a list, e.g. a supply with several selectable
 voltages) map to a list ``RawValue``, which ``contains`` supports — they are
 verified like any other parameter.
@@ -66,11 +67,25 @@ def _numbers(value) -> list[float]:
     return [float(m) for m in _NUMBER.findall(str(value))]
 
 
-def _normalize_unit(unit, canonical_unit: str) -> str:
-    """Reconcile the emitted unit with the ontology's canonical spelling."""
-    if unit is None or unit == "":
-        return canonical_unit
-    return _UNIT_ALIASES.get(unit, unit)
+def _normalize_unit(unit, pdef) -> str | None:
+    """Reconcile the emitted unit with the ontology's canonical spelling.
+
+    A STATED unit is alias-reconciled (e.g. ``"C"`` -> ``"degC"``) or passed
+    through unchanged.  A MISSING/empty unit is filled from the ontology ONLY
+    when the parameter is unambiguous — it has a single accepted unit
+    (``len(pdef.units) == 1``), which covers dimensionless params (MSL, canonical
+    ``""``) and single-unit ones (Gain -> ``"dB"``).  For a MULTI-unit parameter
+    (``freq_range`` GHz/MHz, ``P1dB``/``Psat`` dBm/W/mW) a missing unit is
+    genuinely ambiguous, so this returns ``None`` rather than guess the canonical
+    unit — the caller then omits the parameter and the Verifier reports it
+    UNKNOWN, consistent with the "never guess an optimistic value" rule the
+    min/max scalar picks use above.
+    """
+    if unit is not None and unit != "":
+        return _UNIT_ALIASES.get(unit, unit)
+    if len(pdef.units) == 1:
+        return pdef.canonical_unit
+    return None
 
 
 def _to_value(spec: dict, comparison: str):
@@ -125,8 +140,9 @@ def to_raw_params(params: dict) -> dict[str, RawValue]:
 
     *params* is keyed by ontology canonical names (e.g. ``"Gain"``,
     ``"Temperature"``).  Keys the ontology does not define, not-found params
-    (``None``), and specs from which no value can be formed are omitted — the
-    Verifier then reports those constraints as ``UNKNOWN``.
+    (``None``), specs from which no value can be formed, and specs whose unit is
+    missing on a MULTI-unit parameter (ambiguous — see ``_normalize_unit``) are
+    omitted — the Verifier then reports those constraints as ``UNKNOWN``.
     """
     raw: dict[str, RawValue] = {}
     for name, spec in params.items():
@@ -136,8 +152,10 @@ def to_raw_params(params: dict) -> dict[str, RawValue]:
         value = _to_value(spec, pdef.comparison)
         if value is None:
             continue
-        raw[name] = RawValue(
-            value=value,
-            unit=_normalize_unit(spec.get("unit"), pdef.canonical_unit),
-        )
+        unit = _normalize_unit(spec.get("unit"), pdef)
+        if unit is None:
+            # Ambiguous: a multi-unit parameter arrived without a unit — don't
+            # guess the canonical unit; leave it UNKNOWN.
+            continue
+        raw[name] = RawValue(value=value, unit=unit)
     return raw
