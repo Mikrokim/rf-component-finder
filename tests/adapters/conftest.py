@@ -19,16 +19,16 @@ def pytest_configure(config: pytest.Config) -> None:
 def _configure_cache(tmp_path):
     """Configure an isolated, empty response cache for every adapter test.
 
-    Adapters now fetch through the shared provider, which the CLI configures at
-    startup; tests call ``search()`` directly, so they must configure it too. A
-    fresh temp dir keeps tests isolated and — crucially for the ``network``
+    Adapters now fetch through the shared HTTP service, which the CLI configures
+    at startup; tests call ``search()`` directly, so they must configure it too.
+    A fresh temp dir keeps tests isolated and — crucially for the ``network``
     tests — starts cold, so ``search()`` performs a real live fetch instead of
     serving a pre-existing cached page. Parse-only tests are unaffected (they
-    call ``_parse_html`` / ``_parse_json`` and never touch the provider).
+    call ``_parse_html`` / ``_parse_json`` and never touch the service).
     """
-    from rf_finder import cache
+    from rf_finder import http
     from rf_finder.config import CacheConfig
 
-    cache.configure(
+    http.configure(
         CacheConfig(cache_dir=tmp_path / "cache", ttl_days=30, enabled=True)
     )

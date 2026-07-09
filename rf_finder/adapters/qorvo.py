@@ -36,7 +36,7 @@ import re
 
 from selectolax.parser import HTMLParser
 
-from rf_finder import cache
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
@@ -184,7 +184,7 @@ class QorvoAdapter(Adapter):
         generous timeout (Qorvo's ~5.3 MB page), and retries. A ``None`` body
         means the page was unreachable with no cached copy → skip this source.
         """
-        result = cache.fetch(
+        result = http.fetch(
             self.manufacturer,
             _PAGE_URL,
             headers={

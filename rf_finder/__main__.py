@@ -152,7 +152,7 @@ def run_search(provider) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    from rf_finder import cache, cli
+    from rf_finder import http, cli
     from rf_finder.config import load_cache_config
 
     parser = argparse.ArgumentParser(
@@ -168,7 +168,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
 
-    provider = cache.configure(load_cache_config())
+    provider = http.configure(load_cache_config())
     if args.command == "refresh":
         cli.run_refresh(provider, args.adapter)
     else:

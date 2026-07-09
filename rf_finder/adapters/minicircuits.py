@@ -19,7 +19,7 @@ import re
 
 from selectolax.parser import HTMLParser
 
-from rf_finder import cache
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
@@ -102,7 +102,7 @@ class MiniCircuitsAdapter(Adapter):
         shared provider owns the User-Agent, delay, timeout and retries; a
         ``None`` body means unreachable with no cached copy → skip this source.
         """
-        result = cache.fetch(
+        result = http.fetch(
             self.manufacturer,
             _AMPLIFIERS_URL,
             headers={

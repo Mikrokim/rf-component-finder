@@ -31,7 +31,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-from rf_finder import cache
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
@@ -321,7 +321,7 @@ class MicrochipAdapter(Adapter):
 
     def _fetch_feed(self, url: str) -> dict | None:
         """GET one microchipdirect parametric feed (cache-first); None on any error."""
-        result = cache.fetch(self.manufacturer, url, headers=_FEED_HEADERS)
+        result = http.fetch(self.manufacturer, url, headers=_FEED_HEADERS)
         if result.text is None:
             return None
         try:
@@ -343,7 +343,7 @@ class MicrochipAdapter(Adapter):
             "method": "tools/call",
             "params": {"name": tool, "arguments": arguments},
         }
-        result = cache.fetch(
+        result = http.fetch(
             self.manufacturer, _MCP_URL, method="POST", json=body, headers=_MCP_HEADERS
         )
         if result.text is None:

@@ -12,7 +12,7 @@ import pytest
 
 import rf_finder.__main__ as entry
 import rf_finder.cli as cli
-from rf_finder import cache
+from rf_finder import http
 from rf_finder.cache import _cache_path
 from rf_finder.config import CacheConfig
 from rf_finder.models import Candidate, QuerySpec
@@ -28,7 +28,7 @@ class _FakeAdapter:
         self.url = url
 
     def search(self, spec):
-        result = cache.fetch("FakeCo", self.url)
+        result = http.fetch("FakeCo", self.url)
         if result.text is None:
             return []
         return [Candidate(
@@ -48,9 +48,9 @@ def _no_sleep(monkeypatch):
 
 
 def test_fresh_search_makes_no_network_call(tmp_path, monkeypatch):
-    provider = cache.configure(CacheConfig(cache_dir=tmp_path, ttl_days=30, enabled=True))
+    provider = http.configure(CacheConfig(cache_dir=tmp_path, ttl_days=30, enabled=True))
     # Warm the cache so the adapter's fetch is a fresh hit.
-    provider._store(_cache_path(tmp_path, "FakeCo", "https://fake/x"), "<html/>")
+    provider._cache.store(_cache_path(tmp_path, "FakeCo", "https://fake/x"), "<html/>")
 
     fake = _FakeAdapter("https://fake/x")
     # Replace the whole adapter loader so the real adapters never register/fetch.
@@ -73,7 +73,7 @@ def test_fresh_search_makes_no_network_call(tmp_path, monkeypatch):
 
 
 def test_refresh_continues_past_failure(tmp_path, monkeypatch, capsys):
-    provider = cache.configure(CacheConfig(cache_dir=tmp_path, ttl_days=30, enabled=True))
+    provider = http.configure(CacheConfig(cache_dir=tmp_path, ttl_days=30, enabled=True))
 
     class _BadAdapter:
         manufacturer = "BadCo"

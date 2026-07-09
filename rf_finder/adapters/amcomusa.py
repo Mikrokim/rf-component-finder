@@ -29,7 +29,7 @@ import re
 
 from selectolax.parser import HTMLParser
 
-from rf_finder import cache
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
@@ -189,7 +189,7 @@ class AmcomUSAAdapter(Adapter):
         cached copy, so the caller skips that one category and keeps the others.
         """
         url = _BASE_URL + path
-        result = cache.fetch(
+        result = http.fetch(
             self.manufacturer,
             url,
             headers={

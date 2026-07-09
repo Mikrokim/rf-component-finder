@@ -23,7 +23,7 @@ import html as htmlmod
 import json
 import re
 
-from rf_finder import cache
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, RawValue
 
@@ -105,7 +105,7 @@ class MacomAdapter(Adapter):
         timeout and retries; a ``None`` body means unreachable with no cached
         copy → skip this source.
         """
-        result = cache.fetch(
+        result = http.fetch(
             self.manufacturer,
             _ALL_AMPLIFIERS_URL,
             headers={
