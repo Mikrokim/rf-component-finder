@@ -141,7 +141,6 @@ def _extract_json_object(text: str) -> str:
 def extract_rf_parameters(
     datasheet_text: str,
     requested_parameters: list[str],
-    provider: str | None = None,
     runtime=None,
 ) -> dict:
     """Extract the requested parameters from an RF component datasheet's text.
@@ -152,24 +151,19 @@ def extract_rf_parameters(
     all six fields (missing ones as ``None``), normalised so the shape is
     uniform regardless of how much of the schema the model spelled out.
 
-    The model is taken from the ``DATASHEET_MODEL`` variable in
-    ``rf_finder.config``, not passed in.  ``provider`` defaults to
-    ``DATASHEET_PROVIDER`` (``"local"``/``"openai"``/``"mock"``) and may be
-    overridden per call.  ``runtime`` lets callers/tests supply their own
-    GenAIFabric instance (e.g. one whose provider_map holds a MockProvider);
-    default is the shared runtime.
+    The model and provider are taken from the ``DATASHEET_MODEL`` and
+    ``DATASHEET_PROVIDER`` variables in ``rf_finder.config``, not passed in.
+    ``runtime`` lets callers/tests supply their own GenAIFabric instance (e.g.
+    one whose provider_map holds a MockProvider); default is the shared runtime.
 
     Raises ``RuntimeError`` when the LLM run itself fails and ``ValueError``
     when the model's output is not valid JSON.
     """
-    if provider is None:
-        provider = DATASHEET_PROVIDER
-
     if runtime is None:
         runtime = _get_runtime()
     result = runtime.run(
         instruction=EXTRACT_RF_PARAMETERS_INSTRUCTION,
-        provider=provider,
+        provider=DATASHEET_PROVIDER,
         model=DATASHEET_MODEL,
         input={
             "datasheet": datasheet_text,

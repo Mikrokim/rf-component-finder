@@ -125,7 +125,7 @@ def test_thinking_model_preamble_is_stripped():
     )
     rt = _runtime(thinky)
 
-    out = extract_rf_parameters("...", ["gain"], provider="local", runtime=rt)
+    out = extract_rf_parameters("...", ["gain"], runtime=rt)
 
     assert out == {"gain": _FOUND_GAIN}
 
