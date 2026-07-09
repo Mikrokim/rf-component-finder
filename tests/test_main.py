@@ -12,6 +12,7 @@ import pytest
 
 import rf_finder.__main__ as entry
 import rf_finder.cli as cli
+import rf_finder.search as core
 from rf_finder import cache
 from rf_finder.cache import _cache_path
 from rf_finder.config import CacheConfig
@@ -54,7 +55,8 @@ def test_fresh_search_makes_no_network_call(tmp_path, monkeypatch):
 
     fake = _FakeAdapter("https://fake/x")
     # Replace the whole adapter loader so the real adapters never register/fetch.
-    monkeypatch.setattr(entry, "_load_adapters", lambda: {"FakeCo": fake})
+    # (`_load_adapters` now lives in the shared core module `rf_finder.search`.)
+    monkeypatch.setattr(core, "_load_adapters", lambda: {"FakeCo": fake})
     monkeypatch.setattr("rf_finder.form.build_form", lambda ct: object())
     monkeypatch.setattr("rf_finder.form.collect", lambda schema: QuerySpec("amplifier", []))
     monkeypatch.setattr("builtins.input", lambda *a: "")   # default component, don't show fails
@@ -83,7 +85,7 @@ def test_refresh_continues_past_failure(tmp_path, monkeypatch, capsys):
             raise RuntimeError("boom")
 
     good = _FakeAdapter("https://fake/good")
-    monkeypatch.setattr(entry, "_load_adapters", lambda: {"BadCo": _BadAdapter(), "FakeCo": good})
+    monkeypatch.setattr(core, "_load_adapters", lambda: {"BadCo": _BadAdapter(), "FakeCo": good})
 
     class _Resp:
         text = "<html/>"

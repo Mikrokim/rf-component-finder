@@ -50,7 +50,7 @@ def run_refresh(provider, adapter_name: str | None = None) -> None:
     Errors are isolated per adapter: one failing source never stops the rest.
     """
     from rf_finder.models import QuerySpec
-    from rf_finder.__main__ import _load_adapters
+    from rf_finder.search import _load_adapters
 
     adapters = _load_adapters()
     selected = list(adapters.values())

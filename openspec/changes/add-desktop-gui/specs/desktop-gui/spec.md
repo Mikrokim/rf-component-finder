@@ -66,32 +66,60 @@ The window SHALL execute the search (each supporting adapter's `search(spec)` fo
 - **THEN** only adapters whose `supported_components` include that type are queried, as in the CLI flow
 - **AND** each candidate is passed through `verify(spec, candidate)` to obtain its verdict
 
-### Requirement: Results shown in a sorted, color-coded table with browser deep-links
+### Requirement: Matching components shown in a table with browser deep-links
 
-Completed results SHALL be displayed in a table with columns model, manufacturer, verdicts, and url, ordered match first, then partial, then fail. Each row SHALL be color-coded by its overall verdict (match / partial / fail). Double-clicking a row SHALL open that candidate's url in the system web browser. When a search returns no candidates, the window SHALL display an explicit empty-result indication rather than an empty table with no explanation.
+The table SHALL display only the components whose overall verdict is `match`; `partial` and `fail` candidates SHALL be screened out of the table. It SHALL show at most `max_results` (a configurable cap, default 10, loaded from `config.yaml`) matches; when more exist, the window SHALL indicate that only the top `max_results` of the total are shown so the user knows to narrow the filters. The table SHALL have columns model, manufacturer, verdicts, and url. Double-clicking a row SHALL open that candidate's url in the system web browser. When a search yields no `match` candidates, the window SHALL display an explicit "no matching components" indication (including the number screened) rather than an empty table with no explanation.
 
-#### Scenario: Results are grouped and colored by verdict
+#### Scenario: Only matches are listed; the rest are screened out
 
 - **WHEN** a search yields a mix of match, partial, and fail candidates
-- **THEN** the table lists them ordered match, then partial, then fail
-- **AND** each row is color-coded according to its overall verdict
+- **THEN** the table lists only the `match` candidates (at most 10)
+
+#### Scenario: More than ten matches shows only the top ten
+
+- **WHEN** a search yields more than 10 `match` candidates
+- **THEN** the table shows exactly 10 rows
+- **AND** the window indicates the total number of matches and that only the top 10 are shown
 
 #### Scenario: Row opens the datasheet url
 
 - **WHEN** the user double-clicks a result row
 - **THEN** that candidate's url is opened in the system web browser
 
-#### Scenario: No candidates found
+#### Scenario: No matching components found
 
-- **WHEN** a search returns no candidates
-- **THEN** the window shows an explicit "no results" indication
+- **WHEN** a search returns candidates but none with overall verdict `match`
+- **THEN** the window shows an explicit "no matching components" indication with the number screened
+
+### Requirement: Numeric fields reject non-numeric input as it is typed
+
+Every value entry (min, max, and scalar value) SHALL accept only characters that form a number in progress (digits, an optional leading `-`, and a single `.`); a keystroke that would make the field non-numeric SHALL be rejected so it never appears. Unit selectors are fixed dropdowns and cannot take a free-typed value.
+
+#### Scenario: Letters cannot be typed into a value field
+
+- **WHEN** the user types a letter into a min/max/value entry
+- **THEN** the keystroke is rejected and the field keeps only numeric text
+
+### Requirement: A `contains` field requires both bounds before searching
+
+Because a `contains` parameter (e.g. frequency range) describes a band, a one-sided entry is meaningless. Before searching, IF a `contains` field has exactly one of its min/max filled, the window SHALL report an error naming that field and SHALL NOT run the search — rather than silently dropping the half-entered constraint. A `between`/`min`/`max` field MAY be left one-sided (an open-ended bound) and SHALL NOT trigger this error.
+
+#### Scenario: Half-filled contains range is rejected
+
+- **WHEN** the user fills only the minimum of a `contains` field (e.g. frequency range) and clicks Search
+- **THEN** the window shows an error naming that field and does not run the search
+
+#### Scenario: One-sided between range is allowed
+
+- **WHEN** the user fills only the minimum of a `between` field (e.g. gain) and clicks Search
+- **THEN** no validation error is raised for that field and the search runs
 
 ### Requirement: Invalid input is reported without crashing
 
-When `collect` raises `ValueError` (for example an unrecognized unit or a min greater than max), the window SHALL catch it and present the message in a dialog, leaving the form intact for correction, and SHALL NOT close or crash.
+When `collect` raises `ValueError` (for example a min greater than max), the window SHALL catch it and present the message in a dialog, leaving the form intact for correction, and SHALL NOT close or crash.
 
 #### Scenario: Bad input surfaces as a dialog
 
-- **WHEN** the user enters a min greater than the max (or an invalid unit) and clicks Search
+- **WHEN** the user enters a min greater than the max and clicks Search
 - **THEN** the `ValueError` from `collect` is caught and its message is shown in a dialog
 - **AND** the window stays open with the entered values preserved for correction

@@ -25,18 +25,22 @@ Tkinter ships with CPython, so the client needs no extra install, and `ttk.Combo
 `run_search` today interleaves the logic (`build_form` → `collect` → adapter loop → `verify` → sort) with its terminal I/O (`input()`/`print()`), so there is no function a second front-end can call to just *get results*. We extract the terminal-free middle into:
 
 ```
-def search_and_verify(provider, spec) -> list[VerifiedCandidate]:
+def search_and_verify(spec, *, on_source=None) -> list[VerifiedCandidate]:
     # select adapters whose supported_components include spec.component_type,
     # adapter.search(spec) per source (per-source exception isolation),
     # verify(spec, candidate) for each, sort match→partial→fail. No print/input.
+    # on_source(outcome, adapter, payload) is an optional progress hook so the CLI
+    # can keep its per-source lines; the GUI passes None (or its own progress).
 ```
 
 `run_search` keeps its exact `print` wrapping but calls this helper for the work; the GUI imports and calls the **same** helper, then renders a table. This guarantees one physical search implementation shared by both front-ends — the GUI cannot drift from the CLI because it *is* the CLI's search. `gui.py` still owns only presentation: it calls `build_form`, `collect`, and `search_and_verify`, and computes no constraints or ranking itself. Alternative considered and rejected: a private copy of the loop inside `gui.py` (no CLI edit) — smaller blast radius, but two loops to keep in sync, which is exactly the drift the user asked to avoid.
 
-Home for the helper: `rf_finder/__main__.py`, next to `run_search`, imported by the GUI as `from rf_finder.__main__ import search_and_verify` (mirrors the existing `from rf_finder.__main__ import _load_adapters` in `cli.py`). Importing `__main__` is side-effect-free (the `main()` call is under a `__name__ == "__main__"` guard).
+`provider` is deliberately **not** a parameter: adapters reach the network through the process-global provider that `cache.configure(load_cache_config())` installs, so the core needs no handle. The per-source cache-age note (`cli._snapshot_note(provider, …)`) stays in the CLI's `on_source` callback, which already closes over `provider`.
 
-### D3 — Background thread + thread-safe hand-off via `root.after`
-The search runs in a `threading.Thread`; on completion it does **not** touch widgets directly. Instead it marshals the results back to the UI thread with `root.after(0, ...)`, the standard Tkinter pattern for "run this on the main loop". During the run the Search button is disabled and a loading label is shown, which both signals progress and enforces the "no concurrent search" requirement. Alternative considered: polling a `queue.Queue` from a periodic `after` tick — equivalent, but `after(0, callback)` is simpler for a single hand-off.
+Home for the helper: a new terminal-free module `rf_finder/search.py` holding `_load_adapters`, `_sources_for`, and `search_and_verify`. Both front-ends import from it (`from rf_finder.search import search_and_verify`); `cli.py`'s existing `from rf_finder.__main__ import _load_adapters` moves to `from rf_finder.search import _load_adapters`. This keeps `__main__` as pure CLI glue that nothing else imports, matching the project's focused-module style (`form`, `verifier`, `cache`, `config`). Chosen over parking it in `__main__.py` (would force the GUI to import the CLI entry point) and over `reporter.py` (that stub is about *rendering/ranking* results, not *running* the search).
+
+### D3 — Background thread + thread-safe hand-off via a `queue.Queue`
+The search runs in a `threading.Thread`; on completion it does **not** touch widgets directly. The worker only `put`s a `("ok", results)` / `("error", exc)` message on a `queue.Queue`; a periodic `root.after(100, self._poll_queue)` tick — scheduled from and running on the UI thread — drains the queue and updates the widgets. During the run the Search button is disabled and a loading label is shown, which both signals progress and enforces the "no concurrent search" requirement. Alternative rejected: calling `root.after(0, ...)` from the worker thread — the tidy "single hand-off" version, but it crashed with `RuntimeError: main thread is not in main loop` because registering the callback touches Tcl from the worker thread, which this Tcl build forbids. The queue keeps every Tk call on the UI thread, which is the only safe rule.
 
 ### D4 — Form widget model keyed by the answers convention
 Each field builds its widgets from its `Field` (min/max entries for range comparisons, one value entry for scalar `eq`, a `ttk.Combobox` of `field.units` defaulting to `units[0]`). Widgets are stored in a small per-field record so that on Search we can emit exactly the `answers` keys `collect` expects (`<name>.min`/`.max`/`.unit` or `<name>.value`/`.unit`). Changing the component-type combobox destroys the current field frame and rebuilds from `build_form(new_type)`, so stale widgets can't leak values into the next spec.

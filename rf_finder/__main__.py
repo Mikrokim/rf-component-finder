@@ -16,31 +16,13 @@ import argparse
 import sys
 
 
-def _load_adapters():
-    """Import every adapter module (triggers @register) and return the registry."""
-    from rf_finder.adapters.minicircuits import MiniCircuitsAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.amcomusa import AmcomUSAAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.analogdevices import AnalogDevicesAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.marki import MarkiMicrowaveAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.rwmmic import RwmmicAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.macom import MacomAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.ums import UmsAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.threerwave import ThreeRWaveAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.microchip import MicrochipAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.guerrillarf import GuerrillaRFAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.vectrawave import VectraWaveAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.qorvo import QorvoAdapter  # noqa: F401 (triggers @register)
-    from rf_finder.adapters.base import ADAPTERS
-
-    return ADAPTERS
-
-
 def run_search(provider) -> None:
     from rf_finder.form import build_form, collect
-    from rf_finder.verifier import verify
+    from rf_finder.search import search_and_verify
+    from rf_finder.config import load_max_results
     from rf_finder import cli   # cache-feature helpers (snapshot note, join)
 
-    adapters = _load_adapters()
+    max_results = load_max_results()
 
     # ── 1. Form ──────────────────────────────────────────────────────────────
     print("\n=== RF Component Finder ===\n")
@@ -75,38 +57,30 @@ def run_search(provider) -> None:
     if not spec.constraints:
         print("  (no filters — returning all results)")
 
-    # ── 2. Search ─────────────────────────────────────────────────────────────
-    sources = [a for a in adapters.values() if spec.component_type in a.supported_components]
+    # ── 2. Search + verify (shared headless core) ─────────────────────────────
+    from rf_finder.search import _sources_for
+    sources = _sources_for(spec)
     names = ", ".join(a.manufacturer for a in sources) or "(none)"
     print(f"\nFetching from {len(sources)} source(s): {names}… (this may take a few seconds)\n")
 
-    candidates = []
-    for adapter in sources:
-        try:
-            found = adapter.search(spec)
-        except Exception as e:
-            print(f"  [!] {adapter.manufacturer}: {e}")
-            continue
-        if not found:
+    def _note(outcome, adapter, payload):
+        if outcome == "error":
+            print(f"  [!] {adapter.manufacturer}: {payload}")
+        elif outcome == "empty":
             print(f"  – {adapter.manufacturer}: no data (source skipped){cli._snapshot_note(provider, adapter.manufacturer)}")
-            continue
-        candidates.extend(found)
-        print(f"  • {adapter.manufacturer}: {len(found)} candidates{cli._snapshot_note(provider, adapter.manufacturer)}")
+        else:  # "ok"
+            print(f"  • {adapter.manufacturer}: {len(payload)} candidates{cli._snapshot_note(provider, adapter.manufacturer)}")
 
-    if not candidates:
+    verified = search_and_verify(spec, on_source=_note)
+
+    if not verified:
         print("No candidates returned.")
         cli._join_cache(provider)
         return
 
-    print(f"Retrieved {len(candidates)} raw candidates.")
+    print(f"Retrieved {len(verified)} raw candidates.")
 
-    # ── 3. Verify ─────────────────────────────────────────────────────────────
-    verified = [verify(spec, c) for c in candidates]
-
-    # ── 4. Simple output ──────────────────────────────────────────────────────
-    order = {"match": 0, "partial": 1, "fail": 2}
-    verified.sort(key=lambda v: order.get(v.overall, 9))
-
+    # ── 3. Output (already sorted match→partial→fail by the core) ──────────────
     matches  = [v for v in verified if v.overall == "match"]
     partials = [v for v in verified if v.overall == "partial"]
     fails    = [v for v in verified if v.overall == "fail"]
@@ -130,7 +104,9 @@ def run_search(provider) -> None:
 
     if matches:
         print(f"── MATCHES ({len(matches)}) ──")
-        _show(matches)
+        _show(matches, max_results)
+        if len(matches) > max_results:
+            print(f"  … showing top {max_results} of {len(matches)} — refine the filters to narrow down")
         print()
 
     if partials:

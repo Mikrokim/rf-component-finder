@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from rf_finder.config import CacheConfig, ConfigError, load_cache_config
+from rf_finder.config import (
+    DEFAULT_MAX_RESULTS,
+    CacheConfig,
+    ConfigError,
+    load_cache_config,
+    load_max_results,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -112,3 +118,43 @@ def test_empty_file_uses_defaults(tmp_path):
     assert cfg == CacheConfig(
         cache_dir=Path(".cache/responses"), ttl_days=30, enabled=True
     )
+
+
+# ---------------------------------------------------------------------------
+# max_results (top-level display cap)
+# ---------------------------------------------------------------------------
+
+class TestMaxResults:
+    """The ``max_results`` display cap, read from the top level of config.yaml."""
+
+    def test_missing_file_uses_default(self, tmp_path):
+        assert load_max_results(tmp_path / "nope.yaml") == DEFAULT_MAX_RESULTS
+
+    def test_missing_key_uses_default(self, tmp_path):
+        path = tmp_path / "config.yaml"
+        path.write_text("cache:\n  ttl_days: 3\n", encoding="utf-8")
+        assert load_max_results(path) == DEFAULT_MAX_RESULTS
+
+    def test_value_is_read(self, tmp_path):
+        path = tmp_path / "config.yaml"
+        path.write_text("max_results: 25\n", encoding="utf-8")
+        assert load_max_results(path) == 25
+
+    def test_zero_raises(self, tmp_path):
+        path = tmp_path / "config.yaml"
+        path.write_text("max_results: 0\n", encoding="utf-8")
+        with pytest.raises(ConfigError):
+            load_max_results(path)
+
+    def test_non_integer_raises(self, tmp_path):
+        path = tmp_path / "config.yaml"
+        path.write_text("max_results: lots\n", encoding="utf-8")
+        with pytest.raises(ConfigError):
+            load_max_results(path)
+
+    def test_boolean_raises(self, tmp_path):
+        # bool is a subclass of int; it must not sneak through as 1.
+        path = tmp_path / "config.yaml"
+        path.write_text("max_results: true\n", encoding="utf-8")
+        with pytest.raises(ConfigError):
+            load_max_results(path)
