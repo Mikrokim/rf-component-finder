@@ -46,6 +46,34 @@ def _power_to_dbm(value: float, from_unit: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Which units may be entered for each canonical unit (drives the form selectors)
+# ---------------------------------------------------------------------------
+
+#: Every source unit convertible to a given canonical unit, canonical first.
+#: This is the single source of truth for the unit selectors: the ontology
+#: derives each parameter's accepted units from it (see ``parameters.units_for``),
+#: so a unit added to the converters here appears in the form automatically.
+_CANONICAL_UNITS: dict[str, list[str]] = {
+    # Frequency: derived from the conversion table, canonical (largest) first.
+    "GHz": sorted(_FREQ_TO_GHZ, key=lambda u: -_FREQ_TO_GHZ[u]),
+    # Power: dBm canonical, plus the linear units ``_power_to_dbm`` accepts.
+    "dBm": ["dBm", "W", "mW"],
+    # Ratio: dimensionless — only dB.
+    "dB": ["dB"],
+}
+
+
+def units_for(canonical: str) -> list[str]:
+    """Return all units convertible to *canonical*, canonical first.
+
+    A canonical unit with no alternative-unit converter (e.g. ``V``, ``mm``,
+    ``degC``, ``""``) returns ``[canonical]`` — its only accepted unit. A fresh
+    list is returned each call so callers can't mutate the registry.
+    """
+    return list(_CANONICAL_UNITS.get(canonical, [canonical]))
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
