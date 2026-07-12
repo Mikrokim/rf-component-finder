@@ -11,6 +11,7 @@ Run with:  python -m rf_finder.ui.gui
 
 from __future__ import annotations
 
+import asyncio
 import queue
 import re
 import threading
@@ -84,6 +85,7 @@ class App:
 
         # Controls: the Search button and a status line (loading / result count).
         self._searching = False
+        self._skill_running = False
         self.last_results: list = []
         controls = ttk.Frame(self.form_area)
         controls.pack(fill="x", pady=(16, 0))
@@ -92,6 +94,12 @@ class App:
             bootstyle="success", width=16,
         )
         self.search_button.pack(side="left", ipady=4)
+        # AI Search: same form + same table, but a Claude Skill is the engine.
+        self.skill_button = ttk.Button(
+            controls, text="AI Search", command=self._on_run_skill,
+            bootstyle="info", width=16,
+        )
+        self.skill_button.pack(side="left", padx=(10, 0), ipady=4)
         self.status_var = tk.StringVar(value="")
         ttk.Label(controls, textvariable=self.status_var, bootstyle="secondary").pack(
             side="left", padx=(14, 0)
@@ -280,8 +288,12 @@ class App:
                 kind, payload = self._result_queue.get_nowait()
                 if kind == "ok":
                     self._deliver_results(payload)
-                else:
+                elif kind == "error":
                     self._on_error(payload)
+                elif kind == "skill_done":
+                    self._deliver_skill_results(payload)
+                elif kind == "skill_error":
+                    self._on_skill_error(payload)
         except queue.Empty:
             pass
         self.root.after(100, self._poll_queue)
@@ -332,6 +344,119 @@ class App:
                 tags=(v.overall,),
             )
             self._row_urls[item] = c.url
+
+    # -- AI Search (Claude Skill) --------------------------------------------
+
+    def _on_run_skill(self) -> None:
+        """AI Search: hand the current form to a Claude Skill and render the
+        components it returns into the shared results table.
+
+        Shares Search's input seam (``build_answers`` + ``collect``) and its
+        results table; only the engine differs. The deterministic Search flow
+        and its ``_deliver_results`` rendering are untouched.
+        """
+        if self._skill_running or self._searching:
+            return
+
+        errors = self._validate_form()
+        if errors:
+            messagebox.showerror("Incomplete filters", "\n".join(errors))
+            return
+        try:
+            spec = collect(self.schema, answers=self.build_answers())
+        except ValueError as e:
+            messagebox.showerror("Invalid input", str(e))
+            return
+
+        spec_text = self._format_spec_for_skill(spec)
+        self._set_skill_running(True)
+        self._clear_results()
+        threading.Thread(
+            target=self._skill_worker, args=(spec_text,), daemon=True
+        ).start()
+
+    def _format_spec_for_skill(self, spec) -> str:
+        """Render a ``QuerySpec`` as a compact pipe-delimited line for the prompt."""
+        parts = [f"Component type: {spec.component_type}"]
+        for c in spec.constraints:
+            if c.range is not None:
+                lo, hi = c.range
+                if lo == float("-inf") and hi == float("inf"):
+                    rng = "any"
+                elif hi == float("inf"):
+                    rng = f">= {lo}"
+                elif lo == float("-inf"):
+                    rng = f"<= {hi}"
+                else:
+                    rng = f"{lo} to {hi}"
+                parts.append(f"{c.canonical_name}: {rng} {c.unit}".strip())
+            else:
+                parts.append(f"{c.canonical_name}: {c.value} {c.unit}".strip())
+        if not spec.constraints:
+            parts.append("(no filters)")
+        return " | ".join(parts)
+
+    def _skill_worker(self, spec_text: str) -> None:
+        """Runs off the UI thread; hands the outcome back through the queue.
+
+        Imports the SDK-facing entry lazily so a missing ``claude-agent-sdk``
+        (or an unauthenticated / failed run, or an unreadable result) becomes a
+        ``("skill_error", exc)`` message rather than a crash. Never touches Tk.
+        """
+        try:
+            from rf_finder.agent.skill_runner import run_demo_search
+
+            result = asyncio.run(run_demo_search(spec_text, on_text=lambda _t: None))
+            components = (result or {}).get("components", [])
+        except Exception as e:   # missing SDK/auth, run error, unreadable result
+            self._result_queue.put(("skill_error", e))
+            return
+        self._result_queue.put(("skill_done", components))
+
+    def _set_skill_running(self, busy: bool) -> None:
+        """Toggle the AI-Search loading state; block either engine mid-run."""
+        self._skill_running = busy
+        state = "disabled" if busy else "normal"
+        self.skill_button.configure(state=state)
+        self.search_button.configure(state=state)
+        if busy:
+            self.status_var.set("AI Search… (this may take a few seconds)")
+
+    def _on_skill_error(self, exc: Exception) -> None:
+        self._set_skill_running(False)
+        self.status_var.set("")
+        messagebox.showerror("AI Search failed", str(exc))
+
+    def _deliver_skill_results(self, components: list) -> None:
+        """Render Skill-returned components into the shared results table.
+
+        Mirrors ``_deliver_results``' table handling but maps plain dicts
+        (model/manufacturer/verdict/url) straight to rows, so the two engines
+        share the ``Treeview`` without sharing a data model.
+        """
+        self._set_skill_running(False)
+        self._clear_results()
+
+        if not components:
+            self.status_var.set("No components (AI Search)")
+            self._show_empty("No components returned — try different filters.")
+            return
+
+        self.status_var.set(f"{len(components)} component(s) from AI Search")
+        self._show_tree()
+        for c in components:
+            url = c.get("url", "")
+            item = self.tree.insert(
+                "", "end",
+                values=(
+                    c.get("model", ""),
+                    c.get("manufacturer", ""),
+                    c.get("verdict", ""),
+                    url,
+                ),
+                tags=("match",),
+            )
+            self._row_urls[item] = url
 
     # -- Results table -------------------------------------------------------
 
