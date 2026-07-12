@@ -389,9 +389,11 @@ class App:
 
 
 def main() -> None:
-    """Build and run the window (adapters fetch live, like the CLI)."""
-    from rf_finder.config import load_max_results
+    """Build and run the window (adapters fetch cache-first, like the CLI)."""
+    from rf_finder.config import load_cache_config, load_max_results
+    from rf_finder import http
 
+    http.configure(load_cache_config())   # set up the shared HTTP service the adapters fetch through
     root = ttk.Window(themename=_THEME)
     App(root, max_results=load_max_results())
     root.mainloop()
