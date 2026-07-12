@@ -21,7 +21,8 @@ The dictionary SHALL define exactly these ten parameters, each applicable to `am
 | `IP3` | `IP3` | `dBm` | `["dBm"]` | `min` |
 | `Psat` | `Saturated power (Psat)` | `dBm` | `["dBm", "W", "mW"]` | `min` |
 | `VDD` | `Supply voltage (VDD)` | `V` | `["V"]` | `contains` |
-| `Size` | `Size` | `mm` | `["mm"]` | `max` |
+| `length` | `Length` | `mm` | `["mm", "mil", "cm", "inch"]` | `max` |
+| `width` | `Width` | `mm` | `["mm", "mil", "cm", "inch"]` | `max` |
 | `MSL` | `MSL level (1–5)` | `""` (dimensionless) | `[""]` | `max` |
 | `Temperature` | `Operating temperature` | `degC` | `["degC"]` | `contains` |
 
@@ -30,9 +31,9 @@ The dictionary SHALL define exactly these ten parameters, each applicable to `am
 #### Scenario: Amplifier parameter set and rules
 
 - **WHEN** the `PARAMETERS` dictionary is read
-- **THEN** it contains exactly the ten entries `freq_range`, `P1dB`, `Gain`, `NF`, `IP3`, `Psat`, `VDD`, `Size`, `MSL`, `Temperature`
-- **AND** their `comparison` values are `contains`, `min`, `min`, `max`, `min`, `min`, `contains`, `max`, `max`, `contains` respectively
-- **AND** their `canonical_unit` values are `GHz`, `dBm`, `dB`, `dB`, `dBm`, `dBm`, `V`, `mm`, `""`, `degC` respectively
+- **THEN** it contains exactly the eleven entries `freq_range`, `P1dB`, `Gain`, `NF`, `IP3`, `Psat`, `VDD`, `length`, `width`, `MSL`, `Temperature`
+- **AND** their `comparison` values are `contains`, `min`, `min`, `max`, `min`, `min`, `contains`, `max`, `max`, `max`, `contains` respectively
+- **AND** their `canonical_unit` values are `GHz`, `dBm`, `dB`, `dB`, `dBm`, `dBm`, `V`, `mm`, `mm`, `""`, `degC` respectively
 
 #### Scenario: Canonical unit listed first in the units list
 
@@ -56,7 +57,7 @@ The system SHALL provide `params_for(component_type)` that returns the subset of
 #### Scenario: Amplifier returns its ten parameters
 
 - **WHEN** `params_for("amplifier")` is called
-- **THEN** the returned keys are exactly `{freq_range, P1dB, Gain, NF, IP3, Psat, VDD, Size, MSL, Temperature}`
+- **THEN** the returned keys are exactly `{freq_range, P1dB, Gain, NF, IP3, Psat, VDD, length, width, MSL, Temperature}`
 - **AND** every returned value is a `ParamDef`
 
 #### Scenario: Unknown component returns an empty dictionary

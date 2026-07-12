@@ -96,13 +96,15 @@ def test_contains_discrete_list_stays_a_list():
 # Non-numeric strings parsed to numbers
 # ---------------------------------------------------------------------------
 
-def test_size_string_parses_to_largest_dimension():
-    # Size (comparison "max"): "9.00 x 8.00 mm" -> worst case is the 9.0 mm side.
-    params = {"Size": _spec_obj(unit="mm", value="9.00 x 8.00 mm")}
+def test_dimension_string_parses_to_largest_dimension():
+    # length/width (comparison "max"): from a "9.00 x 8.00 mm" string each takes
+    # the worst-case (largest) figure, 9.0 mm — identical max-scalar handling to NF.
+    for name in ("length", "width"):
+        params = {name: _spec_obj(unit="mm", value="9.00 x 8.00 mm")}
 
-    raw = to_raw_params(params)
+        raw = to_raw_params(params)
 
-    assert raw["Size"] == RawValue(value=9.0, unit="mm")
+        assert raw[name] == RawValue(value=9.0, unit="mm")
 
 
 def test_msl_string_parses_to_number_with_canonical_unit():
@@ -156,7 +158,7 @@ def test_mapped_params_verify_against_real_verifier():
         "Gain": _spec_obj(unit="dB", min=22.0, typ=23.6, max=25.0),
         "NF": _spec_obj(unit="dB", typ=3.0),
         "Temperature": _spec_obj(unit="C", min=-30, max=110),
-        "Size": _spec_obj(unit="mm", value="9.00 x 8.00 mm"),
+        "length": _spec_obj(unit="mm", value="9.00 x 8.00 mm"),
     }
     candidate = _candidate(to_raw_params(params))
 
@@ -164,7 +166,7 @@ def test_mapped_params_verify_against_real_verifier():
         ParamConstraint("Gain", "min", 20.0, None, "dB"),          # 22 >= 20 -> PASS
         ParamConstraint("NF", "max", 4.0, None, "dB"),             # 3 <= 4 -> PASS
         ParamConstraint("Temperature", "contains", None, (0.0, 85.0), "degC"),  # covers -> PASS
-        ParamConstraint("Size", "max", 10.0, None, "mm"),          # 9 <= 10 -> PASS
+        ParamConstraint("length", "max", 10.0, None, "mm"),        # 9 <= 10 -> PASS
     )
 
     result = verify(spec, candidate)

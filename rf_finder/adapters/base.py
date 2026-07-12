@@ -9,7 +9,11 @@ from rf_finder.models import Candidate, QuerySpec, RawValue
 # but do not describe its RF performance. A candidate carrying ONLY these (e.g. a
 # non-RF part that a vendor lists with a supply voltage but no freq/gain/etc.)
 # cannot be evaluated as an amplifier, so it counts as having no usable data.
-_SECONDARY_PARAMS = frozenset({"VDD", "Size", "MSL", "Temperature"})
+# ``Size`` is retained transitionally: the ontology now models physical size as
+# two params (``length``/``width``), but the Marki/Microchip adapters still emit
+# a single ``Size`` RawValue pending their rework, so it must stay classified as
+# secondary here to keep ``drop_paramless`` from treating a size-only part as RF.
+_SECONDARY_PARAMS = frozenset({"VDD", "length", "width", "Size", "MSL", "Temperature"})
 
 
 def drop_paramless(candidates: list[Candidate]) -> list[Candidate]:
@@ -17,7 +21,7 @@ def drop_paramless(candidates: list[Candidate]) -> list[Candidate]:
 
     A candidate keeps only if it has at least one *primary* (RF) parameter —
     ``freq_range``, ``Gain``, ``NF``, ``P1dB``, ``Psat``, ``IP3``. One that has
-    nothing, or only *secondary* params (``VDD``/``Size``/``MSL``/``Temperature``;
+    nothing, or only *secondary* params (``VDD``/``length``/``width``/``MSL``/``Temperature``;
     see ``_SECONDARY_PARAMS``), gives the Verifier no RF spec to check and can only
     surface as an all-UNKNOWN ``partial`` — pure noise rather than a usable result
     (typically non-RF parts mis-listed in a manufacturer's amplifier feed, e.g.

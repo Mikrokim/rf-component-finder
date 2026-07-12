@@ -21,7 +21,7 @@ def _amplifier_schema() -> FormSchema:
 class TestBuildForm:
     def test_amplifier_has_expected_field_count(self):
         schema = _amplifier_schema()
-        assert len(schema.fields) == 10
+        assert len(schema.fields) == 11
 
     def test_component_type_stored_on_schema(self):
         schema = _amplifier_schema()

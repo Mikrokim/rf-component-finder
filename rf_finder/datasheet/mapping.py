@@ -18,7 +18,7 @@ The shape is chosen from each parameter's ``comparison``:
   - ``contains`` (freq_range, VDD, Temperature): a continuous ``(low, high)``
     range, or a list of discrete options — matching the two ``contains``
     branches in ``verifier._compare``.
-  - ``min`` / ``max`` / ``eq`` (Gain, NF, P1dB, Size, MSL, ...): a single scalar,
+  - ``min`` / ``max`` / ``eq`` (Gain, NF, P1dB, length, width, MSL, ...): a single scalar,
     picked as the candidate's GUARANTEED value by comparison direction — the
     stated ``min`` (falling back to ``typ``) for a ``min`` rule ("at least"), the
     stated ``max`` (falling back to ``typ``) for a ``max`` rule ("at most"), the

@@ -54,7 +54,8 @@ PARAMETERS: dict[str, ParamDef] = {
     "IP3": _param("IP3", "dBm", "min", ["amplifier"]),
     "Psat": _param("Saturated power (Psat)", "dBm", "min", ["amplifier"]),
     "VDD": _param("Supply voltage (VDD)", "V", "contains", ["amplifier"]),
-    "Size": _param("Size", "mm", "max", ["amplifier"]),
+    "length": _param("Length", "mm", "max", ["amplifier"]),
+    "width": _param("Width", "mm", "max", ["amplifier"]),
     "MSL": _param("MSL level (1–5)", "", "max", ["amplifier"]),
     "Temperature": _param("Operating temperature", "degC", "contains", ["amplifier"]),
 }
