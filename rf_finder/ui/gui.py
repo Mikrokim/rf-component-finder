@@ -33,6 +33,10 @@ _STATUS = {"PASS": "✓", "FAIL": "✗", "UNKNOWN": "?"}
 #: Subtle row tint for a matching component (complements the light theme).
 _MATCH_ROW = "#e8f8ef"
 
+#: Source-column markers so a row's origin is clear (both engines share the table).
+_SRC_SEARCH = "🔎 Search"
+_SRC_AI = "🤖 AI"
+
 #: ttkbootstrap theme for the whole window.
 _THEME = "minty"
 
@@ -340,7 +344,7 @@ class App:
             )
             item = self.tree.insert(
                 "", "end",
-                values=(c.model, c.manufacturer, verdicts, c.url),
+                values=(_SRC_SEARCH, c.model, c.manufacturer, verdicts, c.url),
                 tags=(v.overall,),
             )
             self._row_urls[item] = c.url
@@ -370,7 +374,8 @@ class App:
 
         spec_text = self._format_spec_for_skill(spec)
         self._set_skill_running(True)
-        self._clear_results()
+        # AI Search does NOT clear the table — its rows combine with what's
+        # already shown. Only Search resets the table.
         threading.Thread(
             target=self._skill_worker, args=(spec_text,), daemon=True
         ).start()
@@ -428,27 +433,30 @@ class App:
         messagebox.showerror("AI Search failed", str(exc))
 
     def _deliver_skill_results(self, components: list) -> None:
-        """Render Skill-returned components into the shared results table.
+        """Append Skill-returned components to the shared results table.
 
-        Mirrors ``_deliver_results``' table handling but maps plain dicts
-        (model/manufacturer/verdict/url) straight to rows, so the two engines
-        share the ``Treeview`` without sharing a data model.
+        Unlike Search, AI Search does NOT clear the table — its rows are added
+        alongside whatever is already shown (Search or earlier AI results), so
+        the two engines' results combine. Only Search resets the table. The
+        Source column (``_SRC_AI``) marks each appended row's origin. Maps plain
+        dicts straight to rows, so the two engines share the ``Treeview``
+        without sharing a data model.
         """
         self._set_skill_running(False)
-        self._clear_results()
 
         if not components:
-            self.status_var.set("No components (AI Search)")
-            self._show_empty("No components returned — try different filters.")
+            # Nothing to add — leave any existing rows untouched.
+            self.status_var.set("No components from AI Search")
             return
 
-        self.status_var.set(f"{len(components)} component(s) from AI Search")
+        self.status_var.set(f"Added {len(components)} component(s) from AI Search")
         self._show_tree()
         for c in components:
             url = c.get("url", "")
             item = self.tree.insert(
                 "", "end",
                 values=(
+                    _SRC_AI,
                     c.get("model", ""),
                     c.get("manufacturer", ""),
                     c.get("verdict", ""),
@@ -464,18 +472,19 @@ class App:
         """A Treeview of results plus an empty-state label, in ``results_area``."""
         ttk.Style().configure("Treeview", rowheight=28)   # roomier rows
 
-        cols = ("model", "manufacturer", "verdicts", "url")
+        cols = ("source", "model", "manufacturer", "verdicts", "url")
         self.tree = ttk.Treeview(
             self.results_area, columns=cols, show="headings", bootstyle="success"
         )
-        for key, text, width in (
-            ("model", "Model", 180),
-            ("manufacturer", "Manufacturer", 130),
-            ("verdicts", "Verdicts", 260),
-            ("url", "Datasheet URL", 320),
+        for key, text, width, anchor in (
+            ("source", "Source", 96, "center"),
+            ("model", "Model", 170, "w"),
+            ("manufacturer", "Manufacturer", 130, "w"),
+            ("verdicts", "Verdicts", 240, "w"),
+            ("url", "Datasheet URL", 300, "w"),
         ):
             self.tree.heading(key, text=text)
-            self.tree.column(key, width=width, anchor="w")
+            self.tree.column(key, width=width, anchor=anchor)
 
         # Only matching rows are shown; give them a subtle tint over the theme.
         self.tree.tag_configure("match", background=_MATCH_ROW)

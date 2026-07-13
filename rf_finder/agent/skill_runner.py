@@ -128,9 +128,12 @@ async def run_demo_search(
     skill with the same call shape and schema, without changing the GUI.
     """
     prompt = (
-        "Find RF components matching these search parameters and return them "
-        "as structured data. The parameters (separated by ' | '):\n\n"
-        f"{spec_text}"
+        "Use the demo-component-search skill to find RF components matching the "
+        "parameters below. You MUST invoke the skill and return exactly the "
+        "components it produces — do NOT invent, add, remove, or modify "
+        "components, and do NOT answer from your own knowledge. If the skill "
+        "produces nothing, return an empty list.\n\n"
+        f"Search parameters (separated by ' | '):\n{spec_text}"
     )
     return await run_agent_skill(
         prompt,

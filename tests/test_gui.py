@@ -164,29 +164,51 @@ def test_deliver_skill_results_maps_components_to_rows(app):
     rows = app.tree.get_children()
     assert len(rows) == 2
     vals = app.tree.item(rows[0], "values")
-    assert vals[0] == "M1"          # model
-    assert vals[1] == "Mfr1"        # manufacturer
-    assert vals[2] == "match"       # verdict
-    assert vals[3] == "http://u1"   # url
+    assert "AI" in vals[0]          # source marker (AI Search)
+    assert vals[1] == "M1"          # model
+    assert vals[2] == "Mfr1"        # manufacturer
+    assert vals[3] == "match"       # verdict
+    assert vals[4] == "http://u1"   # url
     assert app._row_urls[rows[0]] == "http://u1"   # double-click deep-link
 
 
-def test_deliver_skill_results_empty_shows_empty_state(app):
+def _det_row(model="A"):
+    from rf_finder.models import Candidate, VerifiedCandidate
+
+    c = Candidate(model=model, manufacturer="X", url="u", raw_params={}, source="table")
+    return VerifiedCandidate(candidate=c, verdicts=[], overall="match", confidence="table")
+
+
+def test_empty_ai_search_keeps_existing_rows(app):
+    """An AI Search that returns nothing must NOT clear the table."""
+    app._deliver_results([_det_row()])
+    assert len(app.tree.get_children()) == 1
+
     app._deliver_skill_results([])
-    assert app.tree.get_children() == ()
+    assert len(app.tree.get_children()) == 1          # existing row preserved
     assert "No components" in app.status_var.get()
 
 
-def test_ai_search_leaves_deterministic_results_rendering_untouched(app):
-    """AI Search rendering must not disturb the existing _deliver_results path."""
-    from rf_finder.models import Candidate, VerifiedCandidate
-
-    c = Candidate(model="A", manufacturer="X", url="u", raw_params={}, source="table")
-    app._deliver_results([VerifiedCandidate(candidate=c, verdicts=[], overall="match", confidence="table")])
+def test_ai_search_appends_to_existing_results(app):
+    """AI Search combines with existing rows; the Source column marks origin."""
+    app._deliver_results([_det_row()])
     assert len(app.tree.get_children()) == 1
 
-    # An AI Search then replaces the table with its own rows.
+    # AI Search appends rather than replacing.
     app._deliver_skill_results([{"model": "B", "manufacturer": "Y", "url": "v", "verdict": "match"}])
     rows = app.tree.get_children()
-    assert len(rows) == 1
-    assert app.tree.item(rows[0], "values")[0] == "B"
+    assert len(rows) == 2                              # combined: 1 Search + 1 AI
+    sources = [app.tree.item(r, "values")[0] for r in rows]
+    assert any("Search" in s for s in sources)
+    assert any("AI" in s for s in sources)
+
+
+def test_search_resets_table_including_ai_rows(app):
+    """Only Search clears the table — it re-renders from scratch."""
+    app._deliver_skill_results([{"model": "B", "manufacturer": "Y", "url": "v", "verdict": "match"}])
+    assert len(app.tree.get_children()) == 1
+
+    app._deliver_results([_det_row("A")])
+    rows = app.tree.get_children()
+    assert len(rows) == 1                              # Search reset the table
+    assert "Search" in app.tree.item(rows[0], "values")[0]
