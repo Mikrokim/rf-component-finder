@@ -42,18 +42,23 @@ The Skill call SHALL execute on a background thread so the UI thread never block
 
 ### Requirement: Skill components rendered into the same results table
 
-The components returned by the Skill SHALL be shown in the **same results table** the deterministic Search populates — the same `Treeview` and columns (model, manufacturer, verdicts, url) — not in a dialog or a separate window. Rendering SHALL replace the table's current contents (as a new search does) and map each returned component to a row. Double-clicking a row SHALL open its url, consistent with Search. WHEN the Skill returns no components, the window SHALL show an explicit "no components" indication rather than an empty table with no explanation. The existing `_deliver_results` rendering used by deterministic Search SHALL remain unchanged; AI Search SHALL use its own rendering path into the shared table.
+The components returned by the Skill SHALL be shown in the **same results table** the deterministic Search populates — the same `Treeview`, not a dialog or a separate window. The table SHALL carry a leading **Source** column, in addition to model, manufacturer, verdicts, and url, marking each row's origin (deterministic Search vs. AI Search). AI Search SHALL **append** its components to the table's current contents — it SHALL NOT clear the table — so results from Search and AI Search combine in one table; only the deterministic Search clears and re-renders the table. Each returned component SHALL map to one appended row tagged as AI-sourced, and double-clicking a row SHALL open its url, consistent with Search. WHEN the Skill returns no components, the window SHALL leave any existing rows untouched and indicate that no components were added, rather than clearing the table. The existing `_deliver_results` rendering used by deterministic Search SHALL remain unchanged apart from also emitting the Source cell; AI Search SHALL use its own append path into the shared table.
 
-#### Scenario: Returned components fill the results table
+#### Scenario: Returned components are appended, combining with existing rows
 
-- **WHEN** an AI Search returns a list of components
-- **THEN** the results table is cleared and shows one row per returned component, with its model, manufacturer, verdict, and url
-- **AND** double-clicking a row opens that component's url
+- **WHEN** the table already shows deterministic Search rows and an AI Search returns a list of components
+- **THEN** the AI components are added as new rows without removing the existing rows, each marked as AI in the Source column
+- **AND** double-clicking an AI row opens that component's url
 
-#### Scenario: Empty result is shown explicitly
+#### Scenario: Only Search clears the table
+
+- **WHEN** the deterministic Search runs while AI Search rows are present
+- **THEN** the table is cleared and re-rendered from the Search results, removing the AI rows
+
+#### Scenario: Empty AI Search preserves existing rows
 
 - **WHEN** an AI Search returns no components
-- **THEN** the window shows an explicit "no components" indication and an empty table
+- **THEN** any existing rows remain in the table and the window indicates that no components were added
 
 ### Requirement: Skill failure is reported without crashing
 
