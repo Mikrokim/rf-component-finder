@@ -42,13 +42,29 @@ from rf_finder.models import RawValue
 from rf_finder.ontology.parameters import PARAMETERS
 
 # Unit spellings a datasheet / LLM may emit that differ from the ontology's
-# canonical spelling.  Anything not listed passes through unchanged.
+# canonical spelling. One flat lookup, grouped by comments per unit; matched
+# case-insensitively (see ``_normalize_unit``). Anything not listed passes
+# through unchanged, with its case preserved.
 _UNIT_ALIASES = {
+    # temperature -> degC
     "C": "degC",
     "°C": "degC",
     "degrees C": "degC",
+    # impedance -> Ohm
     "Ohms": "Ohm",
+    # length -> mm, width -> mm  (size units: mm / cm / inch / mil)
+    "mm": "mm", "millimeter": "mm", "millimeters": "mm",
+    "millimetre": "mm", "millimetres": "mm",
+    "cm": "cm", "centimeter": "cm", "centimeters": "cm",
+    "centimetre": "cm", "centimetres": "cm",
+    "inch": "inch", "inches": "inch", "in": "inch", '"': "inch",
+    "mil": "mil", "mils": "mil", "thou": "mil",
 }
+
+# Case-insensitive index (lower-cased keys) for the lookup above. Units NOT
+# listed in ``_UNIT_ALIASES`` stay case-sensitive on purpose — e.g. "mW" and
+# "MW" are different power units and must never be case-folded together.
+_UNIT_ALIASES_LC = {alias.lower(): canonical for alias, canonical in _UNIT_ALIASES.items()}
 
 _NUMBER = re.compile(r"[-+]?\d*\.?\d+")
 
@@ -70,8 +86,9 @@ def _numbers(value) -> list[float]:
 def _normalize_unit(unit, pdef) -> str | None:
     """Reconcile the emitted unit with the ontology's canonical spelling.
 
-    A STATED unit is alias-reconciled (e.g. ``"C"`` -> ``"degC"``) or passed
-    through unchanged.  A MISSING/empty unit is filled from the ontology ONLY
+    A STATED unit is trimmed and alias-reconciled case-insensitively (e.g.
+    ``"C"``/``"MM"`` -> ``"degC"``/``"mm"``) or passed through unchanged, with its
+    original case preserved.  A MISSING/empty unit is filled from the ontology ONLY
     when the parameter is unambiguous — it has a single accepted unit
     (``len(pdef.units) == 1``), which covers dimensionless params (MSL, canonical
     ``""``) and single-unit ones (Gain -> ``"dB"``).  For a MULTI-unit parameter
@@ -82,7 +99,8 @@ def _normalize_unit(unit, pdef) -> str | None:
     min/max scalar picks use above.
     """
     if unit is not None and unit != "":
-        return _UNIT_ALIASES.get(unit, unit)
+        stated = unit.strip()
+        return _UNIT_ALIASES_LC.get(stated.lower(), stated)
     if len(pdef.units) == 1:
         return pdef.canonical_unit
     return None

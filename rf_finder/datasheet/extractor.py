@@ -66,19 +66,24 @@ Rules:
       8 V". Then put them in "value" as [3, 5, 8] with the "unit" and leave
       "min"/"typ"/"max" null.
 
-- NON-NUMERIC / categorical parameters (moisture sensitivity level, package type,
-  physical size / dimensions): put the value in "value" as a string, exactly as
-  written — e.g. "3" for MSL, "LGA_CAV" for package, "9.00 x 8.00 mm" for size;
-  leave the numeric fields null.
+- NON-NUMERIC / categorical parameters (moisture sensitivity level, package type):
+  put the value in "value" as a string, exactly as written — e.g. "3" for MSL,
+  "LGA_CAV" for package; leave the numeric fields null.
+
+- PHYSICAL DIMENSIONS ("length" and "width") are each a SINGLE numeric measurement
+  in mm — put the number in "typ" (NOT in "value", and never a combined string).
+  Read the two footprint numbers from the Outline Dimensions in SOURCE ORDER: the
+  first goes to "length", the second to "width". E.g. a "9.00 x 8.00 mm" outline
+  means length -> typ 9.0 and width -> typ 8.0. Leave the other numeric fields null.
 
 - DISAMBIGUATION: when a requested name specifies a variant, extract THAT variant
   only — e.g. "operating_temperature" -> the operating temperature range,
   "storage_temperature" -> the storage temperature range. Never substitute a
   different one.
 
-- WHERE TO LOOK: parameters such as size, MSL, and temperature ranges usually live
-  OUTSIDE the main specifications table — check Absolute Maximum Ratings and
-  Outline Dimensions.
+- WHERE TO LOOK: parameters such as length, width, MSL, and temperature ranges
+  usually live OUTSIDE the main specifications table — check Absolute Maximum
+  Ratings and Outline Dimensions.
 
 - If a parameter is NOT present in the datasheet, set its value to null (the JSON
   literal null), NOT an object. NEVER guess or infer a value that is not stated.

@@ -107,6 +107,20 @@ def test_dimension_string_parses_to_largest_dimension():
         assert raw[name] == RawValue(value=9.0, unit="mm")
 
 
+def test_length_unit_aliases_are_reconciled():
+    # Variant spellings / plurals / symbols / CASE of the size units normalise to
+    # the canonical mm / cm / inch / mil (the Verifier then converts them to mm).
+    cases = {
+        "millimeter": "mm", "millimetres": "mm", "MM": "mm", " Mm ": "mm",
+        "centimeter": "cm", "centimetres": "cm", "CM": "cm",
+        "inches": "inch", "in": "inch", '"': "inch", "INCH": "inch",
+        "mils": "mil", "thou": "mil", "THOU": "mil",
+    }
+    for stated, canonical in cases.items():
+        raw = to_raw_params({"length": _spec_obj(unit=stated, typ=5.0)})
+        assert raw["length"] == RawValue(value=5.0, unit=canonical)
+
+
 def test_msl_string_parses_to_number_with_canonical_unit():
     params = {"MSL": _spec_obj(value="3")}
 

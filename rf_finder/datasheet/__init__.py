@@ -1,7 +1,7 @@
 """Datasheet package — LLM-based parameter extraction from datasheet text.
 
 The datasheet-fallback layer (future-requirements REQ-2.2): enrich parameters
-that manufacturer listing pages don't publish (Size, MSL, Temperature, ...)
+that manufacturer listing pages don't publish (length, width, MSL, Temperature, ...)
 by extracting them from the part's datasheet, with ``source="datasheet"``.
 
 Requires the ``llm`` optional dependency: ``pip install rf-finder[llm]``.
