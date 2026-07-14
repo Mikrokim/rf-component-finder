@@ -7,7 +7,7 @@ This is primarily a **documentation/capture** change: almost every requirement a
 ## What Changes
 
 - Introduce the `datasheet-extraction` capability spec documenting the three implemented primitives of `rf_finder/datasheet/`:
-  - **PDF → text** (`pdf.py`): `datasheet_text_from_pdf` / `_join_page_text` — open a datasheet PDF with `pdfplumber` and return its joined page text.
+  - **PDF → text** (`pdf.py`): `_text_from_stream` / `_join_page_text` — open a datasheet PDF (path or in-memory stream) with `pdfplumber` and return its joined page text. Fetching by URL (`datasheet_text_from_url`) is covered by `add-datasheet-orchestration-pipeline`.
   - **LLM extraction contract** (`extractor.py`): the published `EXTRACT_RF_PARAMETERS_INSTRUCTION` and `extract_rf_parameters`, which run a config-selected LLM and return a normalized `{unit, min, typ, max, value, condition}` object (or `None`) per requested parameter, enforcing the contract on the model's reply.
   - **Extractor-output → Verifier mapping** (`mapping.py`): `to_raw_params`, which converts extractor output into `{canonical_name: RawValue}` shaped by each parameter's ontology `comparison` rule, with unit reconciliation and skipping of unmappable specs.
 - **One behavior change (not breaking):** `to_raw_params` no longer assumes the canonical unit for a multi-unit parameter whose `value` lacks a unit — it omits the parameter (Verifier reports UNKNOWN) rather than risk a wrong-by-1000x assumption. This tightens (never loosens) matching: a value that would have been guessed is now honestly UNKNOWN. All other module behavior is captured as-is.

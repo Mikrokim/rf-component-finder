@@ -8,7 +8,7 @@ These are DOCUMENTATION / VERIFICATION tasks: the feature code already exists an
 
 ## 2. Verify PDF-to-text requirement
 
-- [x] 2.1 Verify "Extract datasheet text from a PDF" against `rf_finder/datasheet/pdf.py` (`datasheet_text_from_pdf`, `_join_page_text`).
+- [x] 2.1 Verify "Extract datasheet text from a PDF" against `rf_finder/datasheet/pdf.py` (`_text_from_stream`, `_join_page_text`).
 - [x] 2.2 Confirm each scenario maps to a passing test in `tests/test_datasheet_pdf.py`: blank-line join (`test_pages_are_joined_with_blank_line`), skip empty/None (`test_empty_and_none_pages_are_skipped`), empty string (`test_no_extractable_text_gives_empty_string`), missing path (`test_missing_path_raises_file_not_found`).
 
 ## 3. Verify extraction contract + invocation requirements

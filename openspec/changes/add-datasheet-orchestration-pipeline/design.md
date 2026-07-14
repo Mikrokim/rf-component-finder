@@ -24,7 +24,7 @@ This change introduces the **management layer** that owns the flow retrieve → 
 **Non-Goals:**
 - Discovering datasheet links by a *separate* page fetch — the link is already on the listing/product page the adapter scrapes, so it is read there and carried as `Candidate.datasheet_url`; the management layer does not go hunting for it.
 - Surfacing partials to the user — the result is only full matches (decided with the user).
-- A persistent cross-run cache — caching here is per-run (in-process) to avoid duplicate work within a single search; a durable cache is the separate `implement-response-cache` future change.
+- Caching datasheet fetches/extractions — out of scope by request; each survivor's datasheet is fetched and extracted as needed. A durable cache remains the separate `implement-response-cache` future change.
 - Changing `verify()`'s comparison rules, the ontology, or the form.
 
 ## Decisions
@@ -44,19 +44,18 @@ The management layer is `run_pipeline(spec, *, on_source=None)` in a new `rf_fin
 ### D4 — Enrich by merging into a copy; datasheet never overwrites the table
 `Candidate` is frozen, so enrichment builds a new `Candidate` via `dataclasses.replace(cand, raw_params={**cand.raw_params, **datasheet_raw}, source="datasheet")`. The merge only adds keys that were missing (the `UNKNOWN` set); table keys are never replaced, so a site value always wins over a datasheet value for the same parameter. The requested-parameter list handed to `extract_rf_parameters` is exactly the `UNKNOWN` canonical names from Gate 1's verdicts — never the ones the table already answered. `source="datasheet"` on the enriched copy makes `verify()` label its `confidence` accordingly. Per-`RawValue` provenance is out of scope; `RawValue` stays unchanged.
 
-### D5 — `datasheet_url` fetch path added to `pdf.py`
-Add `datasheet_text_from_url(url)` alongside `datasheet_text_from_pdf(path)`: download the PDF at the candidate's `datasheet_url` (via `requests`, respecting the project's TLS handling — see the `etrog-ssl-fail` skill for the corporate-proxy cert case) to a scratch file or an in-memory buffer, then reuse `_join_page_text` / `pdfplumber`. Failures (network, HTTP error, non-PDF, unparseable) raise a defined exception (e.g. `DatasheetFetchError`) the management layer catches per-candidate.
+### D5 — `pdf.py` becomes URL-only, split fetch from parse
+`pdf.py` exposes a single public entry point, `datasheet_text_from_url(url)`, and drops the old local-file `datasheet_text_from_pdf(path)` (the flow only ever has a remote `datasheet_url`). Concerns are split so parsing stays testable without the wire:
+- `datasheet_text_from_url(url)` — fetch with `httpx` (matching the adapters: `User-Agent`, `follow_redirects`, `timeout`, `raise_for_status`), keep the bytes in memory (`io.BytesIO` — no temp file), verify the body is a real PDF (`%PDF` signature / Content-Type), then parse.
+- `_text_from_stream(source)` — internal pure core: `pdfplumber.open` on a path *or* a stream, reusing the existing `_join_page_text`.
+Any failure (network, HTTP status, non-PDF response, unparseable PDF) raises `DatasheetFetchError`, which the management layer catches per-candidate. TLS: rely on the project's `truststore` setup (the `etrog-ssl-fail` skill) so `httpx` verifies against the Windows cert store — never `verify=False`. The local-file test path is replaced by tests that stub `httpx.get` and the parse core, so no real PDF or network is needed.
 
-### D6 — Per-run extraction cache keyed by `(datasheet_url, frozenset(requested_params))`
-A small in-process cache (dict, or `functools.lru_cache` on a normalized key) memoizes `text-fetch + extract` so two survivors sharing a datasheet, or a re-verify, don't refetch/re-run the LLM. Keyed by the URL plus the sorted missing-parameter set, scoped to one `run_pipeline` call.
-- *Alternative considered:* reuse `cache.py`. Rejected for now — `cache.py` is a stub owned by `implement-response-cache`; a local memo keeps this change self-contained and is trivially replaceable later.
-
-### D7 — Resilience mirrors `search_and_verify`
+### D6 — Resilience mirrors `search_and_verify`
 One adapter raising, one PDF failing to download, or one extraction erroring never aborts the run: the affected source/candidate is skipped (reported via `on_source` where applicable) and the rest complete. The LLM/`requests` imports stay lazy (inside the enrichment functions) so importing `pipeline` is free and the table-only path needs neither the `llm` extra nor network.
 
 ## Risks / Trade-offs
 
-- **LLM cost/latency on large survivor sets** → Gate 1 runs first (cheap, no network), so only survivors are enriched; the per-run cache dedupes shared datasheets; enrichment can be parallelized later if needed.
+- **LLM cost/latency on large survivor sets** → Gate 1 runs first (cheap, no network), so only survivors are enriched, and only for their missing parameters; enrichment can be parallelized later if needed.
 - **Dropping partials hides "almost-matched, couldn't confirm" parts** → This is the user's chosen policy (return only full matches). The management layer still computes the `partial`/`fail` outcomes internally, so a later flag could re-expose them without redesign.
 - **A site row may lack a datasheet link** → then `datasheet_url` is `None`, the candidate's site-missing params cannot be resolved, and Gate 2 drops it. The field defaults to `None`, so adapters that don't set it construct unchanged.
 - **LLM extraction can be wrong** → `extract_rf_parameters` forbids guessing (returns `null` when absent) and `to_raw_params` drops ambiguous/unit-missing values, so an unresolved parameter stays `UNKNOWN` → dropped, never a wrongful match. A mis-extracted value could still cause a wrong `FAIL`/`match`; mitigated by the "never guess" contract and `datasheet` confidence labelling.
@@ -65,8 +64,8 @@ One adapter raising, one PDF failing to download, or one extraction erroring nev
 ## Migration Plan
 
 1. Add `Candidate.datasheet_url: str | None = None` (defaulted — no adapter change required to construct).
-2. Add `datasheet_text_from_url` + `DatasheetFetchError` to `datasheet/pdf.py`.
-3. Add `rf_finder/pipeline.py` — the management layer — with `run_pipeline` and the enrichment/cache helpers.
+2. Rewrite `datasheet/pdf.py` to URL-only (`datasheet_text_from_url` + `_text_from_stream` + `DatasheetFetchError`); update its exports and tests.
+3. Add `rf_finder/pipeline.py` — the management layer — with `run_pipeline` and the enrichment helpers.
 4. Point `__main__.py` and `ui/gui.py` at `run_pipeline`; keep `search_and_verify` for the table-only tests.
 5. Have each adapter read the datasheet link from its site row into `datasheet_url` (where the site exposes one).
 

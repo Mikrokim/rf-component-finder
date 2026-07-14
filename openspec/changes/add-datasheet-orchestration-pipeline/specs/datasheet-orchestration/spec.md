@@ -18,13 +18,19 @@ The system SHALL provide a dedicated management (orchestration) layer that is th
 
 ### Requirement: Two-gate gated pipeline
 
-The management layer SHALL sequence four stages in order: (1) each supporting adapter retrieves every component it lists for the requested component type, (2) a table-based Gate 1, (3) datasheet enrichment of Gate 1 survivors, (4) a final Gate 2. The pipeline SHALL reuse `verifier.verify()` as the only comparison engine; each gate SHALL be a policy over the verdicts `verify()` produces, not a second comparator. The pipeline SHALL return only the candidates that pass Gate 2 (each carrying the component's link).
+The management layer SHALL sequence four stages in order: (1) each supporting adapter retrieves every component it lists for the requested component type, (2) a table-based Gate 1, (3) datasheet enrichment of Gate 1 survivors, (4) a final Gate 2. The pipeline SHALL reuse `verifier.verify()` as the only comparison engine; each gate SHALL be a policy over the verdicts `verify()` produces, not a second comparator. The **same `QuerySpec` (the user's requirements) SHALL be used at both gates** — the requirements never change between Gate 1 and Gate 2; only the candidate changes (Gate 2 sees the datasheet-enriched candidate). The pipeline SHALL return only the candidates that pass Gate 2 (each carrying the component's link).
 
 #### Scenario: Stages run in order and reuse verify
 
 - **WHEN** the pipeline runs for a `QuerySpec`
 - **THEN** it first retrieves table candidates, then applies Gate 1, then enriches survivors from datasheets, then applies Gate 2
 - **AND** every PASS/FAIL/UNKNOWN decision is produced by `verifier.verify()`, not a separate comparator
+
+#### Scenario: Both gates verify against the same user requirements
+
+- **WHEN** Gate 1 verifies a candidate and Gate 2 re-verifies its enriched form
+- **THEN** both calls pass the same `QuerySpec` (the user's constraints)
+- **AND** only the candidate differs between the two calls — Gate 2's candidate additionally carries the datasheet-resolved values
 
 #### Scenario: One failing source does not abort the pipeline
 
@@ -42,7 +48,7 @@ Gate 1 SHALL run `verify()` on each retrieved candidate and SHALL let a candidat
 
 #### Scenario: A table-provided parameter fails
 
-- **WHEN** any requested parameter the table provides yields a `FAIL` verdict
+- **WHEN** at least one requested parameter the table provides yields a `FAIL` verdict (even a single failing parameter is enough)
 - **THEN** Gate 1 drops the candidate and it is not enriched
 
 ### Requirement: Datasheet enrichment of the parameters missing from the site
@@ -64,6 +70,21 @@ For each Gate 1 survivor, the enrichment stage SHALL determine the requested par
 
 - **WHEN** a survivor already has every requested parameter as `PASS` from the table
 - **THEN** no datasheet is fetched for it
+
+### Requirement: Enrichment preserves component identity
+
+Enrichment SHALL keep the site-scraped parameters and the datasheet-scraped parameters bound to the SAME component. The enriched candidate SHALL retain the original candidate's identity (`model`, `manufacturer`, `url`, and its `datasheet_url`), and the datasheet-resolved values SHALL be merged into that candidate's own `raw_params` dictionary, keyed by the SAME canonical parameter name the ontology, the adapters, and the verifier use. The datasheet fetched SHALL be the one at that candidate's own `datasheet_url`, so a datasheet is never associated with a different component. There SHALL be no separate cross-list matching step; identity travels with the candidate object from retrieval through both gates.
+
+#### Scenario: Table and datasheet values live on one candidate keyed by canonical name
+
+- **WHEN** a candidate's `Temperature` is resolved from its datasheet and `freq_range` came from the table
+- **THEN** both appear in the same candidate's `raw_params`, keyed `Temperature` and `freq_range`
+- **AND** the enriched candidate has the same `model`, `manufacturer`, and `url` as the original
+
+#### Scenario: A candidate is enriched only from its own datasheet
+
+- **WHEN** enrichment fetches a datasheet for a candidate
+- **THEN** it uses that candidate's own `datasheet_url`, not another candidate's
 
 ### Requirement: Enrichment requires a datasheet URL
 
@@ -94,25 +115,22 @@ After enrichment, Gate 2 SHALL re-verify each candidate and SHALL return a candi
 - **WHEN** a requested parameter is on neither the site nor the datasheet (no `datasheet_url`, the fetch failed, or the datasheet does not state it) and stays `UNKNOWN`
 - **THEN** the candidate is dropped and does not appear in the result
 
-### Requirement: Fetch a datasheet PDF from a URL
+### Requirement: Fetch datasheet text from a URL
 
-The datasheet layer SHALL provide the ability to obtain datasheet text from a PDF URL, not only from a local file path: download the PDF from the URL and produce the same text output the existing local-file extractor produces. A fetch that fails (network error, non-PDF response, or HTTP error) SHALL raise a well-defined error the pipeline can catch and treat as "not enriched", rather than aborting the run.
+The datasheet layer SHALL obtain datasheet text from a PDF **URL** as its public entry point (`datasheet_text_from_url`). It SHALL download the PDF into memory (no temporary file written), verify the response is actually a PDF, and extract its page text. The PDF→text parsing SHALL be a pure internal step that operates on the downloaded bytes, so it carries no filesystem or network assumptions and is testable without the wire. A fetch that fails — a network/HTTP error, a response that is not a PDF (e.g. an HTML error page served with status 200), or an unparseable PDF — SHALL raise a single well-defined error (`DatasheetFetchError`) the pipeline can catch and treat as "not enriched", rather than aborting the run.
 
 #### Scenario: Datasheet text is produced from a URL
 
 - **WHEN** enrichment is given a candidate's `datasheet_url`
-- **THEN** the PDF is downloaded and its text is extracted for the LLM extractor
+- **THEN** the PDF is downloaded into memory and its page text is extracted for the LLM extractor
+- **AND** no temporary file is written to disk
+
+#### Scenario: A non-PDF response is rejected
+
+- **WHEN** the URL returns a non-PDF body (e.g. an HTML error page) even with a success status
+- **THEN** `DatasheetFetchError` is raised and the candidate is left unenriched
 
 #### Scenario: A failed fetch is contained
 
 - **WHEN** downloading or parsing a candidate's datasheet PDF fails
-- **THEN** the error is caught, the candidate is left unenriched, and the rest of the pipeline continues
-
-### Requirement: Datasheet extraction is cached
-
-To avoid re-downloading and re-running the LLM for the same work, the enrichment stage SHALL cache datasheet extraction so that a repeated request for the same datasheet source and the same requested-parameter set within a run reuses the prior result instead of fetching and extracting again.
-
-#### Scenario: Repeated datasheet work is served from cache
-
-- **WHEN** two candidates share the same `datasheet_url` and require the same missing parameters, or the same candidate is enriched twice in a run
-- **THEN** the PDF is fetched and the extractor is invoked at most once for that (datasheet, parameters) pair
+- **THEN** `DatasheetFetchError` is raised, the candidate is left unenriched, and the rest of the pipeline continues

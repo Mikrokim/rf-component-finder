@@ -13,12 +13,11 @@ Today the search flow is a single pass: `search_and_verify` fetches every adapte
 - Reuse the existing `rf_finder/datasheet` building blocks — no new mapping layer.
 - Add an optional `datasheet_url` field to the `Candidate` model; adapters populate it when known. A candidate with no `datasheet_url` cannot be enriched, so its `UNKNOWN` params remain and it is dropped by Gate 2.
 - Add a **fetch-datasheet-PDF-from-URL** capability (today `pdf.py` reads local files only).
-- Add **caching of datasheet extraction** so a repeated part/parameter set does not re-download or re-run the LLM within a run.
 
 ## Capabilities
 
 ### New Capabilities
-- `datasheet-orchestration`: the two-gate management pipeline — retrieve, table gate, datasheet enrichment of survivors' unknown parameters, final gate returning only full matches; plus datasheet-PDF-by-URL fetching and extraction caching.
+- `datasheet-orchestration`: the two-gate management pipeline — retrieve, table gate, datasheet enrichment of survivors' unknown parameters, final gate returning only full matches; plus datasheet-PDF-by-URL fetching.
 
 ### Modified Capabilities
 - `core-data-models`: `Candidate` gains an optional `datasheet_url` field used by the enrichment stage.
@@ -26,7 +25,7 @@ Today the search flow is a single pass: `search_and_verify` fetches every adapte
 
 ## Impact
 
-- **New code**: `rf_finder/pipeline.py` (orchestrator); a datasheet-PDF-by-URL fetch helper in `rf_finder/datasheet/pdf.py`; an extraction cache.
+- **New code**: `rf_finder/pipeline.py` (orchestrator); a datasheet-PDF-by-URL fetch helper in `rf_finder/datasheet/pdf.py`.
 - **Modified code**: `rf_finder/models.py` (`Candidate.datasheet_url`); `rf_finder/search.py` / `rf_finder/__main__.py` and `rf_finder/ui/gui.py` call sites switch from `search_and_verify` to the new pipeline (or the pipeline wraps it); adapters optionally set `datasheet_url`.
 - **Dependencies**: the datasheet path needs the `llm` extra (`genaifabric`) and network access to fetch PDFs; both are only exercised when enrichment runs, so the table-only path keeps working without them.
 - **Behavior change**: results now reflect datasheet-resolved parameters, and the default result set is only full matches (partials are no longer surfaced as results).

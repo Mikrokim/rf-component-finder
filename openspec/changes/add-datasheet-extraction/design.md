@@ -4,7 +4,7 @@ The datasheet parameter-extraction module already exists in `rf_finder/datasheet
 
 This design records the technical shape of the **already-implemented** module so the retroactive spec is anchored to real decisions. It is primarily a capture; the only code change is one deliberate hardening of the missing-unit policy in `mapping.py` (see Decisions). The module has three primitives that form a pipeline but are individually testable:
 
-1. `pdf.py` — `datasheet_text_from_pdf` / `_join_page_text`: PDF → raw text (via `pdfplumber`).
+1. `pdf.py` — `_text_from_stream` / `_join_page_text`: PDF → raw text (via `pdfplumber`); the by-URL fetch (`datasheet_text_from_url`) is specified in `add-datasheet-orchestration-pipeline`.
 2. `extractor.py` — `EXTRACT_RF_PARAMETERS_INSTRUCTION` + `extract_rf_parameters`: raw text + requested names → normalized `{unit, min, typ, max, value, condition}` per name (via a config-selected LLM through `genaifabric`).
 3. `mapping.py` — `to_raw_params`: extractor output → `{canonical_name: RawValue}` for the Verifier.
 

@@ -6,7 +6,7 @@ Documents the datasheet parameter-extraction module (`rf_finder/datasheet/`) **a
 
 ### Requirement: Extract datasheet text from a PDF
 
-The system SHALL provide `datasheet_text_from_pdf(path, *, pages=None)` which opens a datasheet PDF with `pdfplumber` and returns its page text joined into a single string. `pages=None` SHALL read every page; a list of 0-based page indices SHALL restrict extraction to those pages. Pages that yield no text or whitespace-only text SHALL be skipped, and non-empty pages SHALL be separated by a blank line (`\n\n`). When no page yields extractable text the result SHALL be the empty string. The function SHALL raise `FileNotFoundError` when the path does not exist.
+The system SHALL provide a pure PDF→text core, `_text_from_stream(source, *, pages=None)`, which opens a datasheet PDF with `pdfplumber` (from a path or an in-memory binary stream) and returns its page text joined into a single string via `_join_page_text`. `pages=None` SHALL read every page; a list of 0-based page indices SHALL restrict extraction to those pages. Pages that yield no text or whitespace-only text SHALL be skipped, and non-empty pages SHALL be separated by a blank line (`\n\n`). When no page yields extractable text the result SHALL be the empty string. Fetching a datasheet PDF by URL is specified separately in `datasheet-orchestration` (`datasheet_text_from_url`).
 
 #### Scenario: Pages are joined with a blank line
 
@@ -22,11 +22,6 @@ The system SHALL provide `datasheet_text_from_pdf(path, *, pages=None)` which op
 
 - **WHEN** every page yields `None` or `""`
 - **THEN** the result is the empty string `""`
-
-#### Scenario: Missing PDF path raises FileNotFoundError
-
-- **WHEN** `datasheet_text_from_pdf` is called with a path that does not exist
-- **THEN** it raises `FileNotFoundError`
 
 ### Requirement: Datasheet extraction contract and invocation
 
