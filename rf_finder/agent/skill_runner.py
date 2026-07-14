@@ -57,6 +57,43 @@ COMPONENT_SCHEMA: dict[str, Any] = {
 }
 
 
+def _sum_tokens(usage: Any) -> int | None:
+    """Best-effort total token count from a ``ResultMessage.usage`` dict.
+
+    Sums the integer values whose key mentions "token" (input/output/cache), so
+    it is robust to the exact key set. Returns ``None`` when nothing is found.
+    """
+    if not isinstance(usage, dict):
+        return None
+    total = 0
+    found = False
+    for key, value in usage.items():
+        if isinstance(value, int) and "token" in key.lower():
+            total += value
+            found = True
+    return total if found else None
+
+
+def _run_error_message(meta: dict[str, Any]) -> str:
+    """A clear one-line reason a run did not complete (for the error popup)."""
+    bits: list[str] = []
+    if meta.get("api_error_status"):
+        bits.append(f"HTTP {meta['api_error_status']}")
+    subtype = meta.get("subtype")
+    if subtype and subtype != "success":
+        bits.append(str(subtype))
+    if meta.get("stop_reason"):
+        bits.append(f"stop_reason={meta['stop_reason']}")
+    detail = ", ".join(bits) if bits else "unknown error"
+    tail: list[str] = []
+    if meta.get("num_turns") is not None:
+        tail.append(f"{meta['num_turns']} turns")
+    if meta.get("tokens") is not None:
+        tail.append(f"{meta['tokens']:,} tokens")
+    tail_s = f" ({', '.join(tail)})" if tail else ""
+    return f"AI Search did not complete: {detail}{tail_s}."
+
+
 async def run_agent_skill(
     prompt: str,
     *,
@@ -65,6 +102,7 @@ async def run_agent_skill(
     model: str = "opus",
     on_text: Callable[[str], None] = print,
     output_format: dict[str, Any] | None = None,
+    on_result: Callable[[dict[str, Any]], None] | None = None,
 ) -> Any:
     """The SDK connection itself — the one place that talks to Claude.
 
@@ -77,6 +115,12 @@ async def run_agent_skill(
     the final answer text (``result``). It knows only skill *names*, *allowed
     tools*, and an optional schema — never a skill's internal steps — so any
     finished Skill drops in unchanged.
+
+    Run metadata (completion ``subtype``, ``is_error``, ``api_error_status``,
+    ``num_turns``, and a summed ``tokens`` count) is passed to ``on_result`` when
+    given. A run that ended in error (``is_error``) raises ``RuntimeError`` with
+    a one-line reason, so callers surface it instead of returning a partial
+    result silently.
     """
     from claude_agent_sdk import (
         AssistantMessage,
@@ -99,6 +143,7 @@ async def run_agent_skill(
 
     result_text: str | None = None
     structured: Any = None
+    meta: dict[str, Any] = {}
     async for message in query(prompt=prompt, options=options):
         if isinstance(message, AssistantMessage):
             for block in message.content:
@@ -109,6 +154,22 @@ async def run_agent_skill(
             on_text(f"\n[done: {message.subtype}]")
             result_text = message.result
             structured = message.structured_output
+            meta = {
+                "subtype": message.subtype,
+                "is_error": bool(getattr(message, "is_error", False)),
+                "api_error_status": getattr(message, "api_error_status", None),
+                "stop_reason": getattr(message, "stop_reason", None),
+                "num_turns": getattr(message, "num_turns", None),
+                "tokens": _sum_tokens(getattr(message, "usage", None)),
+            }
+
+    if on_result is not None:
+        on_result(meta)
+
+    # A failed/truncated run (rate limit, session boundary, API error) must not
+    # return a partial result silently — raise so the caller shows it (popup).
+    if meta.get("is_error"):
+        raise RuntimeError(_run_error_message(meta))
 
     return structured if output_format is not None else result_text
 
@@ -117,6 +178,7 @@ async def run_rf_search(
     spec_text: str,
     *,
     on_text: Callable[[str], None] = print,
+    on_result: Callable[[dict[str, Any]], None] | None = None,
 ) -> Any:
     """Real RF search: hand the user's form parameters to the
     ``rf-skill-json-output`` skill and return the components it produces.
@@ -143,4 +205,5 @@ async def run_rf_search(
         model="opus",
         on_text=on_text,
         output_format=COMPONENT_SCHEMA,
+        on_result=on_result,
     )

@@ -408,15 +408,20 @@ class App:
         (or an unauthenticated / failed run, or an unreadable result) becomes a
         ``("skill_error", exc)`` message rather than a crash. Never touches Tk.
         """
+        meta: dict = {}
         try:
             from rf_finder.agent.skill_runner import run_rf_search
 
-            result = asyncio.run(run_rf_search(spec_text, on_text=lambda _t: None))
+            result = asyncio.run(
+                run_rf_search(
+                    spec_text, on_text=lambda _t: None, on_result=meta.update
+                )
+            )
             components = (result or {}).get("components", [])
         except Exception as e:   # missing SDK/auth, run error, unreadable result
             self._result_queue.put(("skill_error", e))
             return
-        self._result_queue.put(("skill_done", components))
+        self._result_queue.put(("skill_done", (components, meta)))
 
     def _set_skill_running(self, busy: bool) -> None:
         """Toggle the AI-Search loading state; block either engine mid-run."""
@@ -432,7 +437,7 @@ class App:
         self.status_var.set("")
         messagebox.showerror("AI Search failed", str(exc))
 
-    def _deliver_skill_results(self, components: list) -> None:
+    def _deliver_skill_results(self, payload: tuple) -> None:
         """Append Skill-returned components to the shared results table.
 
         Unlike Search, AI Search does NOT clear the table — its rows are added
@@ -441,15 +446,32 @@ class App:
         Source column (``_SRC_AI``) marks each appended row's origin. Maps plain
         dicts straight to rows, so the two engines share the ``Treeview``
         without sharing a data model.
+
+        ``payload`` is ``(components, meta)``. A run that reaches here did NOT
+        error (``run_agent_skill`` raises on failure -> ``skill_error`` -> popup),
+        so it completed; the status line shows the token/turn cost so a full run
+        is distinguishable from a cheap/short one.
         """
         self._set_skill_running(False)
+        components, meta = payload
+
+        info_bits = []
+        tokens = meta.get("tokens")
+        if tokens is not None:
+            info_bits.append(f"{tokens:,} tokens")
+        turns = meta.get("num_turns")
+        if turns is not None:
+            info_bits.append(f"{turns} turns")
+        info = f" · {' · '.join(info_bits)}" if info_bits else ""
 
         if not components:
             # Nothing to add — leave any existing rows untouched.
-            self.status_var.set("No components from AI Search")
+            self.status_var.set(f"✓ AI Search completed — no components{info}")
             return
 
-        self.status_var.set(f"Added {len(components)} component(s) from AI Search")
+        self.status_var.set(
+            f"✓ AI Search completed — added {len(components)} component(s){info}"
+        )
         self._show_tree()
         for c in components:
             url = c.get("url", "")

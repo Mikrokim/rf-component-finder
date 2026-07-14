@@ -159,7 +159,7 @@ def test_deliver_skill_results_maps_components_to_rows(app):
         {"model": "M1", "manufacturer": "Mfr1", "url": "http://u1", "verdict": "match"},
         {"model": "M2", "manufacturer": "Mfr2", "url": "http://u2", "verdict": "partial"},
     ]
-    app._deliver_skill_results(components)
+    app._deliver_skill_results((components, {"tokens": 1234, "num_turns": 5}))
 
     rows = app.tree.get_children()
     assert len(rows) == 2
@@ -170,6 +170,8 @@ def test_deliver_skill_results_maps_components_to_rows(app):
     assert vals[3] == "match"       # verdict
     assert vals[4] == "http://u1"   # url
     assert app._row_urls[rows[0]] == "http://u1"   # double-click deep-link
+    # Feature 2: completion + token/turn cost shown in the status line.
+    assert "1,234 tokens" in app.status_var.get()
 
 
 def _det_row(model="A"):
@@ -184,9 +186,9 @@ def test_empty_ai_search_keeps_existing_rows(app):
     app._deliver_results([_det_row()])
     assert len(app.tree.get_children()) == 1
 
-    app._deliver_skill_results([])
+    app._deliver_skill_results(([], {}))
     assert len(app.tree.get_children()) == 1          # existing row preserved
-    assert "No components" in app.status_var.get()
+    assert "no components" in app.status_var.get()
 
 
 def test_ai_search_appends_to_existing_results(app):
@@ -195,7 +197,7 @@ def test_ai_search_appends_to_existing_results(app):
     assert len(app.tree.get_children()) == 1
 
     # AI Search appends rather than replacing.
-    app._deliver_skill_results([{"model": "B", "manufacturer": "Y", "url": "v", "verdict": "match"}])
+    app._deliver_skill_results(([{"model": "B", "manufacturer": "Y", "url": "v", "verdict": "match"}], {}))
     rows = app.tree.get_children()
     assert len(rows) == 2                              # combined: 1 Search + 1 AI
     sources = [app.tree.item(r, "values")[0] for r in rows]
@@ -205,7 +207,7 @@ def test_ai_search_appends_to_existing_results(app):
 
 def test_search_resets_table_including_ai_rows(app):
     """Only Search clears the table — it re-renders from scratch."""
-    app._deliver_skill_results([{"model": "B", "manufacturer": "Y", "url": "v", "verdict": "match"}])
+    app._deliver_skill_results(([{"model": "B", "manufacturer": "Y", "url": "v", "verdict": "match"}], {}))
     assert len(app.tree.get_children()) == 1
 
     app._deliver_results([_det_row("A")])

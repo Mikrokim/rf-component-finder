@@ -197,3 +197,47 @@ def test_run_rf_search_uses_real_skill_and_schema(fake_sdk):
     assert "Bash" in opts.allowed_tools
     assert opts.kwargs["output_format"] == COMPONENT_SCHEMA
     assert "amplifier" in captured["prompt"]
+
+
+# --- run metadata (Feature 2) + error surfacing (Feature 1) ----------------
+
+
+def test_on_result_receives_meta_with_summed_tokens(fake_sdk):
+    from rf_finder.agent.skill_runner import run_agent_skill
+
+    m = _FakeResultMessage(subtype="success", structured_output={"components": []})
+    m.num_turns = 4
+    m.usage = {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 10}
+    fake_sdk.query = _make_query([m], {})
+
+    captured: dict = {}
+    asyncio.run(
+        run_agent_skill(
+            "p", skills=[], allowed_tools=[],
+            output_format={"type": "json_schema", "schema": {}},
+            on_text=lambda _t: None, on_result=captured.update,
+        )
+    )
+    assert captured["is_error"] is False
+    assert captured["num_turns"] == 4
+    assert captured["tokens"] == 160
+
+
+def test_errored_run_raises_with_status_code(fake_sdk):
+    from rf_finder.agent.skill_runner import run_agent_skill
+
+    m = _FakeResultMessage(subtype="error", structured_output={"components": []})
+    m.is_error = True
+    m.api_error_status = 429
+    m.num_turns = 7
+    fake_sdk.query = _make_query([m], {})
+
+    with pytest.raises(RuntimeError) as excinfo:
+        asyncio.run(
+            run_agent_skill(
+                "p", skills=[], allowed_tools=[],
+                output_format={"type": "json_schema", "schema": {}},
+                on_text=lambda _t: None,
+            )
+        )
+    assert "429" in str(excinfo.value)
