@@ -21,6 +21,8 @@ from functools import lru_cache
 from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER
 
 EXTRACT_RF_PARAMETERS_INSTRUCTION = """\
+Return only a valid JSON object.
+Do not return Markdown or explanations.
 You are an RF component datasheet parameter extraction engine.
 
 The Context contains two keys:
@@ -86,6 +88,8 @@ Rules:
 - The parameter names used in these rules are ILLUSTRATIVE examples of each
   category (numeric / range / discrete-supply / categorical), NOT an exhaustive
   list. Apply the same rules to ANY requested parameter, named or not.
+  If a requested parameter is not explicitly stated, return null.
+Return only JSON. No text before or after it.
 """
 
 
@@ -116,7 +120,14 @@ def _get_runtime():
         # openai package missing or OPENAI_API_KEY unset — skip it; the other
         # providers are still usable.
         pass
-
+    try:
+        from genaifabric.providers.gemini import GeminiProvider
+ 
+        providers["gemini"] = GeminiProvider(model=DATASHEET_MODEL)
+    except Exception:
+        # gemini package missing or GEMINI_API_KEY unset — skip it; the other
+        # providers are still usable.
+        pass
     return GenAIFabric(provider_map=providers)
 
 

@@ -26,5 +26,9 @@ playwright-browsers/
 venv/
 env/
 
+# Environment files with secrets (API keys)
+.env
+*.env
+
 # Claude Code local settings
 .claude/settings.local.json
