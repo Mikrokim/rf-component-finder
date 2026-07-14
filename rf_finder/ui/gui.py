@@ -104,6 +104,14 @@ class App:
             bootstyle="info", width=16,
         )
         self.skill_button.pack(side="left", padx=(10, 0), ipady=4)
+        # Stop: interrupts an in-flight AI Search; only enabled while one runs.
+        self.stop_button = ttk.Button(
+            controls, text="Stop", command=self._on_stop_skill,
+            bootstyle="danger", width=8, state="disabled",
+        )
+        self.stop_button.pack(side="left", padx=(10, 0), ipady=4)
+        #: threading.Event set while an AI Search runs; setting it stops the run.
+        self._skill_stop_event = None
         self.status_var = tk.StringVar(value="")
         ttk.Label(controls, textvariable=self.status_var, bootstyle="secondary").pack(
             side="left", padx=(14, 0)
@@ -294,6 +302,8 @@ class App:
                     self._deliver_results(payload)
                 elif kind == "error":
                     self._on_error(payload)
+                elif kind == "skill_component":
+                    self._append_skill_row(payload)   # live result, as found
                 elif kind == "skill_done":
                     self._deliver_skill_results(payload)
                 elif kind == "skill_error":
@@ -373,11 +383,15 @@ class App:
             return
 
         spec_text = self._format_spec_for_skill(spec)
+        self._ai_run_count = 0
+        self._skill_stop_event = threading.Event()
         self._set_skill_running(True)
         # AI Search does NOT clear the table — its rows combine with what's
         # already shown. Only Search resets the table.
         threading.Thread(
-            target=self._skill_worker, args=(spec_text,), daemon=True
+            target=self._skill_worker,
+            args=(spec_text, self._skill_stop_event),
+            daemon=True,
         ).start()
 
     def _format_spec_for_skill(self, spec) -> str:
@@ -401,20 +415,31 @@ class App:
             parts.append("(no filters)")
         return " | ".join(parts)
 
-    def _skill_worker(self, spec_text: str) -> None:
+    def _skill_worker(self, spec_text: str, stop_event) -> None:
         """Runs off the UI thread; hands the outcome back through the queue.
 
         Imports the SDK-facing entry lazily so a missing ``claude-agent-sdk``
         (or an unauthenticated / failed run, or an unreadable result) becomes a
-        ``("skill_error", exc)`` message rather than a crash. Never touches Tk.
+        ``("skill_error", exc)`` message rather than a crash. Never touches Tk —
+        each live result and the final outcome go through ``_result_queue``.
+        ``stop_event`` lets the "Stop" button interrupt the run.
         """
         meta: dict = {}
+
+        def _on_component(component: dict) -> None:
+            # Streamed from a worker thread — hand to the UI thread via the queue.
+            self._result_queue.put(("skill_component", component))
+
         try:
             from rf_finder.agent.skill_runner import run_rf_search
 
             result = asyncio.run(
                 run_rf_search(
-                    spec_text, on_text=lambda _t: None, on_result=meta.update
+                    spec_text,
+                    on_text=lambda _t: None,
+                    on_result=meta.update,
+                    on_component=_on_component,
+                    stop_event=stop_event,
                 )
             )
             components = (result or {}).get("components", [])
@@ -429,31 +454,81 @@ class App:
         state = "disabled" if busy else "normal"
         self.skill_button.configure(state=state)
         self.search_button.configure(state=state)
+        # The Stop button is the mirror image: usable only while a run is active.
+        self.stop_button.configure(state="normal" if busy else "disabled")
         if busy:
-            self.status_var.set("AI Search… (this may take a few seconds)")
+            self.status_var.set(
+                "AI Search… (results appear as they are found — click Stop when you have enough)"
+            )
+
+    def _on_stop_skill(self) -> None:
+        """Ask the in-flight AI Search to stop. The worker interrupts the run and
+        delivers whatever it already found — a user stop is not an error."""
+        if self._skill_stop_event is not None:
+            self._skill_stop_event.set()
+        self.stop_button.configure(state="disabled")
+        self.status_var.set("Stopping AI Search…")
 
     def _on_skill_error(self, exc: Exception) -> None:
         self._set_skill_running(False)
         self.status_var.set("")
         messagebox.showerror("AI Search failed", str(exc))
 
+    @staticmethod
+    def _ai_row_key(component: dict) -> tuple:
+        """Dedup key for an AI result: (model, manufacturer), case-insensitive."""
+        return (
+            str(component.get("model", "")).strip().lower(),
+            str(component.get("manufacturer", "")).strip().lower(),
+        )
+
+    def _append_skill_row(self, component: dict) -> bool:
+        """Add one AI-Search component as a table row, deduped by (model, mfr).
+
+        Shared by the live ``skill_component`` stream and the final list, so a
+        part surfaced live is not re-added when the final list arrives. The
+        Source column (``_SRC_AI``) marks the row's origin. Returns True if a row
+        was added, False if it was a duplicate.
+        """
+        key = self._ai_row_key(component)
+        if key in self._ai_added_keys:
+            return False
+        self._ai_added_keys.add(key)
+        self._show_tree()
+        url = component.get("url", "")
+        item = self.tree.insert(
+            "", "end",
+            values=(
+                _SRC_AI,
+                component.get("model", ""),
+                component.get("manufacturer", ""),
+                component.get("verdict", ""),
+                url,
+            ),
+            tags=("match",),
+        )
+        self._row_urls[item] = url
+        self._ai_run_count += 1
+        return True
+
     def _deliver_skill_results(self, payload: tuple) -> None:
-        """Append Skill-returned components to the shared results table.
+        """Finalize an AI Search: add any final-list part not already streamed
+        live, then show the completed/stopped status with the token/turn cost.
 
-        Unlike Search, AI Search does NOT clear the table — its rows are added
-        alongside whatever is already shown (Search or earlier AI results), so
-        the two engines' results combine. Only Search resets the table. The
-        Source column (``_SRC_AI``) marks each appended row's origin. Maps plain
-        dicts straight to rows, so the two engines share the ``Treeview``
-        without sharing a data model.
-
-        ``payload`` is ``(components, meta)``. A run that reaches here did NOT
-        error (``run_agent_skill`` raises on failure -> ``skill_error`` -> popup),
-        so it completed; the status line shows the token/turn cost so a full run
-        is distinguishable from a cheap/short one.
+        AI Search does NOT clear the table — its rows combine with whatever is
+        already shown; only Search resets the table. Rows may already be present
+        from live ``skill_component`` messages, so ``_append_skill_row`` dedupes
+        and the final list never double-adds. A run that reaches here did NOT
+        error (``run_agent_skill_streaming`` raises on a real failure ->
+        ``skill_error`` -> popup); it either completed or was stopped by the user
+        (``meta["stopped"]``).
         """
         self._set_skill_running(False)
+        self._skill_stop_event = None
         components, meta = payload
+
+        for component in components:
+            self._append_skill_row(component)   # dedupes vs live-streamed rows
 
         info_bits = []
         tokens = meta.get("tokens")
@@ -464,29 +539,11 @@ class App:
             info_bits.append(f"{turns} turns")
         info = f" · {' · '.join(info_bits)}" if info_bits else ""
 
-        if not components:
-            # Nothing to add — leave any existing rows untouched.
-            self.status_var.set(f"✓ AI Search completed — no components{info}")
-            return
-
-        self.status_var.set(
-            f"✓ AI Search completed — added {len(components)} component(s){info}"
-        )
-        self._show_tree()
-        for c in components:
-            url = c.get("url", "")
-            item = self.tree.insert(
-                "", "end",
-                values=(
-                    _SRC_AI,
-                    c.get("model", ""),
-                    c.get("manufacturer", ""),
-                    c.get("verdict", ""),
-                    url,
-                ),
-                tags=("match",),
-            )
-            self._row_urls[item] = url
+        head = "■ AI Search stopped" if meta.get("stopped") else "✓ AI Search completed"
+        if self._ai_run_count:
+            self.status_var.set(f"{head} — added {self._ai_run_count} component(s){info}")
+        else:
+            self.status_var.set(f"{head} — no components{info}")
 
     # -- Results table -------------------------------------------------------
 
@@ -517,6 +574,11 @@ class App:
 
         #: Treeview row id → datasheet url, for the double-click deep-link.
         self._row_urls: dict[str, str] = {}
+        #: (model, manufacturer) keys of AI rows currently in the table — so a
+        #: live-streamed result and the final list don't add the same part twice.
+        self._ai_added_keys: set = set()
+        #: Count of AI rows added in the current run (for the status line).
+        self._ai_run_count = 0
 
         self.empty_label = ttk.Label(self.results_area, anchor="center")
         self._show_empty("No results yet — fill the form and click Search.")
@@ -535,6 +597,7 @@ class App:
     def _clear_results(self) -> None:
         self.tree.delete(*self.tree.get_children())
         self._row_urls.clear()
+        self._ai_added_keys.clear()
 
     def _on_row_open(self, event) -> None:
         """Double-click a row → open its datasheet url in the system browser."""

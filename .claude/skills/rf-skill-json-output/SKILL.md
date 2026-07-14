@@ -223,6 +223,14 @@ State in the coverage statement that datasheet reading was done via Gemini, and 
 
 Everything excluded — datasheet ❌, `rejected at site screen`, access-blocked *unverifiable*, and `insufficient verification` (<80%) — is **not** in `components`; it appears only in the streamed chat rejected list and the coverage journal below. Values in `params` carry the raw unit as found (no normalization), omit any parameter not found, and every returned component has at least one primary RF parameter (full rules in `rf-json-output.md`).
 
+**Emit each result live (do not wait for the end).** The moment a component is confirmed as a good result (a ✅ / ⚠️ that qualifies), print it **immediately on its own line**, using **exactly the SDK schema fields** — `model`, `manufacturer`, `url`, `verdict` (the same four `COMPONENT_SCHEMA` defines; no `params`/`source` here):
+
+```
+@@RESULT@@ {"model": "...", "manufacturer": "...", "url": "...", "verdict": "match"}
+```
+
+One compact JSON object per line, prefixed by the exact marker `@@RESULT@@`. The caller parses these lines to show results as they are found and lets the user stop the run early once she has enough. This is **in addition to** the final `{ "components": [ ... ] }` answer, which remains the authoritative, complete, deduplicated list — emit each qualifying part once as it is confirmed, then still include all of them in the final answer.
+
 The proof-of-work the Excel workbook used to carry in its נבדקו ונפסלו and יומן כיסוי sheets now lives entirely in the **streamed chat report** (the rejected list and the coverage journal below) — nothing is dropped, only moved out of a file and into the run's progress text, exactly as thorough as before. (The GUI discards this progress and shows only the returned `components`; a chat/Claude-Code run shows the full report.) This proof-of-work is not decoration — it IS the product: a components list with no rejection/coverage record is unverifiable, and the user will re-check everything by hand.
 
 **One-match warning**: 0–1 matches after a real sweep is possible but suspicious. Before accepting, run at least one more Path B wave and confirm all three paths (A/B/C) ran for this category — then report, saying explicitly in the coverage statement that this was done.

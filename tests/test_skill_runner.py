@@ -53,13 +53,47 @@ def _make_query(messages, captured):
     return query
 
 
+class _FakeClient:
+    """Stand-in for ``ClaudeSDKClient`` (the streaming path). Per test, set the
+    class-level ``messages``; inspect ``instances`` for options/interrupt state."""
+
+    messages: list = []
+    instances: list = []
+
+    def __init__(self, options=None, transport=None):
+        self.options = options
+        self.queried = None
+        self.interrupted = False
+        _FakeClient.instances.append(self)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def query(self, prompt, session_id="default"):
+        self.queried = prompt
+
+    async def interrupt(self):
+        self.interrupted = True
+
+    async def receive_response(self):
+        for m in list(_FakeClient.messages):
+            yield m
+
+
 @pytest.fixture
 def fake_sdk(monkeypatch):
-    """Install a fake ``claude_agent_sdk`` module; per-test set ``.query``."""
+    """Install a fake ``claude_agent_sdk`` module; per-test set ``.query`` (for
+    ``run_agent_skill``) or ``_FakeClient.messages`` (for the streaming path)."""
     mod = types.ModuleType("claude_agent_sdk")
     mod.AssistantMessage = _FakeAssistantMessage
     mod.ResultMessage = _FakeResultMessage
     mod.ClaudeAgentOptions = _FakeOptions
+    mod.ClaudeSDKClient = _FakeClient
+    _FakeClient.messages = []
+    _FakeClient.instances = []
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", mod)
     return mod
 
@@ -178,10 +212,7 @@ def test_on_text_receives_blocks_then_done_marker(fake_sdk):
 def test_run_rf_search_uses_real_skill_and_schema(fake_sdk):
     from rf_finder.agent.skill_runner import COMPONENT_SCHEMA, run_rf_search
 
-    captured = {}
-    fake_sdk.query = _make_query(
-        [_FakeResultMessage(structured_output={"components": []})], captured
-    )
+    _FakeClient.messages = [_FakeResultMessage(structured_output={"components": []})]
 
     asyncio.run(
         run_rf_search(
@@ -189,14 +220,17 @@ def test_run_rf_search_uses_real_skill_and_schema(fake_sdk):
         )
     )
 
-    opts = captured["options"]
+    client = _FakeClient.instances[-1]
+    opts = client.options
     assert opts.skills == ["rf-skill-json-output"]
     assert opts.model == "opus"
     # Bash MUST be allowed so the skill can run its OWN bundled tools
     # (tools/run_extract.py -> Gemini datasheet extraction).
     assert "Bash" in opts.allowed_tools
     assert opts.kwargs["output_format"] == COMPONENT_SCHEMA
-    assert "amplifier" in captured["prompt"]
+    assert "amplifier" in client.queried
+    # The prompt tells the skill to emit live @@RESULT@@ lines.
+    assert "@@RESULT@@" in client.queried
 
 
 # --- run metadata (Feature 2) + error surfacing (Feature 1) ----------------
@@ -241,3 +275,69 @@ def test_errored_run_raises_with_status_code(fake_sdk):
             )
         )
     assert "429" in str(excinfo.value)
+
+
+# --- streaming path (Phase B): live results + stop + emit parsing -----------
+
+
+def test_emit_components_buffers_partial_lines():
+    from rf_finder.agent.skill_runner import _emit_components
+
+    got: list = []
+    # First chunk has no newline -> the line is buffered, nothing emitted yet.
+    rem = _emit_components(
+        '@@RESULT@@ {"model": "M1", "manufacturer": "X", "url": "u", "verdict": "match"}',
+        got.append,
+    )
+    assert got == []
+    # Next chunk completes the first line and adds a full second one.
+    rem = _emit_components(rem + '\n@@RESULT@@ {"model": "M2"}\n', got.append)
+    assert [c["model"] for c in got] == ["M1", "M2"]
+    assert rem == ""
+
+
+def test_streaming_emits_components_live(fake_sdk):
+    from rf_finder.agent.skill_runner import run_agent_skill_streaming
+
+    text = '@@RESULT@@ {"model": "M1", "manufacturer": "X", "url": "u", "verdict": "match"}\n'
+    _FakeClient.messages = [
+        _FakeAssistantMessage([_Block(text)]),
+        _FakeResultMessage(structured_output={"components": [{"model": "M1"}]}),
+    ]
+
+    seen: list = []
+    out = asyncio.run(
+        run_agent_skill_streaming(
+            "p", skills=[], allowed_tools=[],
+            output_format={"type": "json_schema", "schema": {}},
+            on_text=lambda _t: None, on_component=seen.append,
+        )
+    )
+    assert [c["model"] for c in seen] == ["M1"]
+    assert out == {"components": [{"model": "M1"}]}
+
+
+def test_streaming_stop_interrupts_and_does_not_raise(fake_sdk):
+    import threading
+    from rf_finder.agent.skill_runner import run_agent_skill_streaming
+
+    # An errored ResultMessage — but because the USER stopped, it must NOT raise.
+    errored = _FakeResultMessage(subtype="interrupted")
+    errored.is_error = True
+    _FakeClient.messages = [_FakeAssistantMessage([_Block("working")]), errored]
+
+    stop = threading.Event()
+    stop.set()   # already requested -> the first loop iteration interrupts
+
+    meta: dict = {}
+    out = asyncio.run(
+        run_agent_skill_streaming(
+            "p", skills=[], allowed_tools=[],
+            output_format={"type": "json_schema", "schema": {}},
+            on_text=lambda _t: None, on_result=meta.update, stop_event=stop,
+        )
+    )
+    client = _FakeClient.instances[-1]
+    assert client.interrupted is True
+    assert meta["stopped"] is True
+    assert out is None   # broke before a ResultMessage was recorded
