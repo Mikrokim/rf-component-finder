@@ -11,6 +11,7 @@ Run with:  python -m rf_finder.ui.gui
 
 from __future__ import annotations
 
+import asyncio
 import queue
 import re
 import threading
@@ -31,6 +32,10 @@ _STATUS = {"PASS": "✓", "FAIL": "✗", "UNKNOWN": "?"}
 
 #: Subtle row tint for a matching component (complements the light theme).
 _MATCH_ROW = "#e8f8ef"
+
+#: Source-column markers so a row's origin is clear (both engines share the table).
+_SRC_SEARCH = "🔎 Search"
+_SRC_AI = "🤖 AI"
 
 #: ttkbootstrap theme for the whole window.
 _THEME = "minty"
@@ -84,6 +89,7 @@ class App:
 
         # Controls: the Search button and a status line (loading / result count).
         self._searching = False
+        self._skill_running = False
         self.last_results: list = []
         controls = ttk.Frame(self.form_area)
         controls.pack(fill="x", pady=(16, 0))
@@ -92,6 +98,12 @@ class App:
             bootstyle="success", width=16,
         )
         self.search_button.pack(side="left", ipady=4)
+        # AI Search: same form + same table, but a Claude Skill is the engine.
+        self.skill_button = ttk.Button(
+            controls, text="AI Search", command=self._on_run_skill,
+            bootstyle="info", width=16,
+        )
+        self.skill_button.pack(side="left", padx=(10, 0), ipady=4)
         self.status_var = tk.StringVar(value="")
         ttk.Label(controls, textvariable=self.status_var, bootstyle="secondary").pack(
             side="left", padx=(14, 0)
@@ -280,8 +292,12 @@ class App:
                 kind, payload = self._result_queue.get_nowait()
                 if kind == "ok":
                     self._deliver_results(payload)
-                else:
+                elif kind == "error":
                     self._on_error(payload)
+                elif kind == "skill_done":
+                    self._deliver_skill_results(payload)
+                elif kind == "skill_error":
+                    self._on_skill_error(payload)
         except queue.Empty:
             pass
         self.root.after(100, self._poll_queue)
@@ -328,10 +344,127 @@ class App:
             )
             item = self.tree.insert(
                 "", "end",
-                values=(c.model, c.manufacturer, verdicts, c.url),
+                values=(_SRC_SEARCH, c.model, c.manufacturer, verdicts, c.url),
                 tags=(v.overall,),
             )
             self._row_urls[item] = c.url
+
+    # -- AI Search (Claude Skill) --------------------------------------------
+
+    def _on_run_skill(self) -> None:
+        """AI Search: hand the current form to a Claude Skill and render the
+        components it returns into the shared results table.
+
+        Shares Search's input seam (``build_answers`` + ``collect``) and its
+        results table; only the engine differs. The deterministic Search flow
+        and its ``_deliver_results`` rendering are untouched.
+        """
+        if self._skill_running or self._searching:
+            return
+
+        errors = self._validate_form()
+        if errors:
+            messagebox.showerror("Incomplete filters", "\n".join(errors))
+            return
+        try:
+            spec = collect(self.schema, answers=self.build_answers())
+        except ValueError as e:
+            messagebox.showerror("Invalid input", str(e))
+            return
+
+        spec_text = self._format_spec_for_skill(spec)
+        self._set_skill_running(True)
+        # AI Search does NOT clear the table — its rows combine with what's
+        # already shown. Only Search resets the table.
+        threading.Thread(
+            target=self._skill_worker, args=(spec_text,), daemon=True
+        ).start()
+
+    def _format_spec_for_skill(self, spec) -> str:
+        """Render a ``QuerySpec`` as a compact pipe-delimited line for the prompt."""
+        parts = [f"Component type: {spec.component_type}"]
+        for c in spec.constraints:
+            if c.range is not None:
+                lo, hi = c.range
+                if lo == float("-inf") and hi == float("inf"):
+                    rng = "any"
+                elif hi == float("inf"):
+                    rng = f">= {lo}"
+                elif lo == float("-inf"):
+                    rng = f"<= {hi}"
+                else:
+                    rng = f"{lo} to {hi}"
+                parts.append(f"{c.canonical_name}: {rng} {c.unit}".strip())
+            else:
+                parts.append(f"{c.canonical_name}: {c.value} {c.unit}".strip())
+        if not spec.constraints:
+            parts.append("(no filters)")
+        return " | ".join(parts)
+
+    def _skill_worker(self, spec_text: str) -> None:
+        """Runs off the UI thread; hands the outcome back through the queue.
+
+        Imports the SDK-facing entry lazily so a missing ``claude-agent-sdk``
+        (or an unauthenticated / failed run, or an unreadable result) becomes a
+        ``("skill_error", exc)`` message rather than a crash. Never touches Tk.
+        """
+        try:
+            from rf_finder.agent.skill_runner import run_demo_search
+
+            result = asyncio.run(run_demo_search(spec_text, on_text=lambda _t: None))
+            components = (result or {}).get("components", [])
+        except Exception as e:   # missing SDK/auth, run error, unreadable result
+            self._result_queue.put(("skill_error", e))
+            return
+        self._result_queue.put(("skill_done", components))
+
+    def _set_skill_running(self, busy: bool) -> None:
+        """Toggle the AI-Search loading state; block either engine mid-run."""
+        self._skill_running = busy
+        state = "disabled" if busy else "normal"
+        self.skill_button.configure(state=state)
+        self.search_button.configure(state=state)
+        if busy:
+            self.status_var.set("AI Search… (this may take a few seconds)")
+
+    def _on_skill_error(self, exc: Exception) -> None:
+        self._set_skill_running(False)
+        self.status_var.set("")
+        messagebox.showerror("AI Search failed", str(exc))
+
+    def _deliver_skill_results(self, components: list) -> None:
+        """Append Skill-returned components to the shared results table.
+
+        Unlike Search, AI Search does NOT clear the table — its rows are added
+        alongside whatever is already shown (Search or earlier AI results), so
+        the two engines' results combine. Only Search resets the table. The
+        Source column (``_SRC_AI``) marks each appended row's origin. Maps plain
+        dicts straight to rows, so the two engines share the ``Treeview``
+        without sharing a data model.
+        """
+        self._set_skill_running(False)
+
+        if not components:
+            # Nothing to add — leave any existing rows untouched.
+            self.status_var.set("No components from AI Search")
+            return
+
+        self.status_var.set(f"Added {len(components)} component(s) from AI Search")
+        self._show_tree()
+        for c in components:
+            url = c.get("url", "")
+            item = self.tree.insert(
+                "", "end",
+                values=(
+                    _SRC_AI,
+                    c.get("model", ""),
+                    c.get("manufacturer", ""),
+                    c.get("verdict", ""),
+                    url,
+                ),
+                tags=("match",),
+            )
+            self._row_urls[item] = url
 
     # -- Results table -------------------------------------------------------
 
@@ -339,18 +472,19 @@ class App:
         """A Treeview of results plus an empty-state label, in ``results_area``."""
         ttk.Style().configure("Treeview", rowheight=28)   # roomier rows
 
-        cols = ("model", "manufacturer", "verdicts", "url")
+        cols = ("source", "model", "manufacturer", "verdicts", "url")
         self.tree = ttk.Treeview(
             self.results_area, columns=cols, show="headings", bootstyle="success"
         )
-        for key, text, width in (
-            ("model", "Model", 180),
-            ("manufacturer", "Manufacturer", 130),
-            ("verdicts", "Verdicts", 260),
-            ("url", "Datasheet URL", 320),
+        for key, text, width, anchor in (
+            ("source", "Source", 96, "center"),
+            ("model", "Model", 170, "w"),
+            ("manufacturer", "Manufacturer", 130, "w"),
+            ("verdicts", "Verdicts", 240, "w"),
+            ("url", "Datasheet URL", 300, "w"),
         ):
             self.tree.heading(key, text=text)
-            self.tree.column(key, width=width, anchor="w")
+            self.tree.column(key, width=width, anchor=anchor)
 
         # Only matching rows are shown; give them a subtle tint over the theme.
         self.tree.tag_configure("match", background=_MATCH_ROW)
@@ -389,9 +523,11 @@ class App:
 
 
 def main() -> None:
-    """Build and run the window (adapters fetch live, like the CLI)."""
-    from rf_finder.config import load_max_results
+    """Build and run the window (adapters fetch cache-first, like the CLI)."""
+    from rf_finder.config import load_cache_config, load_max_results
+    from rf_finder import http
 
+    http.configure(load_cache_config())   # set up the shared HTTP service the adapters fetch through
     root = ttk.Window(themename=_THEME)
     App(root, max_results=load_max_results())
     root.mainloop()
