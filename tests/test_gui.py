@@ -119,3 +119,96 @@ def test_table_caps_matches_at_max_results(app):
     app._deliver_results([_match(i) for i in range(cap + 5)])
     assert len(app.tree.get_children()) == cap
     assert str(cap + 5) in app.status_var.get()   # total surfaced in status
+
+
+# ---------------------------------------------------------------------------
+# AI Search — parameter formatting + rendering Skill results into the table
+# ---------------------------------------------------------------------------
+
+
+def test_format_spec_for_skill_keystone(app):
+    from rf_finder.form import collect
+
+    spec = collect(
+        app.schema,
+        answers={
+            "freq_range.min": "14", "freq_range.max": "15", "freq_range.unit": "GHz",
+            "P1dB.min": "24", "P1dB.unit": "dBm",
+        },
+    )
+    text = app._format_spec_for_skill(spec)
+
+    assert text.startswith("Component type: amplifier")
+    assert "freq_range: 14.0 to 15.0 GHz" in text
+    assert "P1dB: >= 24.0 dBm" in text
+    assert " | " in text
+
+
+def test_format_spec_for_skill_empty_form(app):
+    from rf_finder.form import collect
+
+    spec = collect(app.schema, answers={})
+    text = app._format_spec_for_skill(spec)
+
+    assert text.startswith("Component type: amplifier")
+    assert "(no filters)" in text
+
+
+def test_deliver_skill_results_maps_components_to_rows(app):
+    components = [
+        {"model": "M1", "manufacturer": "Mfr1", "url": "http://u1", "verdict": "match"},
+        {"model": "M2", "manufacturer": "Mfr2", "url": "http://u2", "verdict": "partial"},
+    ]
+    app._deliver_skill_results(components)
+
+    rows = app.tree.get_children()
+    assert len(rows) == 2
+    vals = app.tree.item(rows[0], "values")
+    assert "AI" in vals[0]          # source marker (AI Search)
+    assert vals[1] == "M1"          # model
+    assert vals[2] == "Mfr1"        # manufacturer
+    assert vals[3] == "match"       # verdict
+    assert vals[4] == "http://u1"   # url
+    assert app._row_urls[rows[0]] == "http://u1"   # double-click deep-link
+
+
+def _det_row(model="A"):
+    from rf_finder.models import Candidate, VerifiedCandidate
+
+    c = Candidate(model=model, manufacturer="X", url="u", raw_params={}, source="table")
+    return VerifiedCandidate(candidate=c, verdicts=[], overall="match", confidence="table")
+
+
+def test_empty_ai_search_keeps_existing_rows(app):
+    """An AI Search that returns nothing must NOT clear the table."""
+    app._deliver_results([_det_row()])
+    assert len(app.tree.get_children()) == 1
+
+    app._deliver_skill_results([])
+    assert len(app.tree.get_children()) == 1          # existing row preserved
+    assert "No components" in app.status_var.get()
+
+
+def test_ai_search_appends_to_existing_results(app):
+    """AI Search combines with existing rows; the Source column marks origin."""
+    app._deliver_results([_det_row()])
+    assert len(app.tree.get_children()) == 1
+
+    # AI Search appends rather than replacing.
+    app._deliver_skill_results([{"model": "B", "manufacturer": "Y", "url": "v", "verdict": "match"}])
+    rows = app.tree.get_children()
+    assert len(rows) == 2                              # combined: 1 Search + 1 AI
+    sources = [app.tree.item(r, "values")[0] for r in rows]
+    assert any("Search" in s for s in sources)
+    assert any("AI" in s for s in sources)
+
+
+def test_search_resets_table_including_ai_rows(app):
+    """Only Search clears the table — it re-renders from scratch."""
+    app._deliver_skill_results([{"model": "B", "manufacturer": "Y", "url": "v", "verdict": "match"}])
+    assert len(app.tree.get_children()) == 1
+
+    app._deliver_results([_det_row("A")])
+    rows = app.tree.get_children()
+    assert len(rows) == 1                              # Search reset the table
+    assert "Search" in app.tree.item(rows[0], "values")[0]
