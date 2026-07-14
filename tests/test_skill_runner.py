@@ -4,7 +4,7 @@ The SDK is mocked — a fake ``claude_agent_sdk`` module is installed in
 ``sys.modules`` so ``run_agent_skill`` (which imports it lazily) picks up our
 stand-ins. No network, no real model call, no Tk. These lock down the option
 building, the structured-vs-text return contract, the ``on_text`` streaming, and
-the ``run_demo_search`` configuration.
+the ``run_rf_search`` configuration.
 """
 
 from __future__ import annotations
@@ -172,11 +172,11 @@ def test_on_text_receives_blocks_then_done_marker(fake_sdk):
     assert any("done" in s and "success" in s for s in seen)
 
 
-# --- run_demo_search wiring ------------------------------------------------
+# --- run_rf_search wiring (the real skill) ---------------------------------
 
 
-def test_run_demo_search_uses_placeholder_skill_and_schema(fake_sdk):
-    from rf_finder.agent.skill_runner import COMPONENT_SCHEMA, run_demo_search
+def test_run_rf_search_uses_real_skill_and_schema(fake_sdk):
+    from rf_finder.agent.skill_runner import COMPONENT_SCHEMA, run_rf_search
 
     captured = {}
     fake_sdk.query = _make_query(
@@ -184,13 +184,16 @@ def test_run_demo_search_uses_placeholder_skill_and_schema(fake_sdk):
     )
 
     asyncio.run(
-        run_demo_search(
+        run_rf_search(
             "Component type: amplifier | Gain: >= 20 dB", on_text=lambda _t: None
         )
     )
 
     opts = captured["options"]
-    assert opts.skills == ["demo-component-search"]
-    assert opts.model == "haiku"
+    assert opts.skills == ["rf-skill-json-output"]
+    assert opts.model == "opus"
+    # Bash MUST be allowed so the skill can run its OWN bundled tools
+    # (tools/run_extract.py -> Gemini datasheet extraction).
+    assert "Bash" in opts.allowed_tools
     assert opts.kwargs["output_format"] == COMPONENT_SCHEMA
     assert "amplifier" in captured["prompt"]

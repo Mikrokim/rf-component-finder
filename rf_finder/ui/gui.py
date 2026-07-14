@@ -409,9 +409,9 @@ class App:
         ``("skill_error", exc)`` message rather than a crash. Never touches Tk.
         """
         try:
-            from rf_finder.agent.skill_runner import run_demo_search
+            from rf_finder.agent.skill_runner import run_rf_search
 
-            result = asyncio.run(run_demo_search(spec_text, on_text=lambda _t: None))
+            result = asyncio.run(run_rf_search(spec_text, on_text=lambda _t: None))
             components = (result or {}).get("components", [])
         except Exception as e:   # missing SDK/auth, run error, unreadable result
             self._result_queue.put(("skill_error", e))

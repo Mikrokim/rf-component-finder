@@ -1,6 +1,6 @@
 ---
-name: rf-component-search-json
-description: Parametric search for RF/microwave components (amplifiers, mixers, filters, switches, attenuators, couplers, etc.) against a multi-parameter spec, with reliable datasheet verification, returning the matching parts as a JSON file (the rf_finder Candidate shape) for the Python form — not an Excel workbook. Use whenever the user gives a component spec with electrical parameters (frequency range, gain, P1dB, OIP3, NF, insertion loss, isolation...) and wants matching parts as JSON — e.g. "מצא לי מגבר", "תחפש רכיב", "צריכה mixer", "find an amplifier 8-12 GHz gain 20dB", or pastes a spec line. Besides fully datasheet-verified matches, it ALSO returns parts that were not fully verified when at least 80% of the required parameters were verified and matched. Also use when the user asks to check "if there's anything on the market" matching parameters. The user searches AFTER already checking their 12 usual vendor sites, so those are always excluded — see the Vendor Lists section. Trigger even for short spec-only messages with no verb.
+name: rf-skill-json-output
+description: Parametric search for RF/microwave components (amplifiers, mixers, filters, switches, attenuators, couplers, etc.) against a multi-parameter spec, with reliable datasheet verification, returning the matching parts as Agent SDK structured output (a components list, the rf_finder Candidate shape) for the desktop GUI's AI Search — not an Excel workbook. Use whenever the user gives a component spec with electrical parameters (frequency range, gain, P1dB, OIP3, NF, insertion loss, isolation...) and wants matching parts as structured output — e.g. "מצא לי מגבר", "תחפש רכיב", "צריכה mixer", "find an amplifier 8-12 GHz gain 20dB", or pastes a spec line. Besides fully datasheet-verified matches, it ALSO returns parts that were not fully verified when at least 80% of the required parameters were verified and matched. Also use when the user asks to check "if there's anything on the market" matching parameters. The user searches AFTER already checking their 12 usual vendor sites, so those are always excluded — see the Vendor Lists section. Trigger even for short spec-only messages with no verb.
 ---
 
 # RF Component Parametric Search (JSON output)
@@ -20,7 +20,7 @@ Before Step 1, load both:
 
 Only parameters defined in the loaded component module may be used as filters. If no module exists for the requested component type, say so and ask how to proceed rather than improvising parameters.
 
-At **Step 4 (reporting)**, also load **`rf-json-output.md`** — the fixed schema for the output JSON file.
+At **Step 4 (reporting)**, also load **`rf-json-output.md`** — the fixed schema for the structured result returned to the Agent SDK.
 
 ## Core definitions — defined once, referenced throughout
 
@@ -211,19 +211,19 @@ python tools/run_extract.py --url "<datasheet URL>" --params "Gain,P1dB,NF,OIP3"
 
 State in the coverage statement that datasheet reading was done via Gemini, and which provider/model.
 
-### Step 4 — Report: chat table + JSON file
+### Step 4 — Report: chat table + structured result
 
 **Chat**: one table of matches/borderlines (part number, vendor, band, each required parameter with min/typ noted, verdict), followed by a short "checked and rejected" list — part, failing parameter, actual value. Placement follows the Outcome categories: a ⚠️ access-blocked match belongs in the matches table with its "לא אומת — גישה ל-datasheet חסומה" flag (never in the rejected list); a ⚠️ partial-verified match (the 80% rule) belongs in the matches table flagged "אומת חלקית — N/R פרמטרים אומתו", naming the unverified parameters; an access-blocked *unverifiable* part and an `insufficient verification` part (<80%) go in the rejected list, each marked distinctly ("לא נפסל על פרמטר — כדאי לשקול פנייה ליצרן") — never as a parameter failure. The rejected list is what convinces the user the search was real.
 
-**JSON file** — write the machine-readable result to the fixed schema in **`rf-json-output.md`** (load that file now). It is a single JSON array, one object per **returned** component, mirroring the `rf_finder` `Candidate` shape (`model`, `manufacturer`, `url`, `source`, `params{canonical -> {value, unit}}`). This is the file the Python form consumes. The array holds exactly the parts that qualify as good results:
+**Structured result** — the skill's **final answer** is the structured result defined in **`rf-json-output.md`** (load that file now): a single JSON object `{ "components": [ ... ] }`, one entry per **returned** component, with `model`/`manufacturer`/`url`/`verdict` plus (recommended) `source` and `params{canonical -> {value, unit}}`. It is **returned to the Agent SDK** (`ResultMessage.structured_output`) — **nothing is written to disk**. The desktop GUI's AI Search renders it straight into its table (that path does **not** re-verify through `rf_finder`'s Python verifier — the `verdict` you set is shown as-is). The `components` list holds exactly the parts that qualify as good results:
 
-- ✅ full matches.
-- ⚠️ `not datasheet-verified` access-blocked matches (`source: "table"`, aggregator link as `url`).
-- ⚠️ partial-verified matches that clear the 80% rule (`source` = wherever the emitted values were read).
+- ✅ full matches → `verdict: "match"`.
+- ⚠️ `not datasheet-verified` access-blocked matches → `verdict: "not-verified"`, `source: "table"`, aggregator link as `url`.
+- ⚠️ partial-verified matches that clear the 80% rule → `verdict: "partial N/R"` (N of R required params verified).
 
-Everything excluded — datasheet ❌, `rejected at site screen`, access-blocked *unverifiable*, and `insufficient verification` (<80%) — is **not** in the JSON; it lives only in the chat rejected list and the coverage journal below. Values in `params` carry the raw unit as found (no normalization), omit any parameter not found, and every object has at least one primary RF parameter (full rules in `rf-json-output.md`). State the JSON file's path in chat.
+Everything excluded — datasheet ❌, `rejected at site screen`, access-blocked *unverifiable*, and `insufficient verification` (<80%) — is **not** in `components`; it appears only in the streamed chat rejected list and the coverage journal below. Values in `params` carry the raw unit as found (no normalization), omit any parameter not found, and every returned component has at least one primary RF parameter (full rules in `rf-json-output.md`).
 
-The proof-of-work the Excel workbook used to carry in its נבדקו ונפסלו and יומן כיסוי sheets now lives entirely in the **chat report** (the rejected list and the coverage journal below) — nothing is dropped, only moved out of a file and into chat, exactly as thorough as before. This proof-of-work is not decoration — it IS the product: a report with a JSON of matches but no rejection/coverage record is unverifiable, and the user will re-check everything by hand.
+The proof-of-work the Excel workbook used to carry in its נבדקו ונפסלו and יומן כיסוי sheets now lives entirely in the **streamed chat report** (the rejected list and the coverage journal below) — nothing is dropped, only moved out of a file and into the run's progress text, exactly as thorough as before. (The GUI discards this progress and shows only the returned `components`; a chat/Claude-Code run shows the full report.) This proof-of-work is not decoration — it IS the product: a components list with no rejection/coverage record is unverifiable, and the user will re-check everything by hand.
 
 **One-match warning**: 0–1 matches after a real sweep is possible but suspicious. Before accepting, run at least one more Path B wave and confirm all three paths (A/B/C) ran for this category — then report, saying explicitly in the coverage statement that this was done.
 
@@ -253,8 +253,8 @@ Run this checklist; fix anything that fails before reporting. (Each item points 
 - [ ] Any vendor newly discovered by Path A/B was appended to the vendor cache with access metadata.
 - [ ] The Step 1 clarifications are reflected (e.g. a hard bound → no match exceeds it).
 - [ ] The module's sanity checks were applied to Gemini's extracted values; any violation was re-extracted via the runner.
-- [ ] The JSON file validates against `rf-json-output.md`: a top-level array of `{model, manufacturer, url, source, params}`; canonical parameter keys only; raw units (no normalization); parameters omitted when not found; at least one primary RF parameter per object.
-- [ ] The JSON holds **exactly** the good results — ✅, ⚠️ access-blocked `not datasheet-verified`, and ⚠️ partial-verified (80% rule) — and **excludes** every ❌, `rejected at site screen`, access-blocked *unverifiable*, and `insufficient verification` part. The parts and numbers in the JSON match the chat matches table exactly.
+- [ ] The structured result validates against `rf-json-output.md`: a `{ "components": [...] }` object; each entry has `model`/`manufacturer`/`url`/`verdict` (plus `source`/`params` when set); canonical parameter keys only; raw units (no normalization); parameters omitted when not found; at least one primary RF parameter per returned component. It is returned to the SDK (not written to disk).
+- [ ] `components` holds **exactly** the good results — ✅ (`match`), ⚠️ access-blocked `not datasheet-verified` (`not-verified`), and ⚠️ partial-verified (`partial N/R`) — and **excludes** every ❌, `rejected at site screen`, access-blocked *unverifiable*, and `insufficient verification` part. The parts and verdicts in `components` match the streamed matches table exactly.
 - [ ] The coverage journal is present in chat: **exhaustive** (every touched vendor, including empty ones), Path-A aggregators **expanded** into per-vendor rows, with the **"שאילתה שנשלחה"** real query per checked source.
 - [ ] If 0–1 matches: an extra Path B wave was run and the coverage statement says so.
 

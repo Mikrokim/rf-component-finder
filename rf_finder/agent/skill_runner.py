@@ -1,9 +1,8 @@
 """Claude Agent SDK plumbing for the RF finder.
 
 Ported from the proven learning-project wrapper. ``run_agent_skill`` is the one
-place that talks to Claude via the Agent SDK; ``run_demo_search`` is the
-placeholder the GUI's "AI Search" button calls until the real
-``rf-component-search`` skill is wired in.
+place that talks to Claude via the Agent SDK. ``run_rf_search`` wires the real
+``rf-skill-json-output`` skill — the GUI's "AI Search" button calls it.
 
 The SDK is imported lazily inside ``run_agent_skill`` so importing this module
 (and the GUI) never fails when the optional ``claude-agent-sdk`` dependency is
@@ -114,21 +113,23 @@ async def run_agent_skill(
     return structured if output_format is not None else result_text
 
 
-async def run_demo_search(
+async def run_rf_search(
     spec_text: str,
     *,
     on_text: Callable[[str], None] = print,
 ) -> Any:
-    """Placeholder RF search: hand the user's form parameters to the
-    ``demo-component-search`` skill and get back a list of sample components.
+    """Real RF search: hand the user's form parameters to the
+    ``rf-skill-json-output`` skill and return the components it produces.
 
-    Uses the cheap ``haiku`` model — this proves the button -> SDK -> skill ->
-    structured-results path. Returns the structured result (a dict with a
-    ``components`` list). Later swapped for the real ``rf-component-search``
-    skill with the same call shape and schema, without changing the GUI.
+    Drives ``run_agent_skill`` with the ``COMPONENT_SCHEMA`` structured output.
+    ``Bash`` is allowed so the skill can
+    run its OWN bundled tools (``tools/run_extract.py`` -> Gemini datasheet
+    extraction); ``WebSearch``/``WebFetch`` drive the discovery paths; ``Read``
+    loads the skill's reference modules; ``Skill`` lets Claude invoke the skill.
+    Returns the structured result (a dict with a ``components`` list).
     """
     prompt = (
-        "Use the demo-component-search skill to find RF components matching the "
+        "Use the rf-skill-json-output skill to find RF components matching the "
         "parameters below. You MUST invoke the skill and return exactly the "
         "components it produces — do NOT invent, add, remove, or modify "
         "components, and do NOT answer from your own knowledge. If the skill "
@@ -137,9 +138,9 @@ async def run_demo_search(
     )
     return await run_agent_skill(
         prompt,
-        skills=["demo-component-search"],
-        allowed_tools=["Skill", "Bash", "Read"],
-        model="haiku",
+        skills=["rf-skill-json-output"],
+        allowed_tools=["Skill", "Bash", "Read", "WebSearch", "WebFetch", "Glob", "Grep"],
+        model="opus",
         on_text=on_text,
         output_format=COMPONENT_SCHEMA,
     )
