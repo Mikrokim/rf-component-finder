@@ -1,0 +1,8 @@
+# Never commit real API keys / local env files (the .example is safe to commit)
+tools/rf-llm.env
+*.env
+!tools/rf-llm.env.example
+
+# Python
+__pycache__/
+*.pyc
