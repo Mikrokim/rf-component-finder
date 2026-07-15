@@ -45,4 +45,4 @@ def load_max_results(path: str | Path | None = None) -> int:
 # LLM used to extract parameters from datasheet PDFs.
 # Edit these to change the model/provider — no config file, no arguments.
 DATASHEET_PROVIDER = "local"   # "local" (Ollama) | "openai" | "mock"
-DATASHEET_MODEL = "qwen3:8b"   # model name for the chosen provider
+DATASHEET_MODEL = "llama3.1:8b"#"qwen3:8b"   # model name for the chosen provider
