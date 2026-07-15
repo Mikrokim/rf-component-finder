@@ -17,9 +17,12 @@ The `Candidate.datasheet_url` field SHALL default to `None` so existing adapters
 Enumerations:
 - `comparison`: `min`, `max`, `contains`, `eq`, `between`
 - verdict `status`: `PASS`, `FAIL`, `UNKNOWN`
-- `overall`: `match`, `partial`, `fail`
+- `overall` (per-candidate verdict from `verify()`): `match`, `partial`, `fail`
+- pipeline **result outcome** (the value returned/displayed per product, assigned by the datasheet-orchestration pipeline, not by `verify()`): `match`, `not-verified`
 - `source`: `table`, `datasheet`
 - `confidence`: `table`, `datasheet`, `unknown`
+
+`verify()` itself yields only `match`/`partial`/`fail`. The `not-verified` value is a pipeline result outcome: it tags a returned candidate whose table parameters all pass but whose datasheet could not be accessed to confirm the remaining requested parameters (see the datasheet-orchestration spec). Candidates the pipeline returns therefore carry a result outcome of `match` or `not-verified`.
 
 #### Scenario: Candidate exposes its fields
 

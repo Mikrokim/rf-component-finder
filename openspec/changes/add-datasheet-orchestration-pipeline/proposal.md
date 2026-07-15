@@ -8,10 +8,10 @@ Today the search flow is a single pass: `search_and_verify` fetches every adapte
   1. **Retrieve** — adapters return table candidates, as today.
   2. **Gate 1 (table filter)** — `verify()` each candidate; drop any that already `FAIL` on a parameter the table provides. Survivors are `match` or `partial`.
   3. **Enrich (datasheet)** — for survivors only, and only for their still-`UNKNOWN` requested parameters, download the datasheet PDF, extract text, run the existing LLM extractor on **only the missing parameters**, map to `RawValue`, and merge into the candidate with `source="datasheet"`.
-  4. **Gate 2 (final filter)** — re-verify the enriched candidates and return **only full matches** (`overall == "match"`). `FAIL` and `partial` are dropped.
+  4. **Gate 2 (final filter)** — re-verify the enriched candidates and return two result outcomes: **`match`** (every requested parameter `PASS`, site and datasheet) and **`not-verified`** (all site parameters `PASS`, nothing `FAIL`s, but the datasheet could not be accessed to confirm the remaining parameters — and only when at least **80%** of the user's entered parameters are `PASS`). A candidate with any `FAIL`, one left `UNKNOWN` by a datasheet that was read successfully but is silent on the parameter, or a `not-verified` candidate below the 80% coverage threshold, is dropped.
 - Reuse `verifier.verify()` as the single comparison engine — the gates are policy over its verdicts, no second comparator.
 - Reuse the existing `rf_finder/datasheet` building blocks — no new mapping layer.
-- Add an optional `datasheet_url` field to the `Candidate` model; adapters populate it when known. A candidate with no `datasheet_url` cannot be enriched, so its `UNKNOWN` params remain and it is dropped by Gate 2.
+- Add an optional `datasheet_url` field to the `Candidate` model; adapters populate it when known. A candidate with no `datasheet_url` cannot be enriched — a "no datasheet access" condition — so, with its site parameters all passing, Gate 2 returns it as `not-verified` rather than dropping it.
 - Add a **fetch-datasheet-PDF-from-URL** capability (today `pdf.py` reads local files only).
 
 ## Capabilities
@@ -28,4 +28,4 @@ Today the search flow is a single pass: `search_and_verify` fetches every adapte
 - **New code**: `rf_finder/pipeline.py` (orchestrator); a datasheet-PDF-by-URL fetch helper in `rf_finder/datasheet/pdf.py`.
 - **Modified code**: `rf_finder/models.py` (`Candidate.datasheet_url`); `rf_finder/search.py` / `rf_finder/__main__.py` and `rf_finder/ui/gui.py` call sites switch from `search_and_verify` to the new pipeline (or the pipeline wraps it); adapters optionally set `datasheet_url`.
 - **Dependencies**: the datasheet path needs the `llm` extra (`genaifabric`) and network access to fetch PDFs; both are only exercised when enrichment runs, so the table-only path keeps working without them.
-- **Behavior change**: results now reflect datasheet-resolved parameters, and the default result set is only full matches (partials are no longer surfaced as results).
+- **Behavior change**: results now reflect datasheet-resolved parameters. The result set contains fully verified `match` products plus `not-verified` products (site parameters all pass but the datasheet could not be accessed, and at least 80% of the user's entered parameters pass); plain `partial`/`fail` candidates, and `not-verified` candidates below the 80% coverage threshold, are no longer surfaced. Each returned product exposes product name, manufacturer, datasheet URL, and its `match`/`not-verified` verdict (the internal `source` is not part of the result).
