@@ -189,6 +189,37 @@ _DISCOVERY_TOOLS = ["Skill", "Read", "WebSearch", "WebFetch", "Glob", "Grep"]
 # alternative datasheet sources when the primary is blocked).
 _VERIFY_TOOLS = ["Skill", "Bash", "Read", "WebSearch", "WebFetch"]
 
+# --- Test mode -------------------------------------------------------------
+# ``RF_SKILL_MODE=test`` swaps in local-JSON copies of the skills that run the
+# SAME workflow against a fixed mock dataset instead of the web + Gemini — for
+# cheap, offline end-to-end checks of the whole pipeline (see the *-test skills
+# and mockdata/). Default ``real`` runs the live skills. The GUI/conductor are
+# unchanged; only the skill *names* and *allowed tools* differ.
+DISCOVERY_SKILL_TEST = "rf-discovery-test"
+VERIFY_SKILL_TEST = "rf-verify-test"
+
+# Test tools: local JSON only. No WebSearch/WebFetch/Bash, so an external call
+# is physically impossible even if the skill instructions were ignored — a hard
+# guarantee the test spends no web/Gemini tokens.
+_DISCOVERY_TOOLS_TEST = ["Skill", "Read", "Glob", "Grep"]
+_VERIFY_TOOLS_TEST = ["Skill", "Read"]
+
+
+def _test_mode() -> bool:
+    """True when ``RF_SKILL_MODE`` selects the offline test skills."""
+    return os.environ.get("RF_SKILL_MODE", "real").strip().lower() == "test"
+
+
+def _resolve_skills() -> tuple[str, list[str], str, list[str]]:
+    """(discovery_skill, discovery_tools, verify_skill, verify_tools) for the
+    current ``RF_SKILL_MODE`` — the one place the switch is applied."""
+    if _test_mode():
+        return (
+            DISCOVERY_SKILL_TEST, _DISCOVERY_TOOLS_TEST,
+            VERIFY_SKILL_TEST, _VERIFY_TOOLS_TEST,
+        )
+    return (DISCOVERY_SKILL, _DISCOVERY_TOOLS, VERIFY_SKILL, _VERIFY_TOOLS)
+
 #: Discovery's final structured output — the complete deduped candidate list,
 #: a safety net beside the live ``@@CANDIDATE@@`` stream.
 DISCOVERY_SCHEMA: dict[str, Any] = {
@@ -247,9 +278,9 @@ def _candidate_key(candidate: dict[str, Any]) -> tuple[str, str]:
     )
 
 
-def _discovery_prompt(spec_text: str) -> str:
+def _discovery_prompt(spec_text: str, skill: str = DISCOVERY_SKILL) -> str:
     return (
-        "Use the rf-discovery skill to find RF components matching the parameters "
+        f"Use the {skill} skill to find RF components matching the parameters "
         "below. Emit each surviving candidate immediately on its own line as "
         "`@@CANDIDATE@@ {json}` (model, manufacturer, url), and also return the "
         "full candidates list at the end. Do NOT read datasheets or decide final "
@@ -258,9 +289,9 @@ def _discovery_prompt(spec_text: str) -> str:
     )
 
 
-def _verify_prompt(candidate: dict[str, Any], spec_text: str) -> str:
+def _verify_prompt(candidate: dict[str, Any], spec_text: str, skill: str = VERIFY_SKILL) -> str:
     return (
-        "Use the rf-verify skill to verify this ONE candidate against the spec. "
+        f"Use the {skill} skill to verify this ONE candidate against the spec. "
         "Return exactly the skill's result — do NOT invent, add, or modify it. If "
         "it does not qualify, return an empty components list.\n\n"
         f"Candidate: model={candidate.get('model', '')}, "
@@ -301,6 +332,12 @@ async def run_rf_search_pipelined(
         ResultMessage,
     )
 
+    # Resolve which skills + tools this run uses (real web/Gemini, or the offline
+    # local-JSON test skills) once — RF_SKILL_MODE decides.
+    disc_skill, disc_tools, verify_skill, verify_tools = _resolve_skills()
+    if _test_mode():
+        on_text("[RF_SKILL_MODE=test — offline: local JSON only, no web/Gemini]\n")
+
     seen: set[tuple[str, str]] = set()
     tasks: list[asyncio.Task] = []
     components: list[dict[str, Any]] = []
@@ -318,9 +355,9 @@ async def run_rf_search_pipelined(
                 return
             try:
                 result = await run_agent_skill(
-                    _verify_prompt(candidate, spec_text),
-                    skills=[VERIFY_SKILL],
-                    allowed_tools=_VERIFY_TOOLS,
+                    _verify_prompt(candidate, spec_text, verify_skill),
+                    skills=[verify_skill],
+                    allowed_tools=verify_tools,
                     model="opus",
                     on_text=on_text,
                     output_format=COMPONENT_SCHEMA,
@@ -345,8 +382,8 @@ async def run_rf_search_pipelined(
     options = ClaudeAgentOptions(
         cwd=PROJECT_ROOT,
         setting_sources=["user", "project"],
-        skills=[DISCOVERY_SKILL],
-        allowed_tools=_DISCOVERY_TOOLS,
+        skills=[disc_skill],
+        allowed_tools=disc_tools,
         model="opus",
         permission_mode="acceptEdits",
         output_format=DISCOVERY_SCHEMA,
@@ -357,7 +394,7 @@ async def run_rf_search_pipelined(
     disc_candidates: list[dict[str, Any]] = []
 
     async with ClaudeSDKClient(options=options) as client:
-        await client.query(_discovery_prompt(spec_text))
+        await client.query(_discovery_prompt(spec_text, disc_skill))
         async for message in client.receive_response():
             if stop_event is not None and stop_event.is_set():
                 stopped = True

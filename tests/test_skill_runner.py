@@ -83,6 +83,14 @@ class _FakeClient:
             yield m
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_skill_mode(monkeypatch):
+    """Keep tests independent of the repo ``.env``: default to real mode unless a
+    test sets ``RF_SKILL_MODE`` itself. (The app's .env sets it to ``test``, which
+    would otherwise leak into every test here.)"""
+    monkeypatch.delenv("RF_SKILL_MODE", raising=False)
+
+
 @pytest.fixture
 def fake_sdk(monkeypatch):
     """Install a fake ``claude_agent_sdk`` module; per-test set ``.query`` (for
@@ -300,6 +308,72 @@ def test_pipelined_stop_interrupts_and_does_not_raise(fake_sdk):
     assert disc.interrupted is True
     assert meta["stopped"] is True
     assert out == {"components": []}
+
+
+# --- RF_SKILL_MODE switch (real vs offline test skills) --------------------
+
+
+def test_skill_mode_defaults_to_real(monkeypatch):
+    from rf_finder.agent.skill_runner import _resolve_skills, _test_mode
+
+    monkeypatch.delenv("RF_SKILL_MODE", raising=False)
+    assert _test_mode() is False
+    disc, _dt, verify, _vt = _resolve_skills()
+    assert disc == "rf-discovery"
+    assert verify == "rf-verify"
+
+
+def test_skill_mode_test_selects_offline_skills_and_no_web_tools(monkeypatch):
+    from rf_finder.agent.skill_runner import _resolve_skills, _test_mode
+
+    monkeypatch.setenv("RF_SKILL_MODE", "test")
+    assert _test_mode() is True
+    disc, disc_tools, verify, verify_tools = _resolve_skills()
+    assert disc == "rf-discovery-test"
+    assert verify == "rf-verify-test"
+    # The hard offline guarantee: web/Bash tools are physically withheld.
+    for tool in ("WebSearch", "WebFetch", "Bash"):
+        assert tool not in disc_tools
+        assert tool not in verify_tools
+
+
+def test_skill_mode_tolerates_case_and_whitespace(monkeypatch):
+    from rf_finder.agent.skill_runner import _test_mode
+
+    monkeypatch.setenv("RF_SKILL_MODE", "  Test ")
+    assert _test_mode() is True
+    monkeypatch.setenv("RF_SKILL_MODE", "real")
+    assert _test_mode() is False
+
+
+def test_pipelined_uses_test_skills_when_mode_test(fake_sdk, monkeypatch):
+    """End-to-end at the conductor level: in test mode the discovery client and
+    the verify call both load the *-test skills, with no web tools."""
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    monkeypatch.setenv("RF_SKILL_MODE", "test")
+    line = '@@CANDIDATE@@ {"model": "M1", "manufacturer": "X", "url": "u"}\n'
+    _FakeClient.messages = [
+        _FakeAssistantMessage([_Block(line)]),
+        _FakeResultMessage(structured_output={"candidates": [{"model": "M1", "manufacturer": "X", "url": "u"}]}),
+    ]
+    vcaptured: dict = {}
+    fake_sdk.query = _make_query(
+        [_FakeResultMessage(structured_output={"components": [{"model": "M1", "manufacturer": "X", "url": "u", "verdict": "match"}]})],
+        vcaptured,
+    )
+
+    asyncio.run(run_rf_search_pipelined("spec", on_text=lambda _t: None))
+
+    disc = _FakeClient.instances[-1]
+    assert disc.options.skills == ["rf-discovery-test"]
+    assert "WebSearch" not in disc.options.allowed_tools
+    assert "WebFetch" not in disc.options.allowed_tools
+    assert vcaptured["options"].skills == ["rf-verify-test"]
+    assert "Bash" not in vcaptured["options"].allowed_tools
+    # The prompt names the offline skill, not the real one.
+    assert "rf-discovery-test" in disc.queried
+    assert "rf-verify-test" in vcaptured["prompt"]
 
 
 # --- run metadata (Feature 2) + error surfacing (Feature 1) ----------------

@@ -1,0 +1,41 @@
+{
+  "_comment": "RF_SKILL_MODE=test, Path C (vendor-cache catalog sweep). Narda/PMI/BeRex/Erzia/Cernex catalog parts. Several sub-band parts (7-13, 3.3-3.8, 0.1-6, 0.1-12 GHz) exercise the Step 2.7 screen-out against a 14-15 GHz query; NF absent on Narda AMF/PMI exercises verify's partial/unverified path. Schema in README.md.",
+  "components": [
+    {
+      "model": "AMF30-12001800-60-30P",
+      "manufacturer": "Narda-MITEQ",
+      "url": "https://nardamiteq.com/viewmodel.php?model=AMF30-12001800-60-30P",
+      "params": { "freq_range": "12-18 GHz", "Gain": "60 dB", "P1dB": "30 dBm" }
+    },
+    {
+      "model": "PA-12G18G-53-5-40-SFF",
+      "manufacturer": "Planar Monolithics Industries",
+      "url": "https://www.pmi-rf.com/product-details/pa-12g18g-53-5-40-sff",
+      "params": { "freq_range": "12-18 GHz", "Gain": "53 dB", "NF": "5 dB", "Psat": "40 dBm" }
+    },
+    {
+      "model": "LNA-40-02002600-31-10P",
+      "manufacturer": "Narda-MITEQ",
+      "url": "https://www.nardamiteq.com/docs/LNA-40-02002600-31-10P.PDF",
+      "params": { "freq_range": "2-26 GHz", "Gain": "40 dB", "NF": "3.1 dB", "P1dB": "10 dBm" }
+    },
+    {
+      "model": "ERZ-LNA-0010-0600-18-5.5",
+      "manufacturer": "Erzia",
+      "url": "https://www.erzia.com/wp-content/uploads/ERZ-LNA-0010-0600-18-5.5_0.pdf",
+      "params": { "freq_range": "0.1-6 GHz", "Gain": "18 dB", "P1dB": "26 dBm", "NF": "7 dB", "IP3": "37 dBm" }
+    },
+    {
+      "model": "BVA3143",
+      "manufacturer": "BeRex",
+      "url": "https://d2lxe0fofddnat.cloudfront.net/BVA3143-V1.2.pdf",
+      "params": { "freq_range": "3.3-3.8 GHz", "Gain": "40 dB", "P1dB": "26.2 dBm", "NF": "3.9 dB", "IP3": "42 dBm" }
+    },
+    {
+      "model": "CBLU1122630",
+      "manufacturer": "Cernex",
+      "url": "https://www.tect-electronics.com/uploads/files/Cernex/CBL.pdf",
+      "params": { "freq_range": "0.1-12 GHz", "Gain": "26 dB", "P1dB": "10 dBm", "NF": "3.0 dB" }
+    }
+  ]
+}

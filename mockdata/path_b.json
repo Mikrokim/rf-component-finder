@@ -1,0 +1,47 @@
+{
+  "_comment": "RF_SKILL_MODE=test, Path B (part-graph traversal: siblings / alternatives). Altum ARF111x and the Cernex CBLU series are sibling families (natural Path B). ASL4020 is intentionally duplicated from path_a.json to exercise the conductor's on-the-fly dedup. Schema in README.md.",
+  "components": [
+    {
+      "model": "ARF1112Q4",
+      "manufacturer": "Altum RF",
+      "url": "https://www.altumrf.com/products/arf1112q4/",
+      "params": { "freq_range": "13.3-17 GHz", "Gain": "24 dB", "P1dB": "29.9 dBm", "Psat": "30 dBm" }
+    },
+    {
+      "model": "ARF1111Q4",
+      "manufacturer": "Altum RF",
+      "url": "https://www.altumrf.com/products/arf1111q4/",
+      "params": { "freq_range": "13.5-18 GHz", "Gain": "22 dB", "P1dB": "26.1 dBm", "Psat": "27 dBm" }
+    },
+    {
+      "model": "ASL4020",
+      "manufacturer": "Aelius Semiconductors",
+      "url": "https://www.aeliussemi.com/admin/uploads/184065211ASL%204020_Rev%201.0%20Apr%202017.pdf",
+      "params": { "freq_range": "14-15 GHz", "Gain": "26 dB", "P1dB": "33 dBm", "IP3": "43 dBm", "Psat": "34 dBm" }
+    },
+    {
+      "model": "ERZ-LNA-0700-1300-21-1",
+      "manufacturer": "Erzia",
+      "url": "https://www.erzia.com/sites/default/files/amps/ERZ-LNA-0700-1300-21-1_1.pdf",
+      "params": { "freq_range": "7-13 GHz", "Gain": "23 dB", "P1dB": "9 dBm", "NF": "1.3 dB" }
+    },
+    {
+      "model": "CBLU1162134",
+      "manufacturer": "Cernex",
+      "url": "https://www.tect-electronics.com/uploads/files/Cernex/CBL.pdf",
+      "params": { "freq_range": "0.1-16 GHz", "Gain": "21 dB", "P1dB": "10 dBm", "NF": "3.4 dB" }
+    },
+    {
+      "model": "CBLU1181835",
+      "manufacturer": "Cernex",
+      "url": "https://www.tect-electronics.com/uploads/files/Cernex/CBL.pdf",
+      "params": { "freq_range": "0.1-18 GHz", "Gain": "18 dB", "P1dB": "10 dBm", "NF": "3.5 dB" }
+    },
+    {
+      "model": "CBLU1183540",
+      "manufacturer": "Cernex",
+      "url": "https://www.tect-electronics.com/uploads/files/Cernex/CBL.pdf",
+      "params": { "freq_range": "0.1-18 GHz", "Gain": "35 dB", "P1dB": "10 dBm", "NF": "4.0 dB" }
+    }
+  ]
+}

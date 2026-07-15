@@ -1,0 +1,53 @@
+{
+  "_comment": "RF_SKILL_MODE=test, Path A (parametric aggregators). Real components pulled from user-provided links + vendor datasheets (Ciao, Aelius, PMI, Mercury, Erzia, Cernex, BeRex). Values are guaranteed min (Gain/P1dB) / max (NF) where the datasheet gives columns, else the stated typ. Schema in README.md.",
+  "components": [
+    {
+      "model": "CA218-3029",
+      "manufacturer": "Ciao Wireless",
+      "url": "https://www.everythingrf.com/products/microwave-rf-amplifiers/ciao-wireless/567-40-ca218-3029",
+      "params": { "freq_range": "2-18 GHz", "Gain": "25 dB", "P1dB": "30 dBm", "NF": "5.5 dB", "IP3": "40 dBm" }
+    },
+    {
+      "model": "ASL4020",
+      "manufacturer": "Aelius Semiconductors",
+      "url": "https://www.aeliussemi.com/admin/uploads/184065211ASL%204020_Rev%201.0%20Apr%202017.pdf",
+      "params": { "freq_range": "14-15 GHz", "Gain": "26 dB", "P1dB": "33 dBm", "IP3": "43 dBm", "Psat": "34 dBm" }
+    },
+    {
+      "model": "PA-2G18G-43-5-40-SFF",
+      "manufacturer": "Planar Monolithics Industries",
+      "url": "https://www.pmi-rf.com/product-details/pa-2g18g-43-5-40-sff",
+      "params": { "freq_range": "2-18 GHz", "Gain": "43 dB", "NF": "5.0 dB", "Psat": "40 dBm" }
+    },
+    {
+      "model": "AM1175",
+      "manufacturer": "Mercury Systems",
+      "url": "https://www.mrcy.com/application/files/7017/5822/5896/Datasheet-Rev2-AM1175-driver-mmic-amplifier.pdf",
+      "params": { "freq_range": "6-18 GHz", "Gain": "21 dB", "P1dB": "25 dBm", "IP3": "35 dBm", "Psat": "26 dBm" }
+    },
+    {
+      "model": "ERZ-LNA-1000-1600-15-2.5",
+      "manufacturer": "Erzia",
+      "url": "https://www.erzia.com/wp-content/uploads/ERZ-LNA-1000-1600-15-2.5_2.pdf",
+      "params": { "freq_range": "10-16 GHz", "Gain": "15 dB", "P1dB": "12.5 dBm", "NF": "2.5 dB" }
+    },
+    {
+      "model": "ERZ-LNA-0100-4000-30-5",
+      "manufacturer": "Erzia",
+      "url": "https://www.erzia.com/sites/default/files/amps/ERZ-LNA-0100-4000-30-5.pdf",
+      "params": { "freq_range": "1-40 GHz", "Gain": "26 dB", "P1dB": "10 dBm", "NF": "8.5 dB" }
+    },
+    {
+      "model": "CBLH3183032",
+      "manufacturer": "Cernex",
+      "url": "https://www.tect-electronics.com/uploads/files/Cernex/CBL.pdf",
+      "params": { "freq_range": "0.003-18 GHz", "Gain": "30 dB", "P1dB": "10 dBm", "NF": "3.2 dB" }
+    },
+    {
+      "model": "BVA518C",
+      "manufacturer": "BeRex",
+      "url": "https://d2lxe0fofddnat.cloudfront.net/BVA518C-v1.0.pdf",
+      "params": { "freq_range": "0.005-4 GHz", "Gain": "20 dB", "P1dB": "19 dBm", "NF": "5.3 dB", "IP3": "32.7 dBm" }
+    }
+  ]
+}
