@@ -198,7 +198,7 @@ Reading errors are real, and normally this step re-reads each ✅/⚠️ candida
 **Invocation — call the runner per candidate:**
 
 ```
-python tools/run_extract.py --url "<datasheet URL>" --params "Gain,P1dB,NF,OIP3"
+python "${CLAUDE_SKILL_DIR}/tools/run_extract.py" --url "<datasheet URL>" --params "Gain,P1dB,NF,OIP3"
 ```
 
 `--file <path>` reads a local PDF instead of a URL; `--requirements-file <reqs.json>` passes the parameter names from a file instead of `--params`. It prints **one JSON object**:

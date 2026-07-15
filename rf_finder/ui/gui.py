@@ -519,9 +519,8 @@ class App:
         already shown; only Search resets the table. Rows may already be present
         from live ``skill_component`` messages, so ``_append_skill_row`` dedupes
         and the final list never double-adds. A run that reaches here did NOT
-        error (``run_agent_skill_streaming`` raises on a real failure ->
-        ``skill_error`` -> popup); it either completed or was stopped by the user
-        (``meta["stopped"]``).
+        error (the conductor raises on a real failure -> ``skill_error`` -> popup);
+        it either completed or was stopped by the user (``meta["stopped"]``).
         """
         self._set_skill_running(False)
         self._skill_stop_event = None

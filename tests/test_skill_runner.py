@@ -206,31 +206,100 @@ def test_on_text_receives_blocks_then_done_marker(fake_sdk):
     assert any("done" in s and "success" in s for s in seen)
 
 
-# --- run_rf_search wiring (the real skill) ---------------------------------
+# --- pipelined conductor: rf-discovery (stream) -> one rf-verify per candidate
 
 
-def test_run_rf_search_uses_real_skill_and_schema(fake_sdk):
-    from rf_finder.agent.skill_runner import COMPONENT_SCHEMA, run_rf_search
+def test_extract_candidates_buffers_partial_lines():
+    from rf_finder.agent.skill_runner import _extract_candidates
 
-    _FakeClient.messages = [_FakeResultMessage(structured_output={"components": []})]
+    rem, got = _extract_candidates(
+        '@@CANDIDATE@@ {"model": "M1", "manufacturer": "X", "url": "u"}'
+    )
+    assert got == []            # no newline yet -> buffered
+    rem, got = _extract_candidates(rem + '\n@@CANDIDATE@@ {"model": "M2"}\n')
+    assert [c["model"] for c in got] == ["M1", "M2"]
+    assert rem == ""
 
-    asyncio.run(
+
+def test_run_rf_search_pipelines_discovery_into_verify(fake_sdk):
+    from rf_finder.agent.skill_runner import DISCOVERY_SCHEMA, run_rf_search
+
+    cand = {"model": "ASL4020", "manufacturer": "Aelius", "url": "http://d/asl4020.pdf"}
+    line = '@@CANDIDATE@@ {"model": "ASL4020", "manufacturer": "Aelius", "url": "http://d/asl4020.pdf"}\n'
+    _FakeClient.messages = [
+        _FakeAssistantMessage([_Block(line)]),
+        _FakeResultMessage(structured_output={"candidates": [cand]}),
+    ]
+    # Each rf-verify call (via query) returns that candidate as a match.
+    vcaptured: dict = {}
+    fake_sdk.query = _make_query(
+        [_FakeResultMessage(structured_output={"components": [{**cand, "verdict": "match"}]})],
+        vcaptured,
+    )
+
+    seen: list = []
+    out = asyncio.run(
         run_rf_search(
-            "Component type: amplifier | Gain: >= 20 dB", on_text=lambda _t: None
+            "Component type: amplifier | Gain: >= 20 dB",
+            on_text=lambda _t: None, on_component=seen.append,
         )
     )
 
-    client = _FakeClient.instances[-1]
-    opts = client.options
-    assert opts.skills == ["rf-skill-json-output"]
-    assert opts.model == "opus"
-    # Bash MUST be allowed so the skill can run its OWN bundled tools
-    # (tools/run_extract.py -> Gemini datasheet extraction).
-    assert "Bash" in opts.allowed_tools
-    assert opts.kwargs["output_format"] == COMPONENT_SCHEMA
-    assert "amplifier" in client.queried
-    # The prompt tells the skill to emit live @@RESULT@@ lines.
-    assert "@@RESULT@@" in client.queried
+    # Discovery ran the rf-discovery skill with the discovery schema + candidate stream.
+    disc = _FakeClient.instances[-1]
+    assert disc.options.skills == ["rf-discovery"]
+    assert disc.options.kwargs["output_format"] == DISCOVERY_SCHEMA
+    assert "@@CANDIDATE@@" in disc.queried
+    # The candidate was verified (rf-verify) and streamed to on_component.
+    assert [c["model"] for c in seen] == ["ASL4020"]
+    assert out == {"components": [{**cand, "verdict": "match"}]}
+    assert vcaptured["options"].skills == ["rf-verify"]
+    assert "ASL4020" in vcaptured["prompt"]
+
+
+def test_pipelined_dedupes_repeated_candidates(fake_sdk):
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    dup = '@@CANDIDATE@@ {"model": "M1", "manufacturer": "X", "url": "u"}\n'
+    _FakeClient.messages = [
+        _FakeAssistantMessage([_Block(dup), _Block(dup)]),   # same candidate twice
+        _FakeResultMessage(structured_output={"candidates": [{"model": "M1", "manufacturer": "X", "url": "u"}]}),
+    ]
+    fake_sdk.query = _make_query(
+        [_FakeResultMessage(structured_output={"components": [{"model": "M1", "manufacturer": "X", "url": "u", "verdict": "match"}]})],
+        {},
+    )
+
+    seen: list = []
+    out = asyncio.run(
+        run_rf_search_pipelined("spec", on_text=lambda _t: None, on_component=seen.append)
+    )
+    assert len(seen) == 1                    # deduped: one verify, one component
+    assert len(out["components"]) == 1
+
+
+def test_pipelined_stop_interrupts_and_does_not_raise(fake_sdk):
+    import threading
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    errored = _FakeResultMessage(subtype="interrupted")
+    errored.is_error = True
+    _FakeClient.messages = [_FakeAssistantMessage([_Block("searching")]), errored]
+    fake_sdk.query = _make_query([_FakeResultMessage(structured_output={"components": []})], {})
+
+    stop = threading.Event()
+    stop.set()   # already requested -> discovery interrupts on the first message
+
+    meta: dict = {}
+    out = asyncio.run(
+        run_rf_search_pipelined(
+            "spec", on_text=lambda _t: None, on_result=meta.update, stop_event=stop
+        )
+    )
+    disc = _FakeClient.instances[-1]
+    assert disc.interrupted is True
+    assert meta["stopped"] is True
+    assert out == {"components": []}
 
 
 # --- run metadata (Feature 2) + error surfacing (Feature 1) ----------------
@@ -275,69 +344,3 @@ def test_errored_run_raises_with_status_code(fake_sdk):
             )
         )
     assert "429" in str(excinfo.value)
-
-
-# --- streaming path (Phase B): live results + stop + emit parsing -----------
-
-
-def test_emit_components_buffers_partial_lines():
-    from rf_finder.agent.skill_runner import _emit_components
-
-    got: list = []
-    # First chunk has no newline -> the line is buffered, nothing emitted yet.
-    rem = _emit_components(
-        '@@RESULT@@ {"model": "M1", "manufacturer": "X", "url": "u", "verdict": "match"}',
-        got.append,
-    )
-    assert got == []
-    # Next chunk completes the first line and adds a full second one.
-    rem = _emit_components(rem + '\n@@RESULT@@ {"model": "M2"}\n', got.append)
-    assert [c["model"] for c in got] == ["M1", "M2"]
-    assert rem == ""
-
-
-def test_streaming_emits_components_live(fake_sdk):
-    from rf_finder.agent.skill_runner import run_agent_skill_streaming
-
-    text = '@@RESULT@@ {"model": "M1", "manufacturer": "X", "url": "u", "verdict": "match"}\n'
-    _FakeClient.messages = [
-        _FakeAssistantMessage([_Block(text)]),
-        _FakeResultMessage(structured_output={"components": [{"model": "M1"}]}),
-    ]
-
-    seen: list = []
-    out = asyncio.run(
-        run_agent_skill_streaming(
-            "p", skills=[], allowed_tools=[],
-            output_format={"type": "json_schema", "schema": {}},
-            on_text=lambda _t: None, on_component=seen.append,
-        )
-    )
-    assert [c["model"] for c in seen] == ["M1"]
-    assert out == {"components": [{"model": "M1"}]}
-
-
-def test_streaming_stop_interrupts_and_does_not_raise(fake_sdk):
-    import threading
-    from rf_finder.agent.skill_runner import run_agent_skill_streaming
-
-    # An errored ResultMessage — but because the USER stopped, it must NOT raise.
-    errored = _FakeResultMessage(subtype="interrupted")
-    errored.is_error = True
-    _FakeClient.messages = [_FakeAssistantMessage([_Block("working")]), errored]
-
-    stop = threading.Event()
-    stop.set()   # already requested -> the first loop iteration interrupts
-
-    meta: dict = {}
-    out = asyncio.run(
-        run_agent_skill_streaming(
-            "p", skills=[], allowed_tools=[],
-            output_format={"type": "json_schema", "schema": {}},
-            on_text=lambda _t: None, on_result=meta.update, stop_event=stop,
-        )
-    )
-    client = _FakeClient.instances[-1]
-    assert client.interrupted is True
-    assert meta["stopped"] is True
-    assert out is None   # broke before a ResultMessage was recorded
