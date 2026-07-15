@@ -74,6 +74,16 @@ A blocked datasheet is an *access* failure, never a parameter failure. First **e
 
 ## Workflow
 
+### Processing model — per-candidate pipeline (stream, do NOT batch)
+
+**This governs how every step below is applied.** Do **not** run the steps as batch phases (discover *all* → screen *all* → verify *all* → report at the end) — that makes every result appear only at the very end. Instead, run a **per-candidate pipeline**: the **moment** a candidate surfaces from any discovery path, immediately carry *that one candidate* through the whole chain — Step 2.7 screen → Step 3 datasheet verification → verdict → **emit its `@@RESULT@@` line right away** if it qualifies (Step 4) — and only then move on. Discovery (Step 2's three paths) keeps running throughout; each new candidate it surfaces is pipelined the same way. A candidate never waits for the rest of the search to be processed.
+
+Rules that keep this correct and cheap:
+
+- **Dedupe on the fly.** Keep a running set of candidates already processed (by vendor + part number). When a path surfaces one already seen, skip it — never screen or verify the same part twice. This replaces the old "pool everything, then dedupe" step without losing the guarantee.
+- **Emit each match once, immediately.** The instant a candidate is confirmed ✅ / qualifying ⚠️ (Step 3 + the 80% rule), print its `@@RESULT@@` line (Step 4) — before touching the next candidate. This is what lets results appear one-by-one and lets the user stop early with real results in hand.
+- **Completeness is unchanged.** All three discovery paths (and their waves/sweeps) still run to their normal ceilings — only the *order of work* changes (interleaved, not batched). The holistic checks that genuinely need the whole picture (the "one-match warning", the final coverage journal) run at the end as before, over everything processed.
+
 ### Step 1 — Parse the spec, then clarify ONCE before searching
 
 Extract every parameter into a requirements table: name, value, direction (min/max/range), and whether it's hard or soft. Specs arrive as terse free text ("pidb 20 min, OIP3 30dbm, NF 6db max").
@@ -89,7 +99,7 @@ Do NOT re-ask things already answered in the conversation, and don't ask about p
 
 ### Step 2 — Search wide (candidates), never trusting search snippets
 
-Discovery must not hang on any single list of vendors. A small vendor that a hand-maintained list omits **and** Google indexes poorly falls through both nets and is missed entirely — this is exactly how Aelius Semiconductors' ASL 4020 / ASL4065 were missed on a real query ("amplifier 14–15 GHz, Gain≥20 dB, P1dB≥24 dBm"), even though everything.rf lists Aelius with 111 amplifiers. So run **three independent discovery paths** and pool everything they surface into one candidate queue. **Dedupe the queue** (same vendor/part surfaced by more than one path is processed once) before it flows into the Step 2.7 screen. A vendor is missed only if **all three** paths miss it — and even then the report says so honestly (Step 4).
+Discovery must not hang on any single list of vendors. A small vendor that a hand-maintained list omits **and** Google indexes poorly falls through both nets and is missed entirely — this is exactly how Aelius Semiconductors' ASL 4020 / ASL4065 were missed on a real query ("amplifier 14–15 GHz, Gain≥20 dB, P1dB≥24 dBm"), even though everything.rf lists Aelius with 111 amplifiers. So run **three independent discovery paths**, and — per the Processing model above — pipeline **each candidate the instant it surfaces** (screen → verify → emit), rather than pooling everything first. **Dedupe on the fly** against a running set of already-processed candidates (same vendor/part surfaced by more than one path is processed once). A vendor is missed only if **all three** paths miss it — and even then the report says so honestly (Step 4).
 
 These paths are component-agnostic: the category and category hints vary by component type, the mechanism does not. In every path, **always exclude the user's 12 vendor domains** using blocked_domains (Vendor Lists section). Per the site-data rule, a hit from any path is only a *candidate* until Step 3.
 
@@ -151,7 +161,7 @@ Safety rules (all generic in `rf-parameter-rules.md`): parameters the user did n
 
 ### Step 3 — Verify every candidate against primary sources
 
-A candidate becomes a match only after every required parameter is confirmed against the **manufacturer's datasheet** — or, short of that, after it clears the **80% rule** (Core definitions), which decides whether a partially-verified part is still returned or is an `insufficient verification` reject. **Reading the datasheet is ALWAYS delegated to Gemini — the skill never opens, downloads-to-read, or decodes the PDF in its own context.** Whenever a candidate's datasheet must be read, hand it to the runner (see *Reading datasheets — always via Gemini* below); it returns the extracted values as JSON, and the agent judges the match from them. Distributor summaries and snippets routinely show typ at one frequency point, omit conditions, or are wrong — see the site-data rule: a part is rejected here only against an actual datasheet value (what Gemini extracted from the datasheet); site data may only have promoted it in.
+Per the Processing model, verify **each candidate the moment it passes the Step 2.7 screen** — do not wait to collect all survivors first. As soon as a candidate is confirmed, **emit its `@@RESULT@@` line immediately** (Step 4), then continue to the next candidate. A candidate becomes a match only after every required parameter is confirmed against the **manufacturer's datasheet** — or, short of that, after it clears the **80% rule** (Core definitions), which decides whether a partially-verified part is still returned or is an `insufficient verification` reject. **Reading the datasheet is ALWAYS delegated to Gemini — the skill never opens, downloads-to-read, or decodes the PDF in its own context.** Whenever a candidate's datasheet must be read, hand it to the runner (see *Reading datasheets — always via Gemini* below); it returns the extracted values as JSON, and the agent judges the match from them. Distributor summaries and snippets routinely show typ at one frequency point, omit conditions, or are wrong — see the site-data rule: a part is rejected here only against an actual datasheet value (what Gemini extracted from the datasheet); site data may only have promoted it in.
 
 **Efficiency:** extract only the parameters still open. A site-checkable parameter that already cleared the spec **beyond its guard band** at Step 2.7 need not be re-extracted — pass the runner only the datasheet-only and borderline parameter names. (Such a guard-band-clear site parameter counts as **verified-and-matching** for the 80% rule.)
 
@@ -268,8 +278,8 @@ Run this checklist; fix anything that fails before reporting. (Each item points 
 
 ## Efficiency notes
 
-- Two-stage search — cheap wide search → **Step 2.7 site screen** → datasheet fetches for survivors only — is the main token saver. Datasheets open only for parts that pass the screen.
-- **Dedupe the candidate queue** (Step 2) before Step 2.7 so a vendor/part surfaced by multiple paths is processed once.
+- Two-stage screening **per candidate** — cheap **Step 2.7 site screen** first, and a datasheet fetch only if it passes — is the main token saver. Datasheets open only for parts that clear the screen. (Applied per-candidate in the pipeline, not as a batch phase.)
+- **Dedupe on the fly** (Processing model): keep a running set of already-processed candidates so a vendor/part surfaced by multiple paths is screened/verified once — the pipeline equivalent of the old pre-screen queue dedupe.
 - At Step 3, only ask the runner to extract the datasheet-only and borderline parameters — a site-checkable parameter already clear of its guard band at 2.7 needn't be re-extracted.
 - Step 3.5 independent re-verification is off in the current Gemini-reads mode (see Step 3.5), so no extra tokens are spent there.
 - If the user names a vendor missing from the cache, add it (Path C) for the session with whatever access metadata you learn — same auto-append rule Paths A/B use.
