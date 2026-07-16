@@ -26,5 +26,11 @@ playwright-browsers/
 venv/
 env/
 
+# Environment variable files (secrets — never commit)
+.env
+.env.*
+!.env.example
+
+
 # Claude Code local settings
 .claude/settings.local.json

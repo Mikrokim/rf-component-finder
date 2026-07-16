@@ -1,7 +1,7 @@
 ## 1. Dependencies
 
 - [x] 1.1 Add an optional group to `pyproject.toml`: `[project.optional-dependencies] agent = ["claude-agent-sdk>=0.1.0", "python-dotenv>=1.0.0"]` (`python-dotenv` is optional — only for a `.env` API key; leave the base `dependencies` untouched so deterministic search installs without the SDK)
-- [ ] 1.2 (user, terminal) Install into the venv: `py -m pip install claude-agent-sdk`. **No `ANTHROPIC_API_KEY` needed** if you are logged into Claude Code — the SDK authenticates via that existing login (precedence: `ANTHROPIC_API_KEY` → `CLAUDE_CODE_OAUTH_TOKEN` → Claude Code credentials at `~/.claude/.credentials.json`). Set a key only if you want to run outside a Claude Code login.
+- [x] 1.2 (user, terminal) Install into the venv: `py -m pip install claude-agent-sdk`. **No `ANTHROPIC_API_KEY` needed** if you are logged into Claude Code — the SDK authenticates via that existing login (precedence: `ANTHROPIC_API_KEY` → `CLAUDE_CODE_OAUTH_TOKEN` → Claude Code credentials at `~/.claude/.credentials.json`). Set a key only if you want to run outside a Claude Code login.
 
 ## 2. Agent-skill wrapper (`rf_finder/agent/`)
 
@@ -41,5 +41,5 @@
 ## 7. Verify
 
 - [x] 7.1 (user, terminal) Run `py -m rf_finder.ui.gui`: fill the amplifier form, click **AI Search**, confirm the sample components appear in the same results table, double-click opens a url, and the deterministic **Search** still works unchanged  *(verified working; note the sample components' URLs are placeholder/fake and may 404 — real URLs arrive with the real skill)*
-- [ ] 7.2 (user, terminal) Confirm failure handling: simulate an unauthenticated/failed run (e.g. log out of Claude Code, or force an SDK error) and click AI Search → an error dialog appears, the button re-enables, and Search still works
-- [ ] 7.3 Confirm `python -m rf_finder` (the existing CLI) is unaffected
+- [x] 7.2 (user, terminal) Confirm failure handling: simulate an unauthenticated/failed run (e.g. log out of Claude Code, or force an SDK error) and click AI Search → an error dialog appears, the button re-enables, and Search still works
+- [x] 7.3 Confirm `python -m rf_finder` (the existing CLI) is unaffected
