@@ -55,5 +55,5 @@
 ## 9. Verify
 
 - [x] 9.1 Add headless unit tests (no Tk driving): `build_answers()` produces the expected key set (the `freq_range`/`P1dB` keystone); `search_and_verify` returns candidates ordered match→partial→fail; `_validate_numeric` accepts numbers / rejects letters; `_validate_form` flags a one-sided `contains` but not a one-sided `between` — `tests/test_search.py` + `tests/test_gui.py` + `tests/test_config.py`; full suite 426 passed
-- [ ] 9.2 Manually run `python -m rf_finder.ui.gui`: fill the amplifier form, run a search, confirm the table shows only matches, double-click opens the datasheet, a half-filled frequency range is rejected, and letters can't be typed  *(final user click-through)*
+- [x] 9.2 Manually run `python -m rf_finder.ui.gui`: fill the amplifier form, run a search, confirm the table shows only matches, double-click opens the datasheet, a half-filled frequency range is rejected, and letters can't be typed  *(final user click-through)*
 - [x] 9.3 Confirm `python -m rf_finder` (the existing CLI) still runs — output preserved; full suite green
