@@ -110,7 +110,10 @@ def _get_runtime():
         "mock": MockProvider(),
         # Local thinking models on CPU are slow, and the first call also loads
         # the model into memory — give them plenty of head-room.
-        "local": LocalProvider(timeout_seconds=600.0),
+        "local": LocalProvider(
+            timeout_seconds=600.0,
+            allowed_models=["qwen3:8b", "llama3.1:8b", "phi4-mini:latest"],
+        ),
     }
     try:
         from genaifabric.providers.openai import OpenAIProvider
@@ -180,6 +183,11 @@ def extract_rf_parameters(
             "datasheet": datasheet_text,
             "requested_parameters": requested_parameters,
         },
+        # Extraction is a lookup, not a creative task: the same datasheet must
+        # always yield the same values.  Providers default to sampling
+        # (Ollama 0.8, Gemini ~1.0), which made repeated runs disagree on both
+        # the value and which field it landed in — greedy decoding pins it.
+        temperature=0,
     )
 
     if not result.success:

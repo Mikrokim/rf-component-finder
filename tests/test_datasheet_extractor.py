@@ -54,7 +54,8 @@ class MockRuntime:
     calls: list[dict] = field(default_factory=list)
 
     def run(
-        self, *, instruction: str, provider: str, input: dict, model=None
+        self, *, instruction: str, provider: str, input: dict, model=None,
+        temperature=None,
     ) -> _Result:
         self.calls.append(
             {
@@ -62,6 +63,7 @@ class MockRuntime:
                 "provider": provider,
                 "input": input,
                 "model": model,
+                "temperature": temperature,
             }
         )
         return self.provider_map[provider].respond()
@@ -162,6 +164,18 @@ def test_model_comes_from_config_variable_not_a_parameter():
 
     (call,) = rt.calls
     assert call["model"] == "qwen3:8b"
+
+
+def test_extraction_pins_temperature_to_zero():
+    # Extraction is a lookup, not a creative task: the same datasheet must
+    # always yield the same values.  Providers default to sampling, which made
+    # repeated runs disagree — so the extractor pins greedy decoding.
+    rt = _runtime(json.dumps({"gain": None}))
+
+    extract_rf_parameters("...", ["gain"], runtime=rt)
+
+    (call,) = rt.calls
+    assert call["temperature"] == 0
 
 
 # ---------------------------------------------------------------------------

@@ -52,6 +52,7 @@ def load_max_results(path: str | Path | None = None) -> int:
 # # LLM used to extract parameters from datasheet PDFs.
 # # Edit these to change the model/provider — no config file, no arguments.
 DATASHEET_PROVIDER = "local"   # "local" (Ollama) | "openai" | "mock"
+# DATASHEET_MODEL = "phi4-mini:latest" 
 DATASHEET_MODEL = "llama3.1:8b"   # model name for the chosen provider
 #provider: "gemini" | "openai" | "local" (Ollama) | "mock"
 # DATASHEET_PROVIDER = os.environ.get("RF_LLM_PROVIDER", "gemini")
