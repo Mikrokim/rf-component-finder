@@ -18,12 +18,12 @@ The system SHALL provide a dedicated management (orchestration) layer that is th
 
 ### Requirement: Two-gate gated pipeline
 
-The management layer SHALL sequence four stages in order: (1) each supporting adapter retrieves every component it lists for the requested component type, (2) a table-based Gate 1, (3) datasheet enrichment of Gate 1 survivors, (4) a final Gate 2. The pipeline SHALL reuse `verifier.verify()` as the only comparison engine; each gate SHALL be a policy over the verdicts `verify()` produces, not a second comparator. The **same `QuerySpec` (the user's requirements) SHALL be used at both gates** — the requirements never change between Gate 1 and Gate 2; only the candidate changes (Gate 2 sees the datasheet-enriched candidate). The pipeline SHALL return the candidates Gate 2 accepts — both **fully verified** candidates (result outcome `match`) and candidates whose site parameters all pass but whose datasheet could not be accessed to confirm the still-missing parameters (result outcome `not-verified`); candidates with any failing parameter SHALL be dropped. Each returned candidate carries the component's link and its result outcome.
+The management layer SHALL sequence five stages in order: (1) each supporting adapter retrieves every component it lists for the requested component type, (2) a table-based Gate 1, (3) datasheet-link resolution for Gate 1 survivors, (4) datasheet enrichment of those survivors, (5) a final Gate 2. The pipeline SHALL reuse `verifier.verify()` as the only comparison engine; each gate SHALL be a policy over the verdicts `verify()` produces, not a second comparator. The **same `QuerySpec` (the user's requirements) SHALL be used at both gates** — the requirements never change between Gate 1 and Gate 2; only the candidate changes (Gate 2 sees the datasheet-enriched candidate). The pipeline SHALL return the candidates Gate 2 accepts — both **fully verified** candidates (result outcome `match`) and candidates whose site parameters all pass but whose datasheet could not be accessed to confirm the still-missing parameters (result outcome `not-verified`); candidates with any failing parameter SHALL be dropped. Each returned candidate carries the component's link and its result outcome.
 
 #### Scenario: Stages run in order and reuse verify
 
 - **WHEN** the pipeline runs for a `QuerySpec`
-- **THEN** it first retrieves table candidates, then applies Gate 1, then enriches survivors from datasheets, then applies Gate 2
+- **THEN** it first retrieves table candidates, then applies Gate 1, then resolves each survivor's datasheet link, then enriches survivors from datasheets, then applies Gate 2
 - **AND** every PASS/FAIL/UNKNOWN decision is produced by `verifier.verify()`, not a separate comparator
 
 #### Scenario: Both gates verify against the same user requirements
@@ -51,9 +51,48 @@ Gate 1 SHALL run `verify()` on each retrieved candidate and SHALL let a candidat
 - **WHEN** at least one requested parameter the table provides yields a `FAIL` verdict (even a single failing parameter is enough)
 - **THEN** Gate 1 drops the candidate and it is not enriched
 
+### Requirement: Datasheet-link resolution for Gate 1 survivors
+
+Between Gate 1 and enrichment, the management layer SHALL resolve a candidate's datasheet link by calling the producing adapter's resolution operation for that candidate (see the manufacturer-adapters capability). When the operation returns a URL, the pipeline SHALL carry it on the candidate as `datasheet_url`; when it returns `None`, the candidate's `datasheet_url` SHALL remain `None`.
+
+Resolution SHALL be attempted ONLY for a Gate 1 survivor that has at least one site-missing (`UNKNOWN`) requested parameter — that is, only for a candidate that is actually about to be enriched. The link exists solely to fetch that candidate's datasheet; a survivor whose requested parameters all passed from the table needs no datasheet, so resolving its link would buy nothing and, for a source that resolves by fetching a product page, would cost a request for a page never used.
+
+Resolution SHALL NOT be attempted for candidates dropped at Gate 1, nor during retrieval. Placing it after Gate 1 is what bounds its cost: it scales with the few candidates needing enrichment rather than with the size of the source's catalogue.
+
+The management layer SHALL NOT contain per-site knowledge of where a datasheet link lives or how to reach it; it SHALL only ask the adapter. A resolution failure SHALL be contained per candidate and SHALL NOT abort the run; the affected candidate proceeds with `datasheet_url` as `None`, which is a "No datasheet access" condition.
+
+#### Scenario: A survivor needing enrichment has its link resolved
+
+- **WHEN** a Gate 1 survivor has at least one requested parameter left `UNKNOWN` by the site
+- **THEN** the pipeline asks the producing adapter to resolve that candidate's datasheet link
+- **AND** the resolved link is used to fetch its datasheet
+
+#### Scenario: A survivor needing no enrichment is not resolved
+
+- **WHEN** a Gate 1 survivor has every requested parameter already `PASS` from the table
+- **THEN** no datasheet-link resolution is attempted for it
+- **AND** no request is made on its behalf
+
+#### Scenario: Resolution is asked of the adapter, not performed by the pipeline
+
+- **WHEN** the pipeline resolves a candidate's datasheet link
+- **THEN** it calls the producing adapter's resolution operation
+- **AND** the pipeline itself contains no per-site link-discovery logic
+
+#### Scenario: Candidates dropped at Gate 1 are never resolved
+
+- **WHEN** retrieval returns many candidates and only a few pass Gate 1
+- **THEN** datasheet-link resolution is attempted only among the Gate 1 survivors
+
+#### Scenario: A failed resolution leaves the candidate without a link
+
+- **WHEN** an adapter's resolution operation returns `None` for a candidate
+- **THEN** that candidate's `datasheet_url` stays `None` and the run continues
+- **AND** the candidate is treated as having no datasheet access
+
 ### Requirement: Datasheet enrichment of the parameters missing from the site
 
-For each Gate 1 survivor, the enrichment stage SHALL determine the requested parameters that do not appear on the site (verdict `UNKNOWN`) and SHALL resolve those, and only those, from the candidate's datasheet. When the candidate has a `datasheet_url`, the stage SHALL fetch the datasheet PDF, extract its text, run the existing LLM extractor requesting ONLY the missing parameter names, map the result to `RawValue` via the existing datasheet mapping, and merge the newly resolved values into a copy of the candidate. Merged values SHALL carry `source="datasheet"`; the candidate's original table values SHALL NOT be overwritten. A survivor whose requested parameters are already all `PASS` (nothing missing) SHALL skip enrichment entirely.
+For each Gate 1 survivor, the enrichment stage SHALL determine the requested parameters that do not appear on the site (verdict `UNKNOWN`) and SHALL resolve those, and only those, from the candidate's datasheet. When the candidate has a `datasheet_url`, the stage SHALL fetch the datasheet PDF, extract its text, run the existing LLM extractor requesting ONLY the missing parameter names, map the result to `RawValue` via the existing datasheet mapping, and merge the newly resolved values into a copy of the candidate. Merged values SHALL carry `source="datasheet"`; the candidate's original table values SHALL NOT be overwritten. A survivor whose requested parameters are already all `PASS` (nothing missing) SHALL skip enrichment entirely — its datasheet link is not resolved, no datasheet PDF is downloaded, and no extractor runs for it.
 
 #### Scenario: Only the site-missing parameters are requested from the datasheet
 
@@ -70,6 +109,7 @@ For each Gate 1 survivor, the enrichment stage SHALL determine the requested par
 
 - **WHEN** a survivor already has every requested parameter as `PASS` from the table
 - **THEN** no datasheet is fetched for it
+- **AND** no datasheet-link resolution is attempted for it
 
 ### Requirement: Enrichment preserves component identity
 
@@ -88,11 +128,11 @@ Enrichment SHALL keep the site-scraped parameters and the datasheet-scraped para
 
 ### Requirement: Enrichment requires a datasheet URL
 
-Datasheet enrichment SHALL run only for candidates that carry a non-empty `datasheet_url`. A survivor without a `datasheet_url` and with at least one site-missing parameter SHALL be left unchanged (its `UNKNOWN` parameters stay `UNKNOWN`); a missing `datasheet_url` is one of the "No datasheet access" conditions, so Gate 2 SHALL return such a survivor as `not-verified` (its site parameters all pass), not drop it.
+Datasheet enrichment SHALL run only for candidates that carry a non-empty `datasheet_url` **after the resolution stage has run**. A survivor still without a `datasheet_url` and with at least one site-missing parameter SHALL be left unchanged (its `UNKNOWN` parameters stay `UNKNOWN`); a missing `datasheet_url` is one of the "No datasheet access" conditions, so Gate 2 SHALL return such a survivor as `not-verified` (its site parameters all pass), not drop it.
 
 #### Scenario: Candidate without a datasheet URL is not enriched
 
-- **WHEN** a Gate 1 survivor has `datasheet_url` unset and at least one site-missing parameter
+- **WHEN** a Gate 1 survivor still has no `datasheet_url` after resolution and has at least one site-missing parameter
 - **THEN** no datasheet fetch is attempted for it
 - **AND** it is returned by Gate 2 as `not-verified`
 
@@ -130,7 +170,7 @@ A `FAIL` always wins: a candidate with any failing parameter is dropped even if 
 
 The pipeline SHALL treat a candidate's datasheet as **inaccessible** — the trigger for a `not-verified` outcome — under ANY of the following conditions, and ONLY these:
 
-1. The candidate has no datasheet link (`datasheet_url` is `None` or empty).
+1. The candidate has no datasheet link once the resolution stage has run (`datasheet_url` is `None` or empty) — either because the source publishes no datasheet link for the part, or because resolving a product-page-only link failed.
 2. The datasheet fetch fails — a network/connection error, a timeout, or a non-success HTTP status (`DatasheetFetchError`).
 3. The response is not a usable PDF — e.g. an HTML page (such as an unresolved viewer wrapper) or any body without a `%PDF` signature (`DatasheetFetchError`).
 4. The PDF is unreadable — corrupt, encrypted, or otherwise unparseable (`DatasheetFetchError`).
@@ -178,16 +218,25 @@ For every returned candidate (outcome `match` or `not-verified`), the pipeline r
 
 - **product name** — the candidate's `model`.
 - **manufacturer** — the candidate's `manufacturer`.
-- **datasheet URL** — the link to the part's datasheet: the candidate's `datasheet_url` when present, otherwise its product `url` as a fallback so the row still links to the part.
+- **product URL** — the candidate's `url`: the part's page on the manufacturer's site, unchanged from what the search flow returns today. This is the result's only link.
 - **verdicts** — the result outcome, `match` or `not-verified`.
+
+The result SHALL NOT expose the candidate's `datasheet_url`. That field exists solely as the enrichment stage's **input**: the pipeline reads the datasheet so the user does not have to, and the extracted parameters — not the link — are what the datasheet contributes to the result. A user who wants the datasheet itself opens the product URL and reaches it from there.
 
 The candidate's `source` field SHALL NOT be part of the returned result — it is an internal/front-end-presentation detail (e.g. a GUI column), not a product-identifying result field.
 
-#### Scenario: A returned product exposes name, manufacturer, datasheet link, and outcome
+#### Scenario: A returned product exposes name, manufacturer, the product link, and outcome
 
 - **WHEN** the pipeline returns a candidate
-- **THEN** the result carries its product name (`model`), manufacturer, a datasheet URL (`datasheet_url`, or the product `url` when no datasheet link exists), and its `match`/`not-verified` outcome
+- **THEN** the result carries its product name (`model`), manufacturer, its product URL, and its `match`/`not-verified` outcome
 - **AND** the result does not include the candidate's `source`
+- **AND** the result does not include the candidate's `datasheet_url`
+
+#### Scenario: The datasheet link is used but never surfaced
+
+- **WHEN** a candidate's datasheet is fetched and its missing parameters extracted during enrichment
+- **THEN** the resolved `datasheet_url` is used to fetch that datasheet
+- **AND** the parameters it yields appear in the candidate's verdicts, while the link itself does not appear in the result
 
 #### Scenario: A fully verified product is tagged match
 
