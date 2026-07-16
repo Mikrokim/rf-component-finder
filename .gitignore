@@ -2,6 +2,12 @@
 # Anchored to repo root so it does not also ignore openspec/config.yaml
 /config.yaml
 
+# Secrets: API keys live in .env (e.g. GEMINI_API_KEY), never in the repo.
+# Note the "env/" rule further down ignores a *directory*, not this file.
+.env
+.env.*
+!.env.example
+
 # Cache directory
 .cache/
 
@@ -22,7 +28,8 @@ build/
 playwright-browsers/
 
 # Virtual environments
-.venv/
+# Glob, not a literal: this repo also has a .venv313, which ".venv/" misses.
+.venv*/
 venv/
 env/
 

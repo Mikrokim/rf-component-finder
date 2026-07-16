@@ -11,6 +11,7 @@ dependencies = [
     "selectolax",
     "playwright",
     "pdfplumber",
+    "python-dotenv",
     "pyyaml",
     "questionary",
     "ttkbootstrap",
@@ -18,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
-llm = ["genai-fabric==0.1.0"]
+llm = ["genai-fabric==0.1.0", "google-genai"]
 
 [project.scripts]
 rf-finder = "rf_finder.__main__:main"

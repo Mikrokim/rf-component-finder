@@ -172,6 +172,15 @@ def _get_runtime():
         # providers are still usable.
         pass
 
+    try:
+        from genaifabric.providers.gemini import GeminiProvider
+
+        providers["gemini"] = GeminiProvider(model=DATASHEET_MODEL)
+    except Exception:
+        # GeminiProvider raises at CONSTRUCTION when GEMINI_API_KEY is unset, so
+        # this guard is what keeps the mock/local paths working without a key.
+        pass
+
     return GenAIFabric(provider_map=providers)
 
 

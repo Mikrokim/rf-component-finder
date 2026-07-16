@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER
 from rf_finder.datasheet import (
     EXTRACT_RF_PARAMETERS_INSTRUCTION,
     extract_rf_parameters,
@@ -69,11 +70,10 @@ class MockRuntime:
 
 def _runtime(canned_output: str = "", fail_with: str | None = None) -> MockRuntime:
     provider = MockProvider(canned_output, fail_with)
-    # Register under every provider name the tests exercise; the mock answers
-    # the same regardless of which one the extractor routes to.
-    return MockRuntime(
-        provider_map={"openai": provider, "local": provider, "mock": provider}
-    )
+    # Key the map by the configured provider, so these tests keep working
+    # whichever provider DATASHEET_PROVIDER names — the mock answers the same
+    # regardless of which one the extractor routes to.
+    return MockRuntime(provider_map={DATASHEET_PROVIDER: provider})
 
 
 _FOUND_GAIN = {
@@ -101,7 +101,7 @@ def test_run_receives_instruction_and_both_context_keys():
 
     (call,) = rt.calls
     assert call["instruction"] == EXTRACT_RF_PARAMETERS_INSTRUCTION
-    assert call["provider"] == "local"          # from DATASHEET_PROVIDER
+    assert call["provider"] == DATASHEET_PROVIDER   # routed from config, not passed in
     assert call["input"] == {
         "datasheet": "DATASHEET TEXT",
         "requested_parameters": ["gain"],
@@ -154,14 +154,14 @@ def test_discrete_supply_list_value_passes_through():
 
 
 def test_model_comes_from_config_variable_not_a_parameter():
-    # The model is read from DATASHEET_MODEL in rf_finder.config (qwen3:8b),
-    # not passed as an argument.
+    # The model is read from DATASHEET_MODEL in rf_finder.config, not passed as
+    # an argument — so it tracks config rather than a value pinned here.
     rt = _runtime(json.dumps({"gain": None}))
 
     extract_rf_parameters("...", ["gain"], runtime=rt)
 
     (call,) = rt.calls
-    assert call["model"] == "qwen3:8b"
+    assert call["model"] == DATASHEET_MODEL
 
 
 # ---------------------------------------------------------------------------
