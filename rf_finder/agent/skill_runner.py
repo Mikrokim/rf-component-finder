@@ -255,6 +255,14 @@ def _resolve_skills() -> tuple[str, list[str], str, list[str]]:
 
 #: Discovery's final structured output — the complete deduped candidate list,
 #: a safety net beside the live ``@@CANDIDATE@@`` stream.
+#:
+#: ``screened`` carries discovery's Step 2.7 result for each *query* parameter,
+#: and is what makes rf-verify's two-step model work: a parameter marked
+#: ``pass`` cleared the spec *beyond* its guard band on a site, so verify counts
+#: it confirmed instead of re-extracting it. Verify opens the datasheet only for
+#: ``borderline`` / ``not_stated`` parameters — and not at all when every
+#: parameter is ``pass``. (``fail`` parts are rejected at the screen and never
+#: emitted, so the status is carried only for logging completeness.)
 DISCOVERY_SCHEMA: dict[str, Any] = {
     "type": "json_schema",
     "schema": {
@@ -268,6 +276,24 @@ DISCOVERY_SCHEMA: dict[str, Any] = {
                         "model": {"type": "string"},
                         "manufacturer": {"type": "string"},
                         "url": {"type": "string"},
+                        "screened": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pass", "borderline", "fail", "not_stated",
+                                        ],
+                                    },
+                                    "value": {"type": ["string", "null"]},
+                                    "source": {"type": ["string", "null"]},
+                                },
+                                "required": ["name", "status"],
+                            },
+                        },
                     },
                     "required": ["model"],
                 },
@@ -322,6 +348,40 @@ def _discovery_prompt(spec_text: str, skill: str = DISCOVERY_SKILL) -> str:
     )
 
 
+def _format_screened(screened: Any) -> str:
+    """Render discovery's per-parameter site-screen results for the verify prompt.
+
+    Each entry is ``{name, status, value, source}`` — see ``DISCOVERY_SCHEMA``.
+    rf-verify treats ``pass`` as confirmed (the site value cleared the spec beyond
+    the parameter's guard band) and settles ``borderline`` / ``not_stated`` against
+    the datasheet, so passing this through is what stops verify re-extracting what
+    discovery already established.
+
+    Returns ``""`` when discovery recorded nothing usable; verify then falls back
+    to settling every parameter itself — correct, just slower.
+    """
+    if not isinstance(screened, list):
+        return ""
+    lines: list[str] = []
+    for entry in screened:
+        if not isinstance(entry, dict) or not entry.get("name"):
+            continue
+        bits = [f"  - {entry['name']}: {entry.get('status') or 'not_stated'}"]
+        if entry.get("value"):
+            bits.append(f"site value = {entry['value']}")
+        if entry.get("source"):
+            bits.append(f"source = {entry['source']}")
+        lines.append(" | ".join(bits))
+    if not lines:
+        return ""
+    return (
+        "\n\nSite-screen results from discovery, one line per query parameter "
+        "(`pass` = cleared the spec beyond its guard band on the site → count it "
+        "confirmed, do NOT re-extract it; `borderline`/`not_stated` = settle it "
+        "against the datasheet):\n" + "\n".join(lines)
+    )
+
+
 def _verify_prompt(candidate: dict[str, Any], spec_text: str, skill: str = VERIFY_SKILL) -> str:
     return (
         f"Use the {skill} skill to verify this ONE candidate against the spec. "
@@ -331,6 +391,7 @@ def _verify_prompt(candidate: dict[str, Any], spec_text: str, skill: str = VERIF
         f"manufacturer={candidate.get('manufacturer', '')}, "
         f"url={candidate.get('url', '')}\n"
         f"Spec (parameters, separated by ' | '):\n{spec_text}"
+        f"{_format_screened(candidate.get('screened'))}"
     )
 
 

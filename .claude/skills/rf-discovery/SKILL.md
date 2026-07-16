@@ -1,6 +1,6 @@
 ---
 name: rf-discovery
-description: Discover EVERY RF/microwave component (amplifiers, mixers, filters, switches, attenuators, couplers…) that plausibly matches a multi-parameter spec, as broadly and reliably as possible — then stream each surviving candidate immediately as `@@CANDIDATE@@ {model, manufacturer, url}`. Runs three independent discovery paths (parametric aggregators, part-graph traversal, vendor-cache sweep) and a cheap site-level pre-screen, but does NOT read datasheets or decide final matches — that is rf-verify's job. Used by the pipelined AI Search conductor, which fires an rf-verify run per candidate this skill surfaces. The user's 12 usual vendor sites are always excluded — see the Vendor Lists section.
+description: Discover EVERY RF/microwave component (amplifiers, mixers, filters, switches, attenuators, couplers…) that plausibly matches a multi-parameter spec, as broadly and reliably as possible — then stream each surviving candidate immediately as `@@CANDIDATE@@ {model, manufacturer, url, screened}`, where `screened` records each query parameter's site outcome (pass/borderline/fail/not_stated) so rf-verify only opens the datasheet for what the sites could not settle. Runs three independent discovery paths (parametric aggregators, part-graph traversal, vendor-cache sweep) and a cheap site-level pre-screen, but does NOT read datasheets or decide final matches — that is rf-verify's job. Used by the pipelined AI Search conductor, which fires an rf-verify run per candidate this skill surfaces. The user's 12 usual vendor sites are always excluded — see the Vendor Lists section.
 ---
 
 # RF Component Discovery (candidate finder)
@@ -28,7 +28,9 @@ The loaded component module classifies each parameter as **site-checkable** (rel
 
 ### The site-data rule (promote-only, except one gate)
 
-Site data (search snippets, distributor/parametric tables) may **freely add or promote** a candidate, but may **reject** one **only** at the Step 2.7 screen, and only via a catalog fact or a clear miss on a site-checkable parameter the site actually exposes. Site data cannot *confirm* a match (typ-at-one-frequency, missing conditions, plain errors) — that is why every survivor still goes to rf-verify. **Never silently skip or drop a source** in any step — an empty/blocked source is logged, not omitted.
+Site data (search snippets, distributor/parametric tables) may **freely add or promote** a candidate, but may **reject** one **only** at the Step 2.7 screen, and only via a catalog fact or a clear miss on a site-checkable parameter the site actually exposes. You never *decide* a match here — every survivor still goes to rf-verify. **Never silently skip or drop a source** in any step — an empty/blocked source is logged, not omitted.
+
+**Record, don't decide.** A parameter that clears the spec **beyond** its guard band on a site is real evidence: rf-verify may confirm that parameter from it without opening the datasheet, and consults the datasheet only for what you could not settle. So your job is to record each screened parameter's outcome faithfully (Step 2.7) and pass it forward on the `@@CANDIDATE@@` line — rf-verify still assigns the verdict. Raw site values remain untrustworthy exactly where the guard band says they are (typ-at-one-frequency, missing conditions, plain errors); that is why only a value **beyond** the guard band counts as settled, and anything inside it is `borderline` and goes to the datasheet.
 
 ### Outcome categories (used in the coverage statement)
 
@@ -107,17 +109,36 @@ Safety rules (all generic in `rf-parameter-rules.md`): parameters the user did n
 
 **Log every Stage-1 reject** as `rejected at site screen` (see Outcome categories) — do not emit a `@@CANDIDATE@@` for it.
 
+#### Record each screened parameter — what rf-verify runs on
+
+rf-verify re-derives nothing from the sites: it confirms a parameter from what you record here, and opens the datasheet **only** for the parameters you could not settle. If every query parameter comes back `pass`, it returns the part with no datasheet fetch at all. So record one entry for **every parameter the query specified**, classified by the guard-band zones in `rf-parameter-rules.md`:
+
+| `status` | When (`min` direction shown; `max` is the mirror) | Effect downstream |
+|---|---|---|
+| `pass` | site-exposed and satisfies the spec **beyond** the guard band — `site_value ≥ target` | rf-verify counts it confirmed; never re-extracted |
+| `borderline` | site-exposed but satisfies it only **inside** the guard band — `target − G ≤ site_value < target` | rf-verify settles it on the datasheet |
+| `fail` | site-exposed and clearly misses — `site_value < target − G` | rejected at site screen; not emitted at all |
+| `not_stated` | datasheet-only, or no site exposed it | rf-verify settles it on the datasheet |
+
+Alongside each, record `value` (the site value **as shown**, with its unit) and `source` (the URL the value came from). Both are `null` for `not_stated`.
+
+**`pass` is a claim rf-verify acts on without re-checking — never mark a parameter `pass` you did not read off a site.** A value inside the guard band is `borderline`; an unexposed parameter is `not_stated`. Neither is `pass`. Over-marking `pass` makes rf-verify return a part as ✅ on evidence that was never established — the one failure mode nothing downstream can catch.
+
 ### Emit candidates + coverage
 
 **Emit each surviving candidate immediately, on its own line:**
 
 ```
-@@CANDIDATE@@ {"model": "...", "manufacturer": "...", "url": "..."}
+@@CANDIDATE@@ {"model": "ASL4020", "manufacturer": "Aelius", "url": "https://…", "screened": [{"name": "freq_range", "status": "pass", "value": "13-16 GHz", "source": "https://everything.rf/…"}, {"name": "Gain", "status": "pass", "value": "22 dB", "source": "https://everything.rf/…"}, {"name": "NF", "status": "not_stated", "value": null, "source": null}]}
 ```
 
-One compact JSON object per line, prefixed by the exact marker `@@CANDIDATE@@`. `url` is the best link you have to the part itself (its product page or datasheet). The conductor parses each line and fires an rf-verify run for that candidate right away — so emit as you go, never in one batch at the end. Emit each unique candidate **once** (dedupe on the fly).
+One compact JSON object per line, prefixed by the exact marker `@@CANDIDATE@@`. `url` is the best link you have to the part itself (its product page or datasheet). `screened` carries one entry per **query** parameter, per the table above.
 
-**Also return a final structured list** `{ "candidates": [ {model, manufacturer, url}, ... ] }` — the complete, deduplicated set you emitted, as a safety net for the conductor.
+**Never omit `screened`** — it is what lets rf-verify skip the datasheet for parameters you already settled. A missing or empty `screened` is not a neutral default: it forces a full datasheet extraction of every parameter, and a part whose datasheet is unreachable can then be dropped for lack of evidence you already had.
+
+The conductor parses each line and fires an rf-verify run for that candidate right away — so emit as you go, never in one batch at the end. Emit each unique candidate **once** (dedupe on the fly).
+
+**Also return a final structured list** `{ "candidates": [ {model, manufacturer, url, screened}, ... ] }` — the complete, deduplicated set you emitted, each carrying the same `screened` array, as a safety net for the conductor.
 
 **End with an honest coverage statement**: which of the three paths ran and their outcomes; which sources were fully swept vs only sampled; whether "no candidates" means "none exist" or "none found in sources covered". Include the manufacturers/sources coverage — one line per vendor touched through any path, **exhaustive** (a vendor that returned nothing is `checked/no candidates`, never omitted) and with Path-A aggregators **expanded** into per-vendor lines, each with the real query sent. If the Path B loop hit the 3-wave ceiling, say so. Coverage is bounded by what these sources contain — state plainly that a vendor absent from **every** path may still be missed.
 
