@@ -22,7 +22,7 @@
     {
       "model": "ERZ-LNA-0010-0600-18-5.5",
       "manufacturer": "Erzia",
-      "url": "https://www.erzia.com/wp-content/uploads/ERZ-LNA-0010-0600-18-5.5_0.pdf",
+      "url": "https://www.erzia.com/wp-content/uploads/ERZ-FLNA-0010-0600-18-5.5_0.pdf",
       "params": { "freq_range": "0.1-6 GHz", "Gain": "18 dB", "P1dB": "26 dBm", "NF": "7 dB", "IP3": "37 dBm" }
     },
     {

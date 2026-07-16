@@ -304,6 +304,8 @@ class App:
                     self._on_error(payload)
                 elif kind == "skill_component":
                     self._append_skill_row(payload)   # live result, as found
+                elif kind == "skill_tokens":
+                    self._on_skill_tokens(payload)    # running token count, mid-run
                 elif kind == "skill_done":
                     self._deliver_skill_results(payload)
                 elif kind == "skill_error":
@@ -430,6 +432,10 @@ class App:
             # Streamed from a worker thread — hand to the UI thread via the queue.
             self._result_queue.put(("skill_component", component))
 
+        def _on_tokens(totals: dict) -> None:
+            # Running token count (per finished agent) — hand to the UI thread.
+            self._result_queue.put(("skill_tokens", totals))
+
         try:
             from rf_finder.agent.skill_runner import run_rf_search
 
@@ -439,6 +445,7 @@ class App:
                     on_text=lambda _t: None,
                     on_result=meta.update,
                     on_component=_on_component,
+                    on_tokens=_on_tokens,
                     stop_event=stop_event,
                 )
             )
@@ -468,6 +475,20 @@ class App:
             self._skill_stop_event.set()
         self.stop_button.configure(state="disabled")
         self.status_var.set("Stopping AI Search…")
+
+    def _on_skill_tokens(self, t: dict) -> None:
+        """Live token tick (UI thread): update the status as each agent finishes,
+        so the running total visibly climbs mid-run. Ignored once the run ends."""
+        if not self._skill_running:
+            return
+        tokens = t.get("tokens", 0)
+        bd = t.get("token_breakdown") or {}
+        fresh = bd.get("input", 0) + bd.get("output", 0)
+        turns = t.get("num_turns", 0)
+        self.status_var.set(
+            f"AI Search… {tokens:,} tokens (fresh in+out {fresh:,}) · "
+            f"{turns} turns · {self._ai_run_count} found — click Stop when you have enough"
+        )
 
     def _on_skill_error(self, exc: Exception) -> None:
         self._set_skill_running(False)
@@ -533,6 +554,15 @@ class App:
         tokens = meta.get("tokens")
         if tokens is not None:
             info_bits.append(f"{tokens:,} tokens")
+        # Break the total into its kinds so the number is honest: cache_read is
+        # cheap re-reads of the skill files, billed ~1/10 of fresh input.
+        bd = meta.get("token_breakdown") or {}
+        if bd:
+            fresh = bd.get("input", 0) + bd.get("output", 0)
+            cached = bd.get("cache_read", 0) + bd.get("cache_write", 0)
+            info_bits.append(
+                f"[fresh in+out {fresh:,} · cached {cached:,}]"
+            )
         turns = meta.get("num_turns")
         if turns is not None:
             info_bits.append(f"{turns} turns")

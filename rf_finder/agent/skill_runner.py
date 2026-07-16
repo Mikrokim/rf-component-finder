@@ -76,6 +76,38 @@ def _sum_tokens(usage: Any) -> int | None:
     return total if found else None
 
 
+#: The four token *kinds*, cheapest last. They cost very different amounts:
+#: ``cache_read`` is ~10% of ``input`` price, so a big total is mostly the cheap
+#: cached re-reads of the (deliberately large) skill files across many turns.
+_TOKEN_KINDS = ("input", "output", "cache_read", "cache_write")
+
+
+def _token_breakdown(usage: Any) -> dict[str, int]:
+    """Split a ``usage`` dict into the four token kinds (``_TOKEN_KINDS``).
+
+    ``input`` = fresh, full-price input; ``output`` = generated tokens;
+    ``cache_read`` = context re-read from the prompt cache (~1/10 price);
+    ``cache_write`` = one-time cost of populating the cache. Their sum equals
+    ``_sum_tokens`` — this just says *what* those tokens were.
+    """
+    b = {k: 0 for k in _TOKEN_KINDS}
+    if not isinstance(usage, dict):
+        return b
+    for key, value in usage.items():
+        if not isinstance(value, int):
+            continue
+        k = key.lower()
+        if "cache_read" in k:
+            b["cache_read"] += value
+        elif "cache_creation" in k or "cache_write" in k:
+            b["cache_write"] += value
+        elif k == "input_tokens":
+            b["input"] += value
+        elif k == "output_tokens":
+            b["output"] += value
+    return b
+
+
 def _run_error_message(meta: dict[str, Any]) -> str:
     """A clear one-line reason a run did not complete (for the error popup)."""
     bits: list[str] = []
@@ -163,6 +195,7 @@ async def run_agent_skill(
                 "stop_reason": getattr(message, "stop_reason", None),
                 "num_turns": getattr(message, "num_turns", None),
                 "tokens": _sum_tokens(getattr(message, "usage", None)),
+                "token_breakdown": _token_breakdown(getattr(message, "usage", None)),
             }
 
     if on_result is not None:
@@ -307,6 +340,7 @@ async def run_rf_search_pipelined(
     on_text: Callable[[str], None] = print,
     on_result: Callable[[dict[str, Any]], None] | None = None,
     on_component: Callable[[dict[str, Any]], None] | None = None,
+    on_tokens: Callable[[dict[str, Any]], None] | None = None,
     stop_event: Any = None,
     max_concurrency: int = 4,
 ) -> Any:
@@ -342,12 +376,24 @@ async def run_rf_search_pipelined(
     tasks: list[asyncio.Task] = []
     components: list[dict[str, Any]] = []
     totals = {"tokens": 0, "num_turns": 0}
+    token_totals = {k: 0 for k in _TOKEN_KINDS}
     sem = asyncio.Semaphore(max(1, max_concurrency))
     stopped = False
 
     def _accumulate(m: dict[str, Any]) -> None:
         totals["tokens"] += (m.get("tokens") or 0)
         totals["num_turns"] += (m.get("num_turns") or 0)
+        for kind, value in (m.get("token_breakdown") or {}).items():
+            if kind in token_totals:
+                token_totals[kind] += value
+        # Live tick: fires once per finished agent (discovery, then each verify),
+        # so the caller can show the running total climb mid-run.
+        if on_tokens is not None:
+            on_tokens({
+                "tokens": totals["tokens"],
+                "num_turns": totals["num_turns"],
+                "token_breakdown": dict(token_totals),
+            })
 
     async def _verify(candidate: dict[str, Any]) -> None:
         async with sem:
@@ -417,6 +463,7 @@ async def run_rf_search_pipelined(
                     "stop_reason": getattr(message, "stop_reason", None),
                     "num_turns": getattr(message, "num_turns", None),
                     "tokens": _sum_tokens(getattr(message, "usage", None)),
+                    "token_breakdown": _token_breakdown(getattr(message, "usage", None)),
                 }
                 _accumulate(disc_meta)
                 so = getattr(message, "structured_output", None)
@@ -440,6 +487,7 @@ async def run_rf_search_pipelined(
         "is_error": bool(disc_meta.get("is_error")) and not stopped,
         "num_turns": totals["num_turns"],
         "tokens": totals["tokens"],
+        "token_breakdown": dict(token_totals),
         "stopped": stopped,
     }
     if on_result is not None:
@@ -459,6 +507,7 @@ async def run_rf_search(
     on_text: Callable[[str], None] = print,
     on_result: Callable[[dict[str, Any]], None] | None = None,
     on_component: Callable[[dict[str, Any]], None] | None = None,
+    on_tokens: Callable[[dict[str, Any]], None] | None = None,
     stop_event: Any = None,
 ) -> Any:
     """Real RF search (the GUI's "AI Search" entry point).
@@ -474,5 +523,6 @@ async def run_rf_search(
         on_text=on_text,
         on_result=on_result,
         on_component=on_component,
+        on_tokens=on_tokens,
         stop_event=stop_event,
     )

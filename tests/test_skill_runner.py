@@ -310,6 +310,32 @@ def test_pipelined_stop_interrupts_and_does_not_raise(fake_sdk):
     assert out == {"components": []}
 
 
+def test_pipelined_reports_running_tokens_with_breakdown(fake_sdk):
+    """on_tokens ticks as each agent finishes; totals accumulate and split into
+    kinds (cache_read counted separately from fresh input/output)."""
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    disc_done = _FakeResultMessage(structured_output={"candidates": [{"model": "M1", "manufacturer": "X", "url": "u"}]})
+    disc_done.usage = {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 900}
+    _FakeClient.messages = [
+        _FakeAssistantMessage([_Block('@@CANDIDATE@@ {"model": "M1", "manufacturer": "X", "url": "u"}\n')]),
+        disc_done,
+    ]
+    vres = _FakeResultMessage(structured_output={"components": [{"model": "M1", "manufacturer": "X", "url": "u", "verdict": "match"}]})
+    vres.usage = {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 200}
+    fake_sdk.query = _make_query([vres], {})
+
+    ticks: list = []
+    asyncio.run(run_rf_search_pipelined("spec", on_text=lambda _t: None, on_tokens=ticks.append))
+
+    assert len(ticks) >= 2                        # discovery + verify each tick once
+    assert ticks[0]["tokens"] <= ticks[-1]["tokens"]   # running total only grows
+    assert ticks[-1]["tokens"] == 1265            # 1050 (disc) + 215 (verify)
+    bd = ticks[-1]["token_breakdown"]
+    assert bd["cache_read"] == 1100               # the cheap re-reads, counted apart
+    assert bd["input"] == 110 and bd["output"] == 55
+
+
 # --- RF_SKILL_MODE switch (real vs offline test skills) --------------------
 
 
