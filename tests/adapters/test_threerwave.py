@@ -130,6 +130,26 @@ def test_content_filter_block_stub_is_legible_error():
         adapter._parse_html(block)
 
 
+def test_delivered_page_with_etrog_footer_stamp_still_parses():
+    """A real page that merely PASSED THROUGH the Etrog filter parses normally.
+
+    The filter injects a hidden ``ntsp_block_page`` field carrying
+    ``safepage.etrog`` and ``block/block1`` (with a benign ``cause=``) into the
+    footer of every delivered page.  That stamp must NOT be mistaken for a block:
+    the product tables are present, so the rows must be returned.
+    """
+    html = FIXTURE.read_text(encoding="utf-8")
+    etrog_footer = (
+        "<input type='hidden' name='ntsp_block_page' "
+        "value='https://safepage.etrog.net.il/?a=block/block1&level=5"
+        "&cause=Quiltingjs'/>"
+    )
+    delivered = html.replace("</body>", etrog_footer + "</body>")
+    adapter = ThreeRWaveAdapter()
+    candidates = adapter._parse_html(delivered)
+    assert len(candidates) == 5  # same rows as the un-stamped fixture
+
+
 # ---------------------------------------------------------------------------
 # Helper-level edge cases (B: header normalization, C: numeric parsing)
 # ---------------------------------------------------------------------------

@@ -51,10 +51,17 @@ _AMPLIFIER_URL = _BASE_URL + "/amplifier/"
 
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA", "—"})
 
-# Markers of a content-filter block stub returned instead of the real page
+# Marker of a content-filter block *stub* returned instead of the real page
 # (e.g. the Etrog/safepage filter — see threerwave-plan.md OQ-3W-10).  Detected
 # so the failure is legible instead of a confusing "no table" error.
-_BLOCK_MARKERS = ("safepage.etrog", "block/block1", "cause=url_level")
+#
+# Only ``cause=url_level`` is used: it is the block *reason* Etrog stamps on a
+# genuine block-stub page.  The broader ``safepage.etrog`` / ``block/block1``
+# strings must NOT be markers — the Etrog filter injects a hidden
+# ``ntsp_block_page`` field carrying both into the FOOTER of every page it merely
+# passes through (with a benign ``cause=`` like ``Quiltingjs``), so matching them
+# flagged every fully-delivered page as blocked and returned zero results.
+_BLOCK_MARKERS = ("cause=url_level",)
 
 # ---------------------------------------------------------------------------
 # Column mapping: normalised header text -> (canonical_name, unit | None)
@@ -195,20 +202,26 @@ class ThreeRWaveAdapter(Adapter):
         if no ``table.tablepress`` is found in the HTML — the site-redesign
         tripwire (fail loudly, never return empty silently).
         """
-        # A network content filter may return a short block stub (HTTP 200)
-        # instead of the real page; distinguish it from a genuine redesign.
-        if any(marker in html for marker in _BLOCK_MARKERS):
-            raise AdapterError(
-                manufacturer=self.manufacturer,
-                context=(
-                    "request intercepted by a content filter (e.g. Etrog/"
-                    "safepage) — whitelist 3rwave.com to fetch live"
-                ),
-            )
-
         tree = HTMLParser(html)
         tables = tree.css("table.tablepress")
+
+        # When the real product tables are present, parse them — even if the HTML
+        # also carries an Etrog/safepage footer stamp.  Only an actual block
+        # *stub* (which has no product table) should be reported as a content-
+        # filter interception; a delivered page that merely passed through the
+        # filter still contains its tables and must not be treated as blocked.
         if not tables:
+            # No product tables: distinguish a content-filter block stub (a short
+            # HTTP-200 page from the filter) from a genuine site redesign, so the
+            # failure is legible either way.
+            if any(marker in html for marker in _BLOCK_MARKERS):
+                raise AdapterError(
+                    manufacturer=self.manufacturer,
+                    context=(
+                        "request intercepted by a content filter (e.g. Etrog/"
+                        "safepage) — whitelist 3rwave.com to fetch live"
+                    ),
+                )
             raise AdapterError(
                 manufacturer=self.manufacturer,
                 context="no table.tablepress found in HTML",
