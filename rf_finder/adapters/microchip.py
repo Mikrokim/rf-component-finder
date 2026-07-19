@@ -211,6 +211,39 @@ def _sse_json(text: str) -> dict:
     return json.loads(text)
 
 
+def _catalog_url(model: str, feed_url: str | None) -> str | None:
+    """Build the human-facing ``microchip.com`` catalog URL from a part's feed URL.
+
+    The microchipdirect ``productUrl`` the MCP returns points at the *store*
+    (``microchipdirect.com/product/<part>``), which for RF-MMIC parts renders a
+    "This Product is Not Available Online" stub — useless to a user. The real
+    catalog page lives at ``www.microchip.com/en-us/product/<slug>`` where
+    ``<slug>`` is the very ``<PART>-<TYPE-WORDS>`` slug that names the
+    ``parametricData`` feed (e.g. feed ``…/MMA035AA-AMPLIFIER-DISTRIBUTED.json``
+    → page ``…/product/MMA035AA-Amplifier-Distributed``).
+
+    The feed slug is upper-cased but the catalog's canonical form title-cases the
+    *type words* while the part number keeps its own casing. A part number may
+    itself carry a suffix (``ICP0444-FL`` → page ``ICP0444-FL-Power-Amplifier``),
+    so we strip the known ``model`` prefix and title-case only the trailing type
+    words rather than title-casing blindly (which would break ``FL`` → ``Fl``).
+    If the slug doesn't start with ``model`` we leave it verbatim.
+
+    ``www.microchip.com`` is Akamai-blocked to fetchers, but this URL is
+    display-only (opened by a human in a browser; never fetched by us), so that
+    block is irrelevant. Returns None when there is no feed slug to build from.
+    """
+    if not feed_url:
+        return None
+    slug = feed_url.rsplit("/", 1)[-1].removesuffix(".json")
+    if not slug:
+        return None
+    if model and slug.upper().startswith(model.upper() + "-"):
+        type_words = slug[len(model) + 1:]
+        slug = model + "-" + "-".join(w.capitalize() for w in type_words.split("-"))
+    return f"https://www.microchip.com/en-us/product/{slug}"
+
+
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
@@ -421,7 +454,14 @@ class MicrochipAdapter(Adapter):
         if msl is not None:
             raw_params["MSL"] = RawValue(value=msl, unit="")
 
-        url = product.get("productUrl") or f"https://www.microchipdirect.com/product/{model}"
+        # Prefer the microchip.com catalog page (built from the feed slug) over the
+        # microchipdirect store URL, which is a "Not Available Online" stub for
+        # RF-MMIC parts; fall back to the store URL only if no feed slug is known.
+        url = (
+            _catalog_url(model, physical.get("parametricData"))
+            or product.get("productUrl")
+            or f"https://www.microchipdirect.com/product/{model}"
+        )
 
         return Candidate(
             model=model,

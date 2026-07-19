@@ -15,6 +15,7 @@ import pytest
 from rf_finder.adapters.base import ADAPTERS, AdapterError
 from rf_finder.adapters.microchip import (
     MicrochipAdapter,
+    _catalog_url,
     _is_amplifier,
     _parse_bias_volts,
     _parse_freq,
@@ -41,7 +42,9 @@ def test_lna_maps_all_present_params():
     c = _build("MMA044AA")
     assert c.manufacturer == "Microchip"
     assert c.source == "table"
-    assert c.url == "https://www.microchipdirect.com/product/MMA044AA"
+    # catalog page built from the feed slug (title-cased type words), not the
+    # microchipdirect store stub
+    assert c.url == "https://www.microchip.com/en-us/product/MMA044AA-Low-Noise-Amplifier"
     assert c.raw_params["freq_range"] == RawValue((6.0, 18.0), "GHz")
     assert c.raw_params["Gain"] == RawValue(21.0, "dB")
     assert c.raw_params["IP3"] == RawValue(30.0, "dBm")
@@ -129,6 +132,34 @@ def test_parse_size_mm_takes_largest_edge():
 def test_sse_json_extracts_data_line():
     payload = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n'
     assert _sse_json(payload)["result"]["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Catalog URL (microchip.com page, not the microchipdirect store stub)
+# ---------------------------------------------------------------------------
+
+def test_catalog_url_title_cases_type_words():
+    """Feed slug is upper-case; catalog page title-cases only the type words."""
+    url = _catalog_url(
+        "MMA035AA",
+        "https://www.microchipdirect.com/feed/json/MMA035AA-AMPLIFIER-DISTRIBUTED.json",
+    )
+    assert url == "https://www.microchip.com/en-us/product/MMA035AA-Amplifier-Distributed"
+
+
+def test_catalog_url_preserves_suffixed_part_number():
+    """A part number with its own suffix (ICP0444-FL) keeps 'FL' upper-cased."""
+    url = _catalog_url(
+        "ICP0444-FL",
+        "https://www.microchipdirect.com/feed/json/ICP0444-FL-POWER-AMPLIFIER.json",
+    )
+    assert url == "https://www.microchip.com/en-us/product/ICP0444-FL-Power-Amplifier"
+
+
+def test_catalog_url_none_without_feed():
+    """No feed URL -> no catalog slug to build from -> None (caller falls back)."""
+    assert _catalog_url("MMA035AA", None) is None
+    assert _catalog_url("MMA035AA", "") is None
 
 
 # ---------------------------------------------------------------------------
