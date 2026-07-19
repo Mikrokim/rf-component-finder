@@ -18,6 +18,11 @@ from rf_finder.datasheet import (
     EXTRACT_RF_PARAMETERS_INSTRUCTION,
     extract_rf_parameters,
 )
+from rf_finder.datasheet.extractor import (
+    _PARAM_ALIASES,
+    _ground_categorical,
+    _parse_size_spec,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -214,3 +219,102 @@ def test_invalid_json_raises_value_error_with_raw_output():
 
     with pytest.raises(ValueError, match="invalid JSON"):
         extract_rf_parameters("...", ["gain"], runtime=rt)
+
+
+# ---------------------------------------------------------------------------
+# robust-param-extraction: pure helpers (no model)
+# ---------------------------------------------------------------------------
+
+_DIE_TEXT = "1.) Die size: 4530 µm x 6090 µm (+0/-50 µm)"
+
+
+def test_parse_size_spec_from_value_string():
+    length, width = _parse_size_spec({"value": "4530 µm x 6090 µm"}, _DIE_TEXT)
+    assert length == {"unit": "µm", "typ": 4530}
+    assert width == {"unit": "µm", "typ": 6090}
+
+
+def test_parse_size_spec_from_min_max_pair():
+    length, width = _parse_size_spec({"unit": "µm", "min": 4530, "max": 6090}, _DIE_TEXT)
+    assert length["typ"] == 4530
+    assert width["typ"] == 6090
+
+
+def test_parse_size_spec_ungrounded_hallucination_is_nulled():
+    # 9 x 8 is not a real dimension pair in the text -> nulled, not trusted.
+    assert _parse_size_spec({"value": "9.00 x 8.00 mm"}, _DIE_TEXT) == (None, None)
+
+
+def test_parse_size_spec_none_input_is_none():
+    assert _parse_size_spec(None, _DIE_TEXT) == (None, None)
+
+
+def test_ground_categorical_absent_is_nulled():
+    assert _ground_categorical("MSL", {"value": "3"}, "no keyword here") is None
+
+
+def test_ground_categorical_present_is_kept():
+    spec = {"value": "1"}
+    assert _ground_categorical("MSL", spec, "Moisture Sensitivity Level MSL 1") is spec
+
+
+def test_ground_categorical_non_categorical_passes_through():
+    spec = {"typ": 20}
+    assert _ground_categorical("Gain", spec, "anything") is spec
+
+
+def test_vdd_aliases_include_drain_voltage():
+    assert "Drain Voltage" in _PARAM_ALIASES["VDD"]
+
+
+# ---------------------------------------------------------------------------
+# robust-param-extraction: wiring through extract_rf_parameters (mocked model)
+# ---------------------------------------------------------------------------
+
+def test_length_width_split_from_model_size():
+    # The model returns a "size"; the extractor splits it into length/width.
+    rt = _runtime(json.dumps({"size": {"value": "4530 µm x 6090 µm"}}))
+    out = extract_rf_parameters(
+        "Die size: 4530 µm x 6090 µm", ["length", "width"], runtime=rt
+    )
+    assert out["length"]["typ"] == 4530
+    assert out["width"]["typ"] == 6090
+    assert set(out) == {"length", "width"}  # internal "size" is not returned
+
+
+def test_length_width_null_when_size_ungrounded():
+    # Model fabricates a size absent from the text -> length/width nulled.
+    rt = _runtime(json.dumps({"size": {"value": "9.00 x 8.00 mm"}}))
+    out = extract_rf_parameters(
+        "Die size: 4530 µm x 6090 µm", ["length"], runtime=rt
+    )
+    assert out["length"] is None
+
+
+def test_absent_categorical_is_grounded_to_null():
+    rt = _runtime(json.dumps({"MSL": {"value": "3"}}))  # model fabricates a value
+    out = extract_rf_parameters("datasheet with no keyword", ["MSL"], runtime=rt)
+    assert out["MSL"] is None
+
+
+def test_present_categorical_survives_grounding():
+    rt = _runtime(json.dumps({"MSL": {"value": "1"}}))
+    out = extract_rf_parameters(
+        "Moisture Sensitivity Level MSL 1", ["MSL"], runtime=rt
+    )
+    assert out["MSL"]["value"] == "1"
+
+
+def test_alias_hint_injected_when_supply_requested():
+    rt = _runtime(json.dumps({"VDD": None}))
+    extract_rf_parameters("Drain Voltage 28 V", ["VDD"], runtime=rt)
+    (call,) = rt.calls
+    assert "SYNONYMS" in call["instruction"]
+    assert "Drain Voltage" in call["instruction"]
+
+
+def test_no_alias_hint_when_no_supply_requested():
+    rt = _runtime(json.dumps({"gain": None}))
+    extract_rf_parameters("...", ["gain"], runtime=rt)
+    (call,) = rt.calls
+    assert "SYNONYMS" not in call["instruction"]

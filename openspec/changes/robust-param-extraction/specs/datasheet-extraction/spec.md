@@ -28,16 +28,23 @@ For a requested keyword-grounded categorical parameter — `MSL` (keywords `msl`
 - **WHEN** the fed text contains no `msl` or `moisture` keyword, but the model returned `"3"`
 - **THEN** `MSL` is `null`
 
-### Requirement: Physical size prose is decomposed into length and width
+### Requirement: The model's size answer is split into length and width
 
-The system SHALL parse a physical-dimension pattern (`A x B unit`, tolerant of `x`/`×` and an optional repeated unit) from the datasheet text and return `length` = the FIRST dimension and `width` = the SECOND — the product-resolved convention — without relying on the model. When no such pattern is present, `length` and `width` SHALL be `null` (never guessed); the regex match is itself the grounding, so no keyword list is used for size.
+When `length` or `width` is requested, the system SHALL request the whole `size` from the model — which selects the product's size more reliably than length/width directly — and split the model's answer into `length` = the FIRST dimension and `width` = the SECOND (the product-resolved convention). The size selected SHALL follow the sold-form priority for component replacement: **(1) the package** (body / outline / case) when stated; **(2) the die** when there is no package (the part is sold bare); **(3) null** when neither is stated. The split SHALL read an `A x B` string (tolerant of `x`/`×` and an optional repeated unit) in the model's `value`, else its `min`/`max` pair. The resulting pair SHALL be grounded against the datasheet text: kept only if those two numbers occur as a real dimension pair in the text, so a fabricated size is nulled. `length`/`width` SHALL be `null` when nothing usable and grounded is found; the internally-requested `size` SHALL NOT be returned to the caller.
 
-#### Scenario: Die size is decomposed
+**Selection basis — now vs later.** The current basis is **how the part is sold** (the sold form: package-first, then die, as above) — the size relevant to replacing the part as it ships. A later need MAY be to search by the **exposed / bare die** size even when a package is stated; the system MAY expose that as an optional mode, with the sold form remaining the default. It is an available option to add when required, not a committed change.
 
-- **WHEN** the fed text states `Die size: 4530 µm x 6090 µm`
+#### Scenario: The die size is selected over the pad size
+
+- **WHEN** the text holds both a die size `4530 µm x 6090 µm` and a pad size `90 x 90 µm`, and the model returns `size` = `4530 µm x 6090 µm`
 - **THEN** `length` resolves to `4530` µm and `width` to `6090` µm
 
-#### Scenario: No dimension pattern gives null
+#### Scenario: A fabricated size absent from the text is nulled
 
-- **WHEN** the fed text contains no `A x B` dimension pattern
+- **WHEN** the model returns `size` `"9.00 x 8.00 mm"`, which does not occur in the datasheet text
 - **THEN** `length` and `width` are `null`
+
+#### Scenario: The internal size request is not leaked
+
+- **WHEN** the caller requests only `length` and `width`
+- **THEN** the result contains exactly `length` and `width`, not `size`

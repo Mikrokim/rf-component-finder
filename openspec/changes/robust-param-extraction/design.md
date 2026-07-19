@@ -43,22 +43,35 @@ After extraction, for each requested **categorical** parameter (per the ontology
 
 *Keyword source (data-based).* Derived from the wording of the five surveyed vendors, not guessed: `MSL → {msl, moisture}` — verified to catch all three real instances (ADCA3270, GRF2111, HMC952), while `jedec` was **rejected as too broad** (it matches ESD `HBM per JEDEC` and package `JEDEC MO-220` standards, not MSL). `package → {package, pkg, case, outline, body}` — `package` alone covers all five, the rest add margin for vendors that word it `Case`/`Outline`/`Body`. `size` needs **no** keyword list: its dimension parser (below) is self-grounding.
 
-### Physical size: a deterministic dimension parser, bypassing the model
+### Physical size: the model selects, a regex splits its answer, grounding guards
 
-Parse the fed text for a dimension pattern (`A x B unit`, tolerant of `x`/`×` and an optional repeated unit) and assign the **first** number to `length`, the **second** to `width` — the product-resolved convention. This runs deterministically for `length`/`width`; when no pattern matches they are `null`, never guessed.
+`length`/`width` are not requested from the model directly (it pollutes them — reading a `+/-` tolerance as a range and fabricating a max). Instead the model is asked for the whole `size`, which it selects far better than a raw-text regex could: a datasheet carries several `A x B` patterns (die, pad, package, PCB layout, `0402` parts), and choosing which is the *product* dimension is a semantic judgement, not a pattern match. The model's `size` answer is then split by regex into `length` (the first number) and `width` (the second), reading an `A x B` string in its `value` or its `min`/`max` pair.
 
-The regex match is itself the grounding for `length`/`width`/`size`: a match yields the values, no match yields `null` — so no separate keyword list is needed. The `A x B` pattern was confirmed present in every surveyed vendor (`9.00 mm × 8.00 mm`, `5x5 mm`, `4530 µm x 6090 µm`, `1.5 x 1.5 mm`).
+*Grounding guards the model's one failure here.* The split pair is kept only if those two numbers occur as a real dimension pair in the datasheet text, so a fabricated size (the parroted `9.00 x 8.00 mm` example) is nulled while a real one (`4530 µm x 6090 µm`) survives. The regex fixes the *shape* of whatever the model returns; grounding rejects fabricated *values*.
 
-*Measured basis.* Requesting these from the model yields fabricated maxes (from the `+0/-50` tolerance), run-to-run variation, and the parroted `9.00 x 8.00 mm` example. A regex over the prose avoids all three.
+*Measured basis.* Requesting `length`/`width` directly yields fabricated maxes (from the `+0/-50` tolerance), run-to-run variation, and the parroted `9.00 x 8.00 mm` example; asking for `size` and splitting its answer avoids all three. The `A x B` pattern was confirmed present in every surveyed vendor (`9.00 mm × 8.00 mm`, `5x5 mm`, `4530 µm x 6090 µm`, `1.5 x 1.5 mm`).
+
+*Alternative rejected — regex over the raw text, bypassing the model.* Reliable on the surveyed set, but it cannot tell the die size from the pad size when both are present, and vendor phrasing varies; the model's selection covers that, and grounding still rejects a hallucinated pair.
+
+### Which size wins — package first, then die
+
+For **replacing an old component**, the size is the form the part is sold in, chosen by an explicit priority:
+
+1. **package** (body / outline / case dimensions) when stated;
+2. **die** when there is no package — the part is sold bare (e.g. CMPA);
+3. **null** when neither is stated.
+
+Package wins over die because a packaged part is replaced together with its package; a bare-die part (no package) is replaced as die. Each datasheet features its sold form, so this priority resolves to a single unambiguous size per part.
+
+**Optional mode (not a deferred change): die-only.** The system MAY expose a "bare / exposed die" mode that returns the die size even when a package exists — a localized toggle in `_parse_size_spec` (prefer the die-labelled pair), no caller or schema change. It is an available option, not a TODO.
 
 ## Risks / Trade-offs
 
 - **Alias / keyword lists need maintenance.** New vendor wording not in the lists is missed (VDD) or nulled (categorical). Mitigated by seeding from the five surveyed vendors and biasing the keyword lists toward inclusion.
 - **Grounding can null a real value** if a datasheet states a categorical parameter under wording outside its keyword list. Measured across the five vendors: **zero false-nulls** with the lists above — every real MSL instance carried `msl`/`moisture`, every package carried `package`/`case`/`outline`/`body`. The residual risk is genuinely novel wording (e.g. MSL stated only as `J-STD-020 Level 3`, with no `msl`/`moisture`), which did not occur in the surveyed set; adding the missing term is the fix if it ever appears.
-- **Multiple size lines.** A datasheet may state die size, package size, and pad size; the parser must choose which is the product dimension. Left to an Open Question below.
+- **Multiple size lines.** A datasheet may state die size, package size, and pad size; the parser must choose which is the product dimension. Resolved above (*Which size wins*): the sold form, by priority package → die → null; a die-only mode is an available option.
 - **The length/width convention is a labelling choice, not a datasheet fact** — `A x B` is unlabelled. Documented as resolved (first = length) so it is at least consistent.
 
 ## Open Questions
 
 - **Where does the alias map live** — a field on `ParamDef` in `ontology/parameters.py`, or a separate `synonyms` module? The ontology couples it to the parameter definitions; a module keeps the ontology lean.
-- **Which size wins** when a datasheet states several (die vs package vs pad)? None of the target flow needs more than the die/package dimension today, but the parser needs a deterministic pick.

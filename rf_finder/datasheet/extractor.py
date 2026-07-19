@@ -16,6 +16,7 @@ so the scraping/verification path keeps working without the ``llm`` extra.
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 
 from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER
@@ -67,11 +68,19 @@ Rules:
       comma-separated list "3, 5, 8 V" or wording like "supports 3 V, 5 V and
       8 V". Then put them in "value" as [3, 5, 8] with the "unit" and leave
       "min"/"typ"/"max" null.
+    - A SINGLE supply figure — one number, e.g. "Drain voltage 10 V" — is NOT a
+      list and NOT a range: put it in "typ" and leave "min"/"max"/"value" null.
+      Only a comma-separated enumeration (above) uses the "value" array.
 
 - NON-NUMERIC / categorical parameters (moisture sensitivity level, package type,
   physical size / dimensions): put the value in "value" as a string, exactly as
-  written — e.g. "3" for MSL, "LGA_CAV" for package, "9.00 x 8.00 mm" for size;
-  leave the numeric fields null.
+  written in THIS datasheet; leave the numeric fields null. Copy the characters
+  from the datasheet — never a value from these rules.
+- For "size": report the PACKAGE outline / body dimensions (the outer size the
+  part ships as) when the datasheet states them; only if there is no package —
+  the part is a bare die — report the die size. Return it verbatim as an
+  "A x B unit" string, e.g. the exact dimensions printed in the Outline / Package
+  Drawing of THIS datasheet.
 
 - DISAMBIGUATION: when a requested name specifies a variant, extract THAT variant
   only — e.g. "operating_temperature" -> the operating temperature range,
@@ -89,6 +98,11 @@ Rules:
   category (numeric / range / discrete-supply / categorical), NOT an exhaustive
   list. Apply the same rules to ANY requested parameter, named or not.
   If a requested parameter is not explicitly stated, return null.
+- INDEPENDENCE: each requested parameter is extracted on its own merits. Some
+  requested parameters may be absent — return those as null, but this MUST NOT
+  affect the others: a parameter that IS stated must still be returned in full.
+  NEVER null a value that is present just because other requested values are
+  missing.
 Return only JSON. No text before or after it.
 """
 
@@ -175,13 +189,47 @@ def extract_rf_parameters(
     """
     if runtime is None:
         runtime = _get_runtime()
+
+    # length/width are not extracted directly (the model pollutes them: it reads
+    # a "+/-" tolerance as a range and fabricates a max).  Instead the model is
+    # asked for the whole "size", which it selects reliably (the die, not the
+    # pad), and its answer is split into length/width below.  "size" is requested
+    # even when only length/width were asked for.
+    wants_dimensions = (
+        "length" in requested_parameters or "width" in requested_parameters
+    )
+    # When dimensions are wanted, ask the model for the whole "size" ONLY, not
+    # length/width: requesting all three made the model juggle them and degrade
+    # the answer (measured: GRF2111 returns the correct "1.5 x 1.5 mm" for a lone
+    # "size" request, but nulled when length/width/size were requested together).
+    # length/width are derived from "size" in _parse_size_spec below.
+    model_params = [p for p in requested_parameters if p not in ("length", "width")]
+    if wants_dimensions and "size" not in model_params:
+        model_params.append("size")
+
+    # Make vendor aliases for the requested supply names available to the model,
+    # so a "Drain Voltage" row satisfies a request for VDD.  Built per call from
+    # ``_PARAM_ALIASES`` and appended to the instruction; the module-level
+    # instruction is left unchanged.
+    instruction = EXTRACT_RF_PARAMETERS_INSTRUCTION
+    alias_hints = [
+        f'"{name}" may be written as: {", ".join(_PARAM_ALIASES[name])}.'
+        for name in requested_parameters
+        if name in _PARAM_ALIASES
+    ]
+    if alias_hints:
+        instruction = EXTRACT_RF_PARAMETERS_INSTRUCTION.replace(
+            "Return only JSON. No text before or after it.",
+            "SYNONYMS: " + " ".join(alias_hints)
+            + "\nReturn only JSON. No text before or after it.",
+        )
     result = runtime.run(
-        instruction=EXTRACT_RF_PARAMETERS_INSTRUCTION,
+        instruction=instruction,
         provider=DATASHEET_PROVIDER,
         model=DATASHEET_MODEL,
         input={
             "datasheet": datasheet_text,
-            "requested_parameters": requested_parameters,
+            "requested_parameters": model_params,
         },
         # Extraction is a lookup, not a creative task: the same datasheet must
         # always yield the same values.  Providers default to sampling
@@ -206,7 +254,24 @@ def extract_rf_parameters(
     # the output is uniform no matter how compliant the model was — a terse
     # model that omits null fields and a chatty one that spells them out yield
     # the same dict.  Not-found parameters stay ``None``, not ``{}``.
-    return {name: _normalize_spec(data.get(name)) for name in requested_parameters}
+    specs = {name: _normalize_spec(data.get(name)) for name in model_params}
+
+    # The model selects the product's size; split its answer into clean
+    # length/width (see ``_parse_size_spec``).  The internally-added "size" is
+    # not returned — only the caller's requested keys are.
+    if wants_dimensions:
+        length, width = _parse_size_spec(data.get("size"), datasheet_text)
+        if "length" in requested_parameters:
+            specs["length"] = _normalize_spec(length)
+        if "width" in requested_parameters:
+            specs["width"] = _normalize_spec(width)
+
+    # Ground categorical values whose topic is absent from the text, and return
+    # exactly the caller's requested keys.
+    return {
+        name: _ground_categorical(name, specs.get(name), datasheet_text)
+        for name in requested_parameters
+    }
 
 
 # The full per-parameter field set the extraction contract promises.
@@ -222,3 +287,99 @@ def _normalize_spec(spec):
     if not isinstance(spec, dict):
         return spec
     return {field: spec.get(field) for field in _SPEC_FIELDS}
+
+
+# Vendor wordings that satisfy a request for a canonical supply-voltage name.
+# These are injected into the prompt so the model finds the value under the
+# datasheet's own term (measured: a request for VDD on a "Drain Voltage 28 V"
+# datasheet returned {} until the wording was made available, then {"typ": 28}).
+_PARAM_ALIASES = {
+    "VDD": ["Drain Voltage", "Vds", "Drain to Source Voltage"],
+    "VCC": ["Vcc", "Collector Voltage"],
+}
+
+# Keyword lists that ground a categorical parameter: if none of a parameter's
+# keywords appears in the fed text, the model's categorical answer is nulled
+# rather than trusted (the small model fabricates absent categoricals). Derived
+# from the surveyed vendors; "jedec" is excluded from MSL because it also marks
+# ESD ("HBM per JEDEC") and package ("JEDEC MO-220") standards, not moisture.
+_CATEGORICAL_KEYWORDS = {
+    "MSL": ["msl", "moisture"],
+    "package": ["package", "pkg", "case", "outline", "body"],
+}
+
+# An "A x B unit" physical-dimension pattern: two numbers separated by x or ×,
+# with the unit on the second (an optional matching unit may follow the first).
+_DIM_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(?:µm|μm|um|mm|nm)?\s*[x×]\s*(\d+(?:\.\d+)?)\s*(µm|μm|um|mm|nm)",
+    re.I,
+)
+
+# Looser variant for parsing the MODEL's own size string, where the model often
+# drops the unit into the separate "unit" field and returns a bare "A x B" (e.g.
+# "4530 x 6090", "1.5 x 1.5"): here the trailing unit is OPTIONAL. Grounding still
+# uses the strict _DIM_RE against the datasheet text (which does carry units), so
+# loosening the value parse cannot admit an ungrounded pair.
+_DIM_VALUE_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(?:µm|μm|um|mm|nm)?\s*[x×]\s*(\d+(?:\.\d+)?)\s*(µm|μm|um|mm|nm)?",
+    re.I,
+)
+
+
+def _dim_num(text: str):
+    """Parse a dimension number, returning an int when it is whole (9.00 -> 9)."""
+    value = float(text)
+    return int(value) if value.is_integer() else value
+
+
+def _parse_size_spec(size_spec, datasheet_text: str):
+    """Split the model's ``size`` answer into (length, width) specs.
+
+    The model selects which dimension is the product's size (the die, not the
+    pad); this parses ITS output into the clean length/width shape — the FIRST
+    number is length, the SECOND width.  It reads an "A x B" string in ``value``
+    first, then falls back to the model's ``min``/``max`` pair.  The pair is
+    grounded against the datasheet text: it is kept only if those same two
+    numbers occur as a real dimension pair in the text, so a fabricated size
+    (e.g. the instruction's "9.00 x 8.00 mm" example) is nulled.  Returns
+    ``(None, None)`` when nothing usable and grounded is found.
+    """
+    if not isinstance(size_spec, dict):
+        return None, None
+    unit = size_spec.get("unit")
+    a = b = None
+    value = size_spec.get("value")
+    if isinstance(value, str):
+        m = _DIM_VALUE_RE.search(value)
+        if m:
+            a, b = _dim_num(m.group(1)), _dim_num(m.group(2))
+            unit = unit or m.group(3)
+    if a is None:
+        low, high = size_spec.get("min"), size_spec.get("max")
+        if low is not None and high is not None:
+            a, b = _dim_num(str(low)), _dim_num(str(high))
+    if a is None:
+        return None, None
+    # Ground against the source: keep only a pair that is a real "A x B" in text.
+    text_pairs = [
+        (_dim_num(m.group(1)), _dim_num(m.group(2)))
+        for m in _DIM_RE.finditer(datasheet_text)
+    ]
+    if (a, b) not in text_pairs:
+        return None, None
+    return {"unit": unit, "typ": a}, {"unit": unit, "typ": b}
+
+
+def _ground_categorical(name: str, spec, datasheet_text: str):
+    """Null a keyword-grounded categorical value whose topic is absent.
+
+    For a categorical parameter with a keyword list (``MSL``, ``package``), the
+    model's answer is kept only when one of its keywords appears in
+    ``datasheet_text`` (case-insensitively); otherwise the result is ``None``,
+    never a fabricated value. Parameters with no keyword list pass through
+    unchanged.
+    """
+    keywords = _CATEGORICAL_KEYWORDS.get(name)
+    if keywords and not any(k in datasheet_text.lower() for k in keywords):
+        return None
+    return spec
