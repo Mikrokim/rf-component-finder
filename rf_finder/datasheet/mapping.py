@@ -15,9 +15,9 @@ accordance with:
     emits (e.g. ``"C"``) are reconciled here to the canonical one (``"degC"``).
 
 The shape is chosen from each parameter's ``comparison``:
-  - ``contains`` (freq_range, VDD, Temperature): a continuous ``(low, high)``
-    range, or a list of discrete options — matching the two ``contains``
-    branches in ``verifier._compare``.
+  - ``contains`` (freq_range, Temperature) and ``overlap`` (VDD): a continuous
+    ``(low, high)`` range, or a list of discrete options — the band-valued
+    candidate shapes both rules compare in ``verifier._compare``.
   - ``min`` / ``max`` / ``eq`` (Gain, NF, P1dB, Size, MSL, ...): a single scalar,
     picked as the candidate's GUARANTEED value by comparison direction — the
     stated ``min`` (falling back to ``typ``) for a ``min`` rule ("at least"), the
@@ -30,8 +30,8 @@ Parameters the ontology does not define, not-found params (``None``), and specs
 whose unit is missing on a multi-unit parameter (ambiguous) are skipped so the
 Verifier reports them as ``UNKNOWN`` rather than mis-comparing or guessing.
 Multi-option params (``value`` is a list, e.g. a supply with several selectable
-voltages) map to a list ``RawValue``, which ``contains`` supports — they are
-verified like any other parameter.
+voltages) map to a list ``RawValue``, which ``contains``/``overlap`` support —
+they are verified like any other parameter.
 """
 
 from __future__ import annotations
@@ -92,8 +92,9 @@ def _to_value(spec: dict, comparison: str):
     """Return the ``RawValue.value`` for *spec* under *comparison*, or None."""
     val = spec.get("value")
 
-    if comparison == "contains":
-        # Discrete, selectable options (e.g. VDD 3/5/8 V) -> list.
+    if comparison in ("contains", "overlap"):
+        # Band-valued candidate: discrete, selectable options (e.g. VDD 3/5/8 V)
+        # -> list.
         if isinstance(val, list) and val:
             nums = _numbers(val)
             return nums or None
@@ -105,6 +106,16 @@ def _to_value(spec: dict, comparison: str):
         nums = _numbers(val)
         if len(nums) >= 2:
             return (min(nums), max(nums))
+        # For overlap (VDD) a single stated supply figure is a degenerate
+        # (v, v) interval — the shape a single-value site cell also yields.
+        # ``contains`` params (freq_range/Temperature) keep their range-only
+        # behaviour: a lone figure there stays UNKNOWN.
+        if comparison == "overlap":
+            single = spec.get("typ")
+            if single is None and len(nums) == 1:
+                single = nums[0]
+            if single is not None:
+                return (float(single), float(single))
         return None
 
     # Scalar comparisons: pick the guaranteed figure by comparison direction.

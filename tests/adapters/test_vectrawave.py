@@ -125,8 +125,10 @@ def test_num_tolerates_malformed_trailing_dot() -> None:
 
 def test_vdd_single_and_dual_rail() -> None:
     assert _vdd("28") == (28.0, 28.0)
-    assert _vdd("+8") == (8.0, 8.0)
-    assert _vdd("+3/-3") == (-3.0, 3.0)   # dual-rail supply -> (min, max)
+    assert _vdd("+8") == (8.0, 8.0)         # leading plus is a sign, ignored
+    # A dual-rail supply belongs to control parts, not the amplifier drain
+    # supply this project matches -> left UNKNOWN (None) rather than mis-ranged.
+    assert _vdd("+3/-3") is None
 
 
 def test_vdd_sentinels_return_none() -> None:

@@ -54,7 +54,7 @@ def build_form(component_type: str) -> FormSchema:
             canonical_unit=param.canonical_unit,
             units=param.units,
         )
-        if param.comparison in ("contains", "between"):
+        if param.comparison in ("contains", "overlap", "between"):
             range_fields.append(field)
         else:
             scalar_fields.append(field)

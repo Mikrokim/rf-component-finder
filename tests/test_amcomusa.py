@@ -58,7 +58,7 @@ class TestVddMapping:
             '<td name="product"><a href="/product-details/x">X</a></td>'
             "<td>2</td><td>6</td><td>20</td><td>5</td>",
         )
-        assert cand.raw_params["VDD"].value == 5.0
+        assert cand.raw_params["VDD"].value == (5.0, 5.0)
         assert cand.raw_params["VDD"].unit == "V"
 
     def test_bias_column_maps_to_vdd(self):
@@ -67,7 +67,7 @@ class TestVddMapping:
             '<td name="product"><a href="/product-details/y">Y</a></td>'
             "<td>2</td><td>6</td><td>8</td>",
         )
-        assert cand.raw_params["VDD"].value == 8.0
+        assert cand.raw_params["VDD"].value == (8.0, 8.0)
         assert cand.raw_params["VDD"].unit == "V"
 
     def test_dual_supply_string_is_unknown(self):

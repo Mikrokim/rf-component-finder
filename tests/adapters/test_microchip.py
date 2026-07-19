@@ -46,7 +46,7 @@ def test_lna_maps_all_present_params():
     assert c.raw_params["Gain"] == RawValue(21.0, "dB")
     assert c.raw_params["IP3"] == RawValue(30.0, "dBm")
     assert c.raw_params["P1dB"] == RawValue(16.0, "dBm")
-    assert c.raw_params["VDD"] == RawValue(4.0, "V")
+    assert c.raw_params["VDD"] == RawValue((4.0, 4.0), "V")
     assert c.raw_params["Size"] == RawValue(1.351, "mm")  # largest package edge
     assert "NF" not in c.raw_params
     assert "Psat" not in c.raw_params
@@ -58,7 +58,7 @@ def test_dc_freq_edge_becomes_zero():
     c = _build("MMA015AA")
     assert c.raw_params["freq_range"] == RawValue((0.0, 14.0), "GHz")
     assert c.raw_params["NF"] == RawValue(2.6, "dB")
-    assert c.raw_params["VDD"] == RawValue(4.0, "V")  # "4V, 80mA" (space)
+    assert c.raw_params["VDD"] == RawValue((4.0, 4.0), "V")  # "4V, 80mA" (space)
     assert c.raw_params["Size"] == RawValue(0.76, "mm")
 
 
@@ -67,7 +67,7 @@ def test_power_amp_misspelled_type_still_accepted():
     c = _build("MMA052AA")
     assert c is not None
     assert c.raw_params["freq_range"] == RawValue((0.0, 26.0), "GHz")
-    assert c.raw_params["VDD"] == RawValue(10.0, "V")
+    assert c.raw_params["VDD"] == RawValue((10.0, 10.0), "V")
     assert c.raw_params["IP3"] == RawValue(35.0, "dBm")
     assert c.raw_params["P1dB"] == RawValue(27.0, "dBm")
 
@@ -76,7 +76,7 @@ def test_pout_and_voltage_schema():
     """SYNTH-PA1: Pout (dBm) -> Psat; Voltage (V) -> VDD (no Bias); MSL parsed."""
     c = _build("SYNTH-PA1")
     assert c.raw_params["Psat"] == RawValue(40.0, "dBm")
-    assert c.raw_params["VDD"] == RawValue(28.0, "V")
+    assert c.raw_params["VDD"] == RawValue((28.0, 28.0), "V")
     assert c.raw_params["MSL"] == RawValue(3.0, "")
     assert c.raw_params["Size"] == RawValue(5.0, "mm")
     assert "NF" not in c.raw_params

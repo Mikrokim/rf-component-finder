@@ -25,6 +25,7 @@ from selectolax.parser import HTMLParser
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -94,20 +95,16 @@ def _num(text: str) -> float | None:
     return float(m.group()) if m else None
 
 
-def _vdd(text: str) -> tuple[float, float] | None:
-    """Supply voltage -> a ``(low, high)`` band, else None.
+def _vdd(text: str) -> tuple[float, float] | list[float] | None:
+    """Parse a VectraWave supply-voltage cell via the shared VDD parser.
 
-    A single value -> ``(v, v)``; a dual/multi-rail supply such as ``"+3/-3"``
-    yields ``(min, max)`` of all listed values (``(-3.0, 3.0)``), which behaves
-    correctly under the ontology's ``contains`` rule.
+    Delegates to :func:`rf_finder.ontology.supply.parse_vdd`: a single value
+    ("+8") or range becomes a ``(low, high)`` interval, discrete options become
+    a ``list``, and a negative/dual-rail cell ("+3/-3", "-7.5") becomes ``None``
+    (VDD left UNKNOWN) — those rails belong to control parts, not the amplifier
+    drain supply this project matches.
     """
-    t = (text or "").strip()
-    if not t or t in _MISSING_SENTINELS:
-        return None
-    nums = [float(x) for x in _NUM_RE.findall(t)]
-    if not nums:
-        return None
-    return (min(nums), max(nums))
+    return parse_vdd(text)
 
 
 def _is_amplifier_section(heading: str) -> bool:

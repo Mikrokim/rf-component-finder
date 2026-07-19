@@ -35,6 +35,7 @@ from selectolax.parser import HTMLParser
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -268,8 +269,14 @@ class UmsAdapter(Adapter):
         if f_low is not None and f_high is not None:
             raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="GHz")
 
-        # Scalar params from COLUMN_MAP.
+        # Scalar params from COLUMN_MAP; VDD goes through the shared parser so a
+        # single value / range / discrete list is normalised (never a bare float).
         for norm_key, (canonical, unit) in COLUMN_MAP.items():
+            if canonical == "VDD":
+                vdd = parse_vdd(_val(norm_key))
+                if vdd is not None:
+                    raw_params["VDD"] = RawValue(value=vdd, unit="V")
+                continue
             value = _parse_float(_val(norm_key))
             if value is not None:
                 raw_params[canonical] = RawValue(value=value, unit=unit)

@@ -40,6 +40,7 @@ from selectolax.parser import HTMLParser
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -107,7 +108,8 @@ def _parse_float(cell_text: str) -> float | None:
     and rejects non-finite results — "nan"/"inf" -> None.
 
     Caveat: an in-cell range like "28-32" yields its first number (28.0).  The
-    3rwave columns we read are single-valued, so this is not expected to fire.
+    remaining columns this parses are single-valued; VDD (which can be a range
+    like "10-15") is handled separately by the shared parser, not here.
     """
     t = cell_text.strip()
     if not t or t in _MISSING_SENTINELS:
@@ -303,9 +305,16 @@ class ThreeRWaveAdapter(Adapter):
         if f_low is not None and f_high is not None:
             raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="GHz")
 
-        # Scalar params from COLUMN_MAP.
+        # Scalar params from COLUMN_MAP; VDD goes through the shared parser so an
+        # in-cell range ("10-15") is kept as an interval, not flattened to its
+        # first number (and a single value never leaks out as a bare float).
         for norm_key, (canonical, unit) in COLUMN_MAP.items():
             if canonical in ("model", "freq_low", "freq_high"):
+                continue
+            if canonical == "VDD":
+                vdd = parse_vdd(_cell_val(norm_key))
+                if vdd is not None:
+                    raw_params["VDD"] = RawValue(value=vdd, unit="V")
                 continue
             val = _parse_float(_cell_val(norm_key))
             if val is not None:

@@ -130,8 +130,8 @@ def test_size_absent_for_evb_variant():
 
 
 def test_vdd_from_js_payload():
-    """VDD comes from power_supply_voltage:[{value:"5"}] -> 5.0 V."""
-    assert _product_details("ADM-11425PSM")["VDD"] == RawValue(value=5.0, unit="V")
+    """VDD comes from power_supply_voltage:[{value:"5"}] -> (5.0, 5.0) V."""
+    assert _product_details("ADM-11425PSM")["VDD"] == RawValue(value=(5.0, 5.0), unit="V")
 
 
 def test_temperature_is_degenerate_range_in_degc():

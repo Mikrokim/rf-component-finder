@@ -6,12 +6,12 @@ from rf_finder.models import ParamConstraint, QuerySpec
 from rf_finder.form.schema import Field, FormSchema
 
 #: Comparison rules collected as a (possibly one-sided) range in the form.
-#: ``contains``/``between`` are inherently range-valued; ``min``/``max`` are
-#: single-bound rules that we also collect as a range so the user may cap the
-#: other side too (e.g. Psat between 20 and 30 dBm, or Gain ≤ 40 dB). All of
-#: them except ``contains`` are emitted as a ``between`` constraint — see
-#: :func:`_build_range_constraint`.
-RANGE_COMPARISONS = ("contains", "between", "min", "max")
+#: ``contains``/``overlap``/``between`` are inherently range-valued; ``min``/
+#: ``max`` are single-bound rules that we also collect as a range so the user
+#: may cap the other side too (e.g. Psat between 20 and 30 dBm, or Gain ≤ 40 dB).
+#: ``contains`` and ``overlap`` keep their own rule; everything else is emitted
+#: as a ``between`` constraint — see :func:`_build_range_constraint`.
+RANGE_COMPARISONS = ("contains", "overlap", "between", "min", "max")
 
 
 def collect(
@@ -135,8 +135,9 @@ def _build_range_constraint(
         )
 
     # A single-bound rule collected as a range is semantically a ``between``;
-    # only ``contains`` (a candidate that is itself a band) keeps its rule.
-    emitted = "contains" if field.comparison == "contains" else "between"
+    # ``contains`` and ``overlap`` (rules over a candidate that is itself a
+    # band) keep their own rule.
+    emitted = field.comparison if field.comparison in ("contains", "overlap") else "between"
     return ParamConstraint(
         canonical_name=name,
         comparison=emitted,
@@ -236,8 +237,9 @@ def _collect_interactive(schema: FormSchema) -> QuerySpec:
                     print("  Min must not be greater than max.")
                     continue
 
-                # min/max collected as a range are one-sided ``between`` queries.
-                emitted = "contains" if require_both else "between"
+                # min/max collected as a range are one-sided ``between`` queries;
+                # ``contains``/``overlap`` fields keep their own rule.
+                emitted = field.comparison if field.comparison in ("contains", "overlap") else "between"
                 constraints.append(
                     ParamConstraint(
                         canonical_name=name,

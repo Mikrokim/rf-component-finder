@@ -16,7 +16,7 @@ class ParamDef(NamedTuple):
     canonical_unit: The unit everything is normalised to (e.g. "GHz", "dBm", "dB").
     units:          Accepted unit strings offered in the form's unit selector
                     (canonical unit listed first, per REQ-1.4).
-    comparison:     Rule used by the Verifier: "min" | "max" | "contains" | "eq" | "between".
+    comparison:     Rule used by the Verifier: "min" | "max" | "contains" | "overlap" | "eq" | "between".
     applies_to:     Component types for which this parameter is relevant.
     """
 
@@ -53,7 +53,7 @@ PARAMETERS: dict[str, ParamDef] = {
     "NF": _param("Noise figure", "dB", "max", ["amplifier"]),
     "IP3": _param("IP3", "dBm", "min", ["amplifier"]),
     "Psat": _param("Saturated power (Psat)", "dBm", "min", ["amplifier"]),
-    "VDD": _param("Supply voltage (VDD)", "V", "contains", ["amplifier"]),
+    "VDD": _param("Supply voltage (VDD)", "V", "overlap", ["amplifier"]),
     "Size": _param("Size", "mm", "max", ["amplifier"]),
     "MSL": _param("MSL level (1–5)", "", "max", ["amplifier"]),
     "Temperature": _param("Operating temperature", "degC", "contains", ["amplifier"]),

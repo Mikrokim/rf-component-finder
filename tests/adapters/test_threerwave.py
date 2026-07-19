@@ -71,7 +71,7 @@ def test_present_scalar_params():
     assert c.raw_params["Gain"] == RawValue(value=30.0, unit="dB")
     assert c.raw_params["Psat"] == RawValue(value=30.0, unit="dBm")
     assert c.raw_params["NF"] == RawValue(value=12.0, unit="dB")
-    assert c.raw_params["VDD"] == RawValue(value=0.4, unit="V")
+    assert c.raw_params["VDD"] == RawValue(value=(0.4, 0.4), unit="V")
 
 
 def test_missing_cell_is_absent_not_none():

@@ -54,6 +54,7 @@ import re
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -293,6 +294,18 @@ class RwmmicAdapter(Adapter):
                 return _parse_float(parts[i])           # coupled per-point value
             return None                                 # mismatched multi-field -> UNKNOWN
 
+        def _pick_raw(parts: list[str], i: int) -> str | None:
+            """Raw cell string for point i (same selection as ``_pick``, unparsed).
+
+            Used for VDD so the shared parser sees the original text and can
+            normalise a single value / range / options rather than a bare float.
+            """
+            if len(parts) == 1:
+                return parts[0]
+            if consistent and len(parts) == n_points:
+                return parts[i]
+            return None
+
         # ---- Build one Candidate per operating point ------------------------
         candidates: list[Candidate] = []
         for i in range(n_points):
@@ -304,6 +317,12 @@ class RwmmicAdapter(Adapter):
                 raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="GHz")
 
             for canonical, unit, parts in scalar_parts:
+                if canonical == "VDD":
+                    raw = _pick_raw(parts, i)
+                    vdd = parse_vdd(raw) if raw is not None else None
+                    if vdd is not None:
+                        raw_params["VDD"] = RawValue(value=vdd, unit="V")
+                    continue
                 val = _pick(parts, i)
                 if val is not None:
                     raw_params[canonical] = RawValue(value=val, unit=unit)
