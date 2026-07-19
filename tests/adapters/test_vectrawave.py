@@ -80,10 +80,11 @@ def test_no_ip3_msl_size_temp_from_table() -> None:
             assert absent not in c.raw_params
 
 
-def test_url_is_datasheet_pdf() -> None:
-    assert _by("VM042D").url == (
-        "https://vectrawave.com/wp-content/uploads/2025/02/VM042D-DS-Rev3.0-Ed1.1.pdf"
-    )
+def test_url_is_product_page_not_datasheet() -> None:
+    # The result link points at the part's own product page (read from the
+    # header-cell <a href>), NOT the Datasheet-row PDF.
+    assert _by("VM042D").url == "https://vectrawave.com/product/vm042d"
+    assert _by("VM017D").url == "https://vectrawave.com/product/vm017d"
 
 
 def test_missing_modules_raises_adaptererror() -> None:
