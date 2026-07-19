@@ -53,6 +53,26 @@ def test_lna_maps_all_present_params():
     assert "MSL" not in c.raw_params  # msl was null
 
 
+def test_datasheet_url_from_mcp_no_extra_request():
+    """Case 1: the MCP payload carries ``datasheetUrl`` -> Candidate.datasheet_url.
+
+    ``_build_candidate`` is pure (dicts in, Candidate out) — it makes NO request,
+    so the link rides along with the other params from the same MCP data.
+    """
+    c = _build("MMA044AA")
+    assert c.datasheet_url == (
+        "https://ww1.microchip.com/downloads/aemDocuments/documents/RFDS/"
+        "ProductDocuments/DataSheets/"
+        "MMA044AA-5-GHz-20-GHz+GaAs-pHEMT-MMIC-Wideband-LNA-DS00004231B.pdf"
+    )
+
+
+def test_datasheet_url_absent_stays_none():
+    """A part whose MCP payload has no ``datasheetUrl`` -> datasheet_url is None."""
+    c = _build("SYNTH-PA1")
+    assert c.datasheet_url is None
+
+
 def test_dc_freq_edge_becomes_zero():
     """MMA015AA: Freq Min = 'DC' -> 0.0 GHz; NF present here."""
     c = _build("MMA015AA")

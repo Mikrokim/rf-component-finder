@@ -75,6 +75,7 @@ class Candidate:
     url: str
     raw_params: dict[str, RawValue]      # canonical_name -> RawValue
     source: str                          # "table" | "datasheet"
+    datasheet_url: str | None = None     # per-part datasheet PDF link; enrichment's input
 
 
 # ---------------------------------------------------------------------------

@@ -421,10 +421,21 @@ class MicrochipAdapter(Adapter):
 
         url = product.get("productUrl") or f"https://www.microchipdirect.com/product/{model}"
 
+        # Datasheet link: the MCP hands it back directly (``datasheetUrl``) in the
+        # already-fetched product / physical-specs payloads — no extra request, no
+        # HTML scrape.  This is a "case 1" source: the link rides along with the
+        # other parameters through the same allowed MCP channel (api.microchip.com,
+        # which serves no robots.txt).  Not every part has one (some are null) →
+        # ``datasheet_url`` stays None, which the enrichment stage treats as
+        # no-accessible-datasheet.  The PDF itself lives on ww1.microchip.com;
+        # carrying the URL is not fetching it (that is the pipeline's concern).
+        datasheet_url = product.get("datasheetUrl") or physical.get("datasheetUrl")
+
         return Candidate(
             model=model,
             manufacturer=self.manufacturer,
             url=url,
             raw_params=raw_params,
             source="table",
+            datasheet_url=datasheet_url,
         )

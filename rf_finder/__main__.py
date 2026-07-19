@@ -1,8 +1,9 @@
 """CLI entry point: run form → search → report (REQ-1.1, REQ-5).
 
-The form and the result rendering live here; the actual search (adapters +
-verify + ranking) is delegated to ``rf_finder.search.search_and_verify`` so the
-CLI and the desktop GUI (``rf_finder.ui.gui``) share one implementation.
+The form and the result rendering live here; the actual search flow (adapters +
+verify + datasheet enrichment + the two gates) is delegated to
+``rf_finder.pipeline.run_pipeline`` so the CLI and the desktop GUI
+(``rf_finder.ui.gui``) share one implementation.
 """
 
 from __future__ import annotations
@@ -10,7 +11,8 @@ from __future__ import annotations
 
 def main() -> None:
     from rf_finder.form import build_form, collect
-    from rf_finder.search import _sources_for, search_and_verify
+    from rf_finder.search import _sources_for
+    from rf_finder.pipeline import run_pipeline
     from rf_finder.config import load_max_results
 
     max_results = load_max_results()
@@ -61,24 +63,22 @@ def main() -> None:
         else:  # "ok"
             print(f"  • {adapter.manufacturer}: {len(payload)} candidates")
 
-    verified = search_and_verify(spec, on_source=_note)
+    verified = run_pipeline(spec, on_source=_note)
 
     if not verified:
-        print("No candidates returned.")
+        print("No matching components.")
         return
 
-    print(f"Retrieved {len(verified)} raw candidates.")
-
-    # ── 3. Output (already ranked match→partial→fail by the core) ──────────────
-    matches  = [v for v in verified if v.overall == "match"]
-    partials = [v for v in verified if v.overall == "partial"]
-    fails    = [v for v in verified if v.overall == "fail"]
+    # ── 3. Output — the pipeline returns only accepted candidates, tagged
+    #        match or not-verified, and already ordered match first. ───────────
+    matches      = [v for v in verified if v.overall == "match"]
+    not_verified = [v for v in verified if v.overall == "not-verified"]
 
     print(f"\n{'─'*60}")
-    print(f"  match: {len(matches)}   partial: {len(partials)}   fail: {len(fails)}")
+    print(f"  match: {len(matches)}   not-verified: {len(not_verified)}")
     print(f"{'─'*60}\n")
 
-    _LABEL = {"match": "MATCH  ", "partial": "PARTIAL", "fail": "FAIL   "}
+    _LABEL = {"match": "MATCH       ", "not-verified": "NOT-VERIFIED"}
     _STATUS = {"PASS": "✓", "FAIL": "✗", "UNKNOWN": "?"}
 
     def _show(group: list, limit: int = 20) -> None:
@@ -98,20 +98,13 @@ def main() -> None:
             print(f"  … showing top {max_results} of {len(matches)} — refine the filters to narrow down")
         print()
 
-    if partials:
-        print(f"── PARTIAL ({len(partials)}) ──")
-        _show(partials)
+    if not_verified:
+        print(
+            f"── NOT-VERIFIED ({len(not_verified)}) — "
+            "site parameters pass; the datasheet could not be accessed to confirm the rest ──"
+        )
+        _show(not_verified)
         print()
-
-    if not matches and not partials:
-        print("No matching or partial-match components found.\n")
-
-    if fails:
-        show_fails = input(f"Show {len(fails)} non-matching results? [y/N]: ").strip().lower()
-        if show_fails == "y":
-            print()
-            _show(fails, limit=50)
-            print()
 
 
 if __name__ == "__main__":
