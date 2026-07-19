@@ -41,15 +41,22 @@ verification fails (verified live — a control fetch of another vendor succeeds
 with verification on).  ``_VERIFY_TLS`` is therefore False for this host; flip it
 to True on a network that trusts the site's certificate.
 
-robots.txt note: ``Disallow:`` is empty (everything allowed).  The datasheet PDF
-URL is populated in ``Candidate.url`` for human-reporter use only — it is never
-fetched programmatically.
+robots.txt note: ``Disallow:`` is empty (everything allowed).
+
+Product URL note: rwmmic has NO per-part product page — the site only exposes a
+datasheet PDF per part and a single shared ``/product.html`` catalogue table
+(rendered client-side from the same API).  So instead of the datasheet link,
+``Candidate.url`` is a Scroll-to-Text-Fragment deep link into that shared page
+(``…/product.html#:~:text=<PN>``): Chrome/Edge scroll to and highlight the found
+part on the catalogue page, and browsers without the feature just load the page.
+The URL is for human-reporter display only — it is never fetched programmatically.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from urllib.parse import quote
 
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
@@ -62,6 +69,8 @@ from rf_finder.ontology.supply import parse_vdd
 
 _BASE_URL = "https://www.rwmmic.com/"
 _ALL_PRODUCTS_URL = _BASE_URL + "index.php?r=api/all-products"
+# The shared catalogue page a result link points at (there is no per-part page).
+_PRODUCT_PAGE_URL = _BASE_URL + "product.html"
 
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A"})
 
@@ -104,6 +113,23 @@ def _normalize_field(raw: str) -> str:
     text = raw.lower()
     text = re.sub(r"[()\[\].,:/\\]", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _highlight_url(part_number: str) -> str:
+    """Build a Scroll-to-Text-Fragment deep link into the shared catalogue page.
+
+    rwmmic has no per-part product page — only a datasheet PDF and the single
+    shared ``/product.html`` table.  A text-fragment directive
+    (``#:~:text=<part number>``) makes Chrome/Edge and other modern browsers
+    scroll to and highlight that exact part on the catalogue page — the same
+    highlight a manual Ctrl+F produces.  Browsers without the feature simply load
+    the page.
+
+    The part number is percent-encoded; ``-`` is force-encoded to ``%2D`` because
+    a literal ``-`` is the range delimiter in the text-fragment grammar.
+    """
+    encoded = quote(part_number, safe="").replace("-", "%2D")
+    return f"{_PRODUCT_PAGE_URL}#:~:text={encoded}"
 
 
 def _split_values(cell_text: str) -> list[str]:
@@ -253,8 +279,10 @@ class RwmmicAdapter(Adapter):
         if not model_name:
             return []
 
-        # Product URL — the datasheet link, for reporter display only (never fetched).
-        url = values.get("datasheet", "").strip() or (_BASE_URL + "product.html")
+        # Product URL — a Scroll-to-Text-Fragment deep link into the shared
+        # catalogue page that highlights this exact part (rwmmic has no per-part
+        # page).  Display only, never fetched.  See _highlight_url.
+        url = _highlight_url(model_name)
 
         # ---- Gather the per-field value lists (split coupled "/" values) -----
         # Each entry: (canonical_name, unit, [value, ...]).  Frequency bounds are

@@ -150,10 +150,11 @@ def test_mismatched_value_counts_fall_back_safely():
     assert "P1dB" not in cands[0].raw_params
 
 
-def test_url_is_datasheet_link():
+def test_url_is_catalogue_page_text_fragment():
+    # rwmmic has no per-part page, so the link points at the shared catalogue
+    # page with a Scroll-to-Text-Fragment directive that highlights this part.
     c = _by_model("RWLA1001")
-    assert c.url.endswith("RWLA1001.pdf")
-    assert "rwmmic.com" in c.url
+    assert c.url == "https://www.rwmmic.com/product.html#:~:text=RWLA1001"
 
 
 def test_bad_json_raises_adaptererror():
