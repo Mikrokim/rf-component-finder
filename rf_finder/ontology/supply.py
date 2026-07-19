@@ -2,7 +2,7 @@
 
 Manufacturer sites express a part's supply voltage in several textual forms.
 This module is the single source of truth that turns any of them into the
-normalized shape the Verifier compares under the ``overlap`` rule, so every
+normalized shape the Verifier compares under the ``contains`` rule, so every
 adapter (and the datasheet fallback) behaves identically.
 
 Supported forms (all positive) and their normalized value:

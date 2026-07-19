@@ -410,7 +410,7 @@ class MicrochipAdapter(Adapter):
             vdd = _parse_float(by_key.get(_VOLTAGE_KEY))
         if vdd is not None:
             # A bias/supply figure is a single value -> degenerate (v, v) interval,
-            # the shape the overlap rule compares (never a bare float).
+            # the shape the contains rule compares (never a bare float).
             raw_params["VDD"] = RawValue(value=(vdd, vdd), unit="V")
 
         # Size / MSL come from the MCP physical-specs (not the feed).

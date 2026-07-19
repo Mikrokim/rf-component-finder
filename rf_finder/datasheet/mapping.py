@@ -15,9 +15,10 @@ accordance with:
     emits (e.g. ``"C"``) are reconciled here to the canonical one (``"degC"``).
 
 The shape is chosen from each parameter's ``comparison``:
-  - ``contains`` (freq_range, Temperature) and ``overlap`` (VDD): a continuous
-    ``(low, high)`` range, or a list of discrete options — the band-valued
-    candidate shapes both rules compare in ``verifier._compare``.
+  - ``contains`` (freq_range, Temperature, VDD): a continuous ``(low, high)``
+    range, or a list of discrete options — the band-valued candidate shapes the
+    ``contains`` rule compares in ``verifier._compare``. VDD additionally stores
+    a lone stated value as the degenerate ``(v, v)`` interval (single_value_ok).
   - ``min`` / ``max`` / ``eq`` (Gain, NF, P1dB, Size, MSL, ...): a single scalar,
     picked as the candidate's GUARANTEED value by comparison direction — the
     stated ``min`` (falling back to ``typ``) for a ``min`` rule ("at least"), the
@@ -30,8 +31,8 @@ Parameters the ontology does not define, not-found params (``None``), and specs
 whose unit is missing on a multi-unit parameter (ambiguous) are skipped so the
 Verifier reports them as ``UNKNOWN`` rather than mis-comparing or guessing.
 Multi-option params (``value`` is a list, e.g. a supply with several selectable
-voltages) map to a list ``RawValue``, which ``contains``/``overlap`` support —
-they are verified like any other parameter.
+voltages) map to a list ``RawValue``, which ``contains`` supports — they are
+verified like any other parameter.
 """
 
 from __future__ import annotations
@@ -88,11 +89,11 @@ def _normalize_unit(unit, pdef) -> str | None:
     return None
 
 
-def _to_value(spec: dict, comparison: str):
+def _to_value(spec: dict, comparison: str, single_value_ok: bool = False):
     """Return the ``RawValue.value`` for *spec* under *comparison*, or None."""
     val = spec.get("value")
 
-    if comparison in ("contains", "overlap"):
+    if comparison == "contains":
         # Band-valued candidate: discrete, selectable options (e.g. VDD 3/5/8 V)
         # -> list.
         if isinstance(val, list) and val:
@@ -106,11 +107,11 @@ def _to_value(spec: dict, comparison: str):
         nums = _numbers(val)
         if len(nums) >= 2:
             return (min(nums), max(nums))
-        # For overlap (VDD) a single stated supply figure is a degenerate
-        # (v, v) interval — the shape a single-value site cell also yields.
-        # ``contains`` params (freq_range/Temperature) keep their range-only
+        # A single-value-capable field (VDD) stores a lone stated figure as the
+        # degenerate (v, v) interval — the shape a single-value site cell yields.
+        # Band-only params (freq_range/Temperature) keep their range-only
         # behaviour: a lone figure there stays UNKNOWN.
-        if comparison == "overlap":
+        if single_value_ok:
             single = spec.get("typ")
             if single is None and len(nums) == 1:
                 single = nums[0]
@@ -160,7 +161,7 @@ def to_raw_params(params: dict) -> dict[str, RawValue]:
         pdef = PARAMETERS.get(name)
         if pdef is None or not isinstance(spec, dict):
             continue
-        value = _to_value(spec, pdef.comparison)
+        value = _to_value(spec, pdef.comparison, pdef.single_value_ok)
         if value is None:
             continue
         unit = _normalize_unit(spec.get("unit"), pdef)

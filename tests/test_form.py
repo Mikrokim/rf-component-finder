@@ -34,10 +34,10 @@ class TestBuildForm:
         assert schema.fields[0].comparison == "contains"
 
     def test_range_fields_precede_scalar_fields(self):
-        # build_form groups range params (contains/overlap/between) before scalar
+        # build_form groups range params (contains/between) before scalar
         # params (min/max/eq). Verify no range field follows a scalar field.
         schema = _amplifier_schema()
-        range_kinds = {"contains", "overlap", "between"}
+        range_kinds = {"contains", "between"}
         seen_scalar = False
         for field in schema.fields:
             if field.comparison in range_kinds:

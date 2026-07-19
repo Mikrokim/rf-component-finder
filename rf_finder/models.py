@@ -10,7 +10,7 @@ from typing import Literal
 # String-constant groups (§5 of data-models.md)
 # ---------------------------------------------------------------------------
 
-Comparison = Literal["min", "max", "contains", "overlap", "eq", "between"]
+Comparison = Literal["min", "max", "contains", "eq", "between"]
 VerdictStatus = Literal["PASS", "FAIL", "UNKNOWN"]
 Overall = Literal["match", "partial", "fail"]
 Source = Literal["table", "datasheet"]
@@ -29,9 +29,9 @@ class ParamConstraint:
     """
 
     canonical_name: str                   # e.g. "P1dB", "freq_range"
-    comparison: str                       # "min" | "max" | "contains" | "overlap" | "eq" | "between"
+    comparison: str                       # "min" | "max" | "contains" | "eq" | "between"
     value: float | None                   # for min/max/eq, in the chosen unit
-    range: tuple[float, float] | None     # for "contains"/"overlap"/"between" (e.g. (2.0, 6.0))
+    range: tuple[float, float] | None     # for "contains"/"between" (e.g. (2.0, 6.0))
     unit: str                             # e.g. "dBm", "GHz"
 
     def __post_init__(self) -> None:

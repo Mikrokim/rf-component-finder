@@ -210,7 +210,7 @@ class MiniCircuitsAdapter(Adapter):
                 raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="MHz")
 
             # VDD: the Voltage column holds a single value; the shared parser
-            # normalises it to a degenerate (v, v) interval for the overlap rule.
+            # normalises it to a degenerate (v, v) interval for the contains rule.
             vdd = parse_vdd(_cell_val("voltage v"))
             if vdd is not None:
                 raw_params["VDD"] = RawValue(value=vdd, unit="V")
