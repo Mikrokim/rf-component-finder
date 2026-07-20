@@ -8,7 +8,7 @@ Define the central, code-defined dictionary of measurable RF parameters and the 
 
 ### Requirement: Central parameter dictionary
 
-The system SHALL maintain a central `PARAMETERS` dictionary keyed by canonical parameter name. Each entry SHALL be an immutable `ParamDef` carrying: `label` (human-readable name), `canonical_unit`, `units` (the accepted unit strings with the canonical unit listed first), `comparison` (the verifier rule), and `applies_to` (the component types the parameter is relevant to).
+The system SHALL maintain a central `PARAMETERS` dictionary keyed by canonical parameter name. Each entry SHALL be an immutable `ParamDef` carrying: `label` (human-readable name), `canonical_unit`, `units` (the accepted unit strings with the canonical unit listed first), `comparison` (the verifier rule), `applies_to` (the component types the parameter is relevant to), and `single_value_ok` (a boolean, default `False`) — for a `contains` parameter, whether the form also accepts a **single** entered value (stored as the degenerate point `(v, v)`) in addition to a full range.
 
 The dictionary SHALL define exactly these ten parameters, each applicable to `amplifier`:
 
@@ -27,12 +27,15 @@ The dictionary SHALL define exactly these ten parameters, each applicable to `am
 
 `freq_range.applies_to` SHALL be `["amplifier", "mixer", "filter", "attenuator"]`; all other parameters SHALL apply to `["amplifier"]` only.
 
+Exactly one parameter SHALL carry `single_value_ok = True`: `VDD` — a `contains` parameter whose form additionally accepts a single value ("must operate at exactly this voltage"), stored as the degenerate point `(v, v)`. All other parameters SHALL have `single_value_ok = False`; in particular the band-only `contains` parameters `freq_range` and `Temperature` are always bands and require both bounds.
+
 #### Scenario: Amplifier parameter set and rules
 
 - **WHEN** the `PARAMETERS` dictionary is read
 - **THEN** it contains exactly the ten entries `freq_range`, `P1dB`, `Gain`, `NF`, `IP3`, `Psat`, `VDD`, `Size`, `MSL`, `Temperature`
 - **AND** their `comparison` values are `contains`, `min`, `min`, `max`, `min`, `min`, `contains`, `max`, `max`, `contains` respectively
 - **AND** their `canonical_unit` values are `GHz`, `dBm`, `dB`, `dB`, `dBm`, `dBm`, `V`, `mm`, `""`, `degC` respectively
+- **AND** `VDD.single_value_ok` is `True` and every other parameter's `single_value_ok` is `False`
 
 #### Scenario: Canonical unit listed first in the units list
 

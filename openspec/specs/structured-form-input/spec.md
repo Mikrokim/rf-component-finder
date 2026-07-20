@@ -8,7 +8,7 @@ Define how the tool turns a structured, ontology-driven form into a `QuerySpec`.
 
 ### Requirement: Form schema generated from the ontology
 
-The system SHALL provide `build_form(component_type) -> FormSchema`. It SHALL emit one `Field` per ontology parameter that applies to `component_type` (via `params_for`), each carrying `canonical_name`, `label`, `comparison`, `canonical_unit`, and `units` (canonical unit first). Range parameters (`comparison` in `contains` or `between`) SHALL be ordered before scalar parameters; within each group the ontology iteration order is preserved. IF `component_type` is not a registered component, the system SHALL raise `ValueError`.
+The system SHALL provide `build_form(component_type) -> FormSchema`. It SHALL emit one `Field` per ontology parameter that applies to `component_type` (via `params_for`), each carrying `canonical_name`, `label`, `comparison`, `canonical_unit`, `units` (canonical unit first), and `single_value_ok` (carried through from the parameter's `ParamDef`). Range parameters (`comparison` in `contains` or `between`) SHALL be ordered before scalar parameters; within each group the ontology iteration order is preserved. IF `component_type` is not a registered component, the system SHALL raise `ValueError`.
 
 #### Scenario: Amplifier form has ten fields, contains first
 
@@ -49,7 +49,7 @@ The system SHALL provide `collect(schema, *, answers=None) -> QuerySpec`. When `
 
 ### Requirement: Range collection for contains, between, min, and max rules
 
-Every parameter except `eq` SHALL be collected as a min/max range field, so the user MAY enter a min, a max, or both. For a `contains` field the system SHALL require both bounds: if only one of min/max is supplied, the field SHALL be skipped (a partial `contains` range is not a constraint). For a `between`, `min`, or `max` field either side MAY be omitted: an omitted min SHALL default to `-inf` and an omitted max to `+inf` (a one-sided, open range) — filling only the natural side of a `min`/`max` parameter reproduces its namesake bound (a `min` param with only a min ⇒ "≥ x"; a `max` param with only a max ⇒ "≤ x"), while supplying the other side caps or brackets the value. A `contains` field is emitted as a `contains` constraint; every `between`/`min`/`max` field is emitted as a (possibly one-sided) `between` constraint. In all range cases, IF the parsed min is greater than the parsed max, the system SHALL raise `ValueError`.
+Every parameter except `eq` SHALL be collected as a min/max range field, so the user MAY enter a min, a max, or both. For a **band-only** `contains` field (`single_value_ok = False`, e.g. `freq_range`, `Temperature`) the system SHALL require both bounds: if only one of min/max is supplied, the field SHALL be skipped (a partial band is not a constraint). For a `contains` field with `single_value_ok = True` (`VDD`) the user MAY enter ONE value or a full range: a lone entry is that single required voltage — the point `(v, v)`, never an open-ended range — and both entries give the range `(min, max)`. For a `between`, `min`, or `max` field either side MAY be omitted: an omitted min SHALL default to `-inf` and an omitted max to `+inf` (a one-sided, open range) — filling only the natural side of a `min`/`max` parameter reproduces its namesake bound (a `min` param with only a min ⇒ "≥ x"; a `max` param with only a max ⇒ "≤ x"), while supplying the other side caps or brackets the value. A `contains` field is emitted as a `contains` constraint (including VDD); every `between`/`min`/`max` field is emitted as a (possibly one-sided) `between` constraint. In all range cases, IF the parsed min is greater than the parsed max, the system SHALL raise `ValueError`.
 
 #### Scenario: Between with one open side
 
@@ -72,6 +72,12 @@ Every parameter except `eq` SHALL be collected as a min/max range field, so the 
 
 - **WHEN** `collect` runs with only `P1dB.unit=dBm` and no min/max
 - **THEN** no `P1dB` constraint is produced
+
+#### Scenario: VDD accepts a single value as a point constraint
+
+- **WHEN** `collect` runs with `VDD.min=5`, `VDD.unit=V` (no max)
+- **THEN** the `VDD` constraint has `comparison == "contains"` and `range == (5.0, 5.0)`
+- **AND WHEN** both `VDD.min=3` and `VDD.max=6` are given, the `VDD` constraint's `range == (3.0, 6.0)`
 
 #### Scenario: Inverted range is rejected
 
