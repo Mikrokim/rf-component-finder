@@ -44,6 +44,61 @@ _THEME = "minty"
 _NUM_RE = re.compile(r"^-?\d*\.?\d*$")
 
 
+class _Spinner(tk.Canvas):
+    """An asset-free rotating-arc loading spinner.
+
+    Draws a faint full-circle track with one bright arc segment that rotates on
+    a timer — the familiar circular "loading" indicator — themed to the active
+    ttkbootstrap palette. No image/GIF asset and no extra dependency. Purely
+    cosmetic and UI-thread-only: ``start()`` begins the rotation, ``stop()``
+    ends it.
+    """
+
+    def __init__(
+        self, master, *, size: int = 20, width: int = 3,
+        extent: int = 90, step: int = 15, interval: int = 40,
+    ) -> None:
+        colors = ttk.Style().colors
+        super().__init__(
+            master, width=size, height=size,
+            highlightthickness=0, borderwidth=0, background=colors.bg,
+        )
+        self._extent = extent      # length of the bright arc (degrees)
+        self._step = step          # degrees advanced per tick
+        self._interval = interval  # ms between ticks
+        self._angle = 90           # start at 12 o'clock
+        self._job = None
+
+        pad = width + 1            # keep the stroke fully inside the canvas
+        box = (pad, pad, size - pad, size - pad)
+        # Faint full-circle track (drawn once).
+        self.create_arc(
+            *box, start=0, extent=359.9, style="arc",
+            outline=colors.border, width=width,
+        )
+        # The rotating bright arc (its start angle is updated each tick).
+        self._arc = self.create_arc(
+            *box, start=self._angle, extent=self._extent, style="arc",
+            outline=colors.primary, width=width,
+        )
+
+    def start(self) -> None:
+        """Begin rotating (no-op if already running)."""
+        if self._job is None:
+            self._tick()
+
+    def stop(self) -> None:
+        """Stop rotating; safe to call when already stopped."""
+        if self._job is not None:
+            self.after_cancel(self._job)
+            self._job = None
+
+    def _tick(self) -> None:
+        self._angle = (self._angle - self._step) % 360   # negative = clockwise
+        self.itemconfigure(self._arc, start=self._angle)
+        self._job = self.after(self._interval, self._tick)
+
+
 class App:
     """The main application window."""
 
@@ -104,6 +159,15 @@ class App:
             bootstyle="info", width=16,
         )
         self.skill_button.pack(side="left", padx=(10, 0), ipady=4)
+        # Reset: clear every field in one click — never rebuilds, keeps the type.
+        self.reset_button = ttk.Button(
+            controls, text="Reset", command=self._on_reset,
+            bootstyle="secondary-outline", width=10,
+        )
+        self.reset_button.pack(side="left", padx=(10, 0), ipady=4)
+        # An asset-free rotating-arc spinner (no GIF/image). Shown only while a
+        # run is in flight — packed on start, hidden on stop.
+        self.spinner = _Spinner(controls, size=30, width=4)
         self.status_var = tk.StringVar(value="")
         ttk.Label(controls, textvariable=self.status_var, bootstyle="secondary").pack(
             side="left", padx=(14, 0)
@@ -149,6 +213,25 @@ class App:
 
     def _on_component_change(self, event=None) -> None:
         self.build_fields(self._selected_component_type())
+
+    def _on_reset(self) -> None:
+        """Clear every field of the current form in one click.
+
+        Empties each value entry and restores each unit to its canonical
+        default (``field.units[0]``), reusing the existing ``field_widgets``
+        records. Unlike a component-type change this does NOT rebuild the fields
+        or change the selected type. A no-op while a search or AI search runs.
+        """
+        if self._searching or self._skill_running:
+            return
+        for rec in self.field_widgets:
+            if rec["kind"] == "range":
+                rec["min"].delete(0, "end")
+                rec["max"].delete(0, "end")
+            else:
+                rec["value"].delete(0, "end")
+            rec["unit"].set(rec["field"].units[0])
+        self.status_var.set("")
 
     # -- Form fields ---------------------------------------------------------
 
@@ -305,16 +388,34 @@ class App:
                     self._deliver_skill_results(payload)
                 elif kind == "skill_error":
                     self._on_skill_error(payload)
+                elif kind == "skill_text":
+                    self._render_activity(payload)
         except queue.Empty:
             pass
         self.root.after(100, self._poll_queue)
 
+    def _start_progress(self) -> None:
+        """Show and spin the loading indicator (UI thread only)."""
+        self.spinner.pack(side="right", padx=(0, 4))
+        self.spinner.start()
+
+    def _stop_progress(self) -> None:
+        """Stop and hide the loading indicator (UI thread only)."""
+        self.spinner.stop()
+        self.spinner.pack_forget()
+
     def _set_searching(self, busy: bool) -> None:
         """Toggle the loading state so a second search can't start mid-run."""
         self._searching = busy
-        self.search_button.configure(state="disabled" if busy else "normal")
+        state = "disabled" if busy else "normal"
+        self.search_button.configure(state=state)
+        self.skill_button.configure(state=state)
+        self.reset_button.configure(state=state)
         if busy:
             self.status_var.set("Searching… (this may take a few seconds)")
+            self._start_progress()
+        else:
+            self._stop_progress()
 
     def _on_error(self, exc: Exception) -> None:
         self._set_searching(False)
@@ -418,7 +519,14 @@ class App:
         try:
             from rf_finder.agent.skill_runner import run_demo_search
 
-            result = asyncio.run(run_demo_search(spec_text, on_text=lambda _t: None))
+            result = asyncio.run(
+                run_demo_search(
+                    spec_text,
+                    # Stream live progress to the UI thread through the same
+                    # queue results use — the worker never touches Tk.
+                    on_text=lambda t: self._result_queue.put(("skill_text", t)),
+                )
+            )
             components = (result or {}).get("components", [])
         except Exception as e:   # missing SDK/auth, run error, unreadable result
             self._result_queue.put(("skill_error", e))
@@ -431,8 +539,30 @@ class App:
         state = "disabled" if busy else "normal"
         self.skill_button.configure(state=state)
         self.search_button.configure(state=state)
+        self.reset_button.configure(state=state)
         if busy:
             self.status_var.set("AI Search… (this may take a few seconds)")
+            self._start_progress()
+        else:
+            self._stop_progress()
+
+    def _render_activity(self, text: str) -> None:
+        """Show the AI engine's latest streamed activity on the status line.
+
+        Renders only the most recent chunk (overwrite, not append), whitespace-
+        collapsed and length-capped so bursty streaming can't reflow the layout.
+        Ignored once the run has ended, so a late chunk can't linger after the
+        summary or error message has been shown. Only AI Search feeds this;
+        deterministic Search produces no such stream.
+        """
+        if not self._skill_running:
+            return
+        collapsed = " ".join(str(text).split())
+        if not collapsed:
+            return
+        if len(collapsed) > 90:
+            collapsed = collapsed[:89] + "…"
+        self.status_var.set(f"🤖 {collapsed}")
 
     def _on_skill_error(self, exc: Exception) -> None:
         self._set_skill_running(False)

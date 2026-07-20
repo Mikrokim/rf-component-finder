@@ -212,3 +212,77 @@ def test_search_resets_table_including_ai_rows(app):
     rows = app.tree.get_children()
     assert len(rows) == 1                              # Search reset the table
     assert "Search" in app.tree.item(rows[0], "values")[0]
+
+
+# ---------------------------------------------------------------------------
+# Reset button — clear the form in one click
+# ---------------------------------------------------------------------------
+
+
+def test_reset_clears_fields_and_keeps_type(app):
+    """Reset empties every value and restores canonical units, keeping the type."""
+    freq = _field(app, "freq_range")
+    freq["min"].insert(0, "2")
+    freq["max"].insert(0, "6")
+    freq["unit"].set(freq["field"].units[-1])   # move off the canonical unit
+    _field(app, "P1dB")["min"].insert(0, "26")
+
+    type_before = app._selected_component_type()
+    app._on_reset()
+
+    assert app.build_answers() == {}                       # every value entry emptied
+    for rec in app.field_widgets:                          # units back to canonical
+        assert rec["unit"].get() == rec["field"].units[0]
+    assert app._selected_component_type() == type_before   # type unchanged
+    assert len(app.field_widgets) > 0                      # fields still present
+
+
+def test_reset_is_a_noop_while_running(app):
+    """Reset must not wipe the form mid-search."""
+    _field(app, "P1dB")["min"].insert(0, "26")
+    app._searching = True
+    app._on_reset()
+    assert app.build_answers() == {"P1dB.min": "26", "P1dB.unit": "dBm"}   # untouched
+
+
+def test_reset_and_action_buttons_disabled_during_run(app):
+    """Reset (and the engine buttons) are blocked while a run is in progress."""
+    app._set_searching(True)
+    assert str(app.reset_button["state"]) == "disabled"
+    assert str(app.search_button["state"]) == "disabled"
+    app._set_searching(False)
+    assert str(app.reset_button["state"]) == "normal"
+
+    app._set_skill_running(True)
+    assert str(app.reset_button["state"]) == "disabled"
+    app._set_skill_running(False)
+    assert str(app.reset_button["state"]) == "normal"
+
+
+# ---------------------------------------------------------------------------
+# Live AI Search activity stream
+# ---------------------------------------------------------------------------
+
+
+def test_skill_text_updates_activity_line_on_ui_thread(app):
+    """A streamed chunk queued by the worker is rendered by the poller."""
+    app._set_skill_running(True)   # activity only shows during an AI run
+    app._result_queue.put(("skill_text", "Invoking   the\n demo skill  now"))
+    app._poll_queue()              # drain on the UI thread
+
+    shown = app.status_var.get()
+    assert shown.startswith("🤖")
+    assert "demo skill" in shown          # whitespace collapsed, chunk shown
+
+
+def test_skill_text_ignored_after_run_ends(app):
+    """A late chunk after the run finished must not linger on the status line."""
+    app._skill_running = False
+    app._render_activity("stale chunk")
+    assert "stale chunk" not in app.status_var.get()
+
+
+def test_deterministic_search_shows_no_streamed_line(app):
+    """Normal Search never renders an AI activity line (it has no stream)."""
+    app._deliver_results([_det_row("A")])
+    assert "🤖" not in app.status_var.get()
