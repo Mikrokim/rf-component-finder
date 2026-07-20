@@ -114,7 +114,13 @@ _MAX_WORKERS  = 8       # concurrency cap for per-part fetches
    `products.items()`; `httpx.Client` is thread-safe, MCP tools are PARALLEL-SAFE):
    `_process_part` runs the chain and returns a `Candidate` or `None`.
 3. `search_product_physical_specs {partNumber}` → `parametricData`,
-   `packageWidthOrSize`, `msl`. Null `parametricData` → skip.
+   `packageWidthOrSize`, `msl`. Null `parametricData` → skip. **Two response
+   shapes** (`_fetch_physical`): a **flat** `data` object for a unique match
+   (e.g. MMA035AA), but a `data.products[]` **list** when the part number also
+   matches variants — tape-and-reel `…/TR`, eval boards `…E` (e.g. MMA044PP3).
+   In the list shape `parametricData` is nested, so pick the row whose
+   `partNumber` equals the requested part. Handling only the flat shape silently
+   drops every part with sibling variants (§8 R12).
 4. **GET the feed** → `response.json()`.
 5. **product_type gate** (`_is_amplifier`, §5) → drop pollution.
 6. `_build_candidate` (§6).
@@ -168,7 +174,7 @@ collapse spaces) so `"p1db(dBM)"` → `p1db dbm`, `"Freq Min GHz"` → `freq min
 | Source | Use |
 |---|---|
 | MCP `partNumber` | `Candidate.model` (skip if missing) |
-| MCP `productUrl` | `Candidate.url` (microchipdirect product page; **display-only, never fetched**); fallback `…/product/<model>` |
+| feed slug (from `parametricData`) | `Candidate.url` — the **microchip.com catalog page** `…/en-us/product/<slug>` built by `_catalog_url` (title-case the type words, keep the part-number prefix incl. suffixes like `ICP0444-FL`). **Display-only, never fetched** (`www.microchip.com` is Akamai-blocked to us but opens fine in a browser). NOT the MCP `productUrl`: that points at the microchipdirect **store**, a "Not Available Online" stub for RF-MMIC parts. Fallbacks: `productUrl` → `…direct.com/product/<model>` |
 | feed `Freq Min/Max GHz` | `freq_range` (GHz; **`"DC"` → 0.0**, emit only if both edges parse) |
 | feed scalars via `FEED_MAP` | `raw_params` (§7) |
 | feed `Bias` / `Voltage (V)` | `VDD` — parse leading volts from `Bias` (e.g. `"4V, 80mA"` → 4.0), else `Voltage (V)` directly |
@@ -176,7 +182,11 @@ collapse spaces) so `"p1db(dBM)"` → `p1db dbm`, `"Freq Min GHz"` → `freq min
 | MCP `msl` | `MSL` — digits from `"MSL-n"`; usually null → omit |
 
 Missing / non-numeric / sentinel → param omitted → Verifier marks UNKNOWN
-(partial), never FAIL. `source = "table"`.
+(partial), never FAIL. `source = "table"`. **Trailing-unit values:** a feed cell
+may publish the value *with* its unit embedded (e.g. a `dBm`/`dB` scalar as a
+string ending in the unit) instead of a bare number; `_parse_float` strips a
+trailing unit (leading-number regex) so such a value isn't lost as UNKNOWN —
+which would wrongly hide the part when that param is filtered (§8 R13).
 
 ### Architecture fit (same contract as the others)
 - **No query-side filtering** — return every amplifier; the **Verifier** applies
@@ -231,6 +241,8 @@ Notes:
 | R9 | **`pool.map` re-raises** — one bad part could nuke all results. | `_process_part` is a blanket `try/except → None`; parsers never raise (e.g. `_parse_size_mm` skips malformed tokens). |
 | R10 | **MCP is a young service** (v1.0) — schema/availability may drift. | Fail-loud tripwire on shape change; name-based maps. |
 | R11 | **`product_type` misspelling** `"Amplifer"`. | Marker is `"amplif"`, not `"amplifier"`. |
+| R12 | **`search_product_physical_specs` has two response shapes** — a flat `data` object for a unique match, but a `data.products[]` list when the part has variants (`/TR` reel, `…E` eval). Nested `parametricData` → part silently dropped. | `_fetch_physical` handles both; in the list shape it picks the row whose `partNumber` equals the requested part (§4.3). |
+| R13 | **A feed scalar may carry its unit in the value** (unit-suffixed string vs a bare number on sibling parts) → `float()` fails → param lost as UNKNOWN → part hidden when filtered. | `_parse_float` strips a trailing unit (leading-number regex); covers every scalar (§6). |
 
 ---
 

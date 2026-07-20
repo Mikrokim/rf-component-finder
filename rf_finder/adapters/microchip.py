@@ -139,7 +139,13 @@ def _parse_float(value: object) -> float | None:
     try:
         return float(text)
     except ValueError:
-        return None
+        pass
+    # Some feed cells carry a trailing unit ("28 dBm", "17 dB") instead of a bare
+    # number — an inconsistency in how a part is published, not a real absence.
+    # Take the leading numeric token so the value isn't lost as UNKNOWN (which
+    # would wrongly hide the part). Applies to every scalar parsed here.
+    match = re.match(r"[-+]?\d*\.?\d+", text)
+    return float(match.group()) if match else None
 
 
 def _parse_freq(value: object) -> float | None:
@@ -342,7 +348,21 @@ class MicrochipAdapter(Adapter):
         return products
 
     def _fetch_physical(self, part_number: str) -> dict:
-        """Return the ``search_product_physical_specs`` data for a part ({} on failure)."""
+        """Return the ``search_product_physical_specs`` data for a part ({} on failure).
+
+        The tool returns two shapes depending on how many products the part
+        number matches:
+
+        - a **flat** object (``partNumber``, ``parametricData``, …) for a unique
+          match (e.g. MMA035AA);
+        - a ``{"products": [...]}`` **list** when the part number also matches
+          variants — tape-and-reel ``…/TR``, eval boards ``…E`` (e.g. MMA044PP3).
+          Here ``parametricData`` is nested one level down, so we pick the row
+          whose ``partNumber`` is exactly the one we asked for.
+
+        Handling only the flat shape would silently drop every part that has
+        sibling variants (its ``parametricData`` reads as ``None`` → skipped).
+        """
         try:
             inner = self._mcp_call(
                 "search_product_physical_specs", {"partNumber": part_number}
@@ -350,7 +370,15 @@ class MicrochipAdapter(Adapter):
         except AdapterError:
             return {}
         data = inner.get("data") if isinstance(inner, dict) else None
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        products = data.get("products")
+        if isinstance(products, list):
+            for prod in products:
+                if isinstance(prod, dict) and prod.get("partNumber") == part_number:
+                    return prod
+            return {}  # multi-match but our exact part isn't among them → skip
+        return data
 
     def _fetch_feed(self, url: str) -> dict | None:
         """GET one microchipdirect parametric feed (cache-first); None on any error."""

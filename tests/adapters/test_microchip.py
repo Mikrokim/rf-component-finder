@@ -18,6 +18,7 @@ from rf_finder.adapters.microchip import (
     _catalog_url,
     _is_amplifier,
     _parse_bias_volts,
+    _parse_float,
     _parse_freq,
     _parse_size_mm,
     _sse_json,
@@ -115,6 +116,30 @@ def test_parse_freq_dc():
     assert _parse_freq("") is None
 
 
+def test_parse_float_strips_trailing_unit():
+    """A value published with its unit ("28 dBm") still parses to the number."""
+    assert _parse_float("28 dBm") == 28.0
+    assert _parse_float("17 dB") == 17.0
+    assert _parse_float("10.25") == 10.25   # clean number unaffected
+    assert _parse_float("-3.5 dBm") == -3.5
+    assert _parse_float("N/A") is None      # sentinel still None
+    assert _parse_float("QFN") is None      # no leading number -> None
+
+
+def test_oip3_with_unit_still_maps_to_ip3():
+    """MMA044PP3-style feed: OIP3 '28 dBm' -> IP3 28.0 (not dropped as UNKNOWN)."""
+    feed = {
+        "Freq Min GHz": "6", "Freq Max GHz": "18",
+        "Gain (dB)": "17", "NF (dB)": "2",
+        "OIP3 (dBm)": "28 dBm", "p1db(dBM)": "14",
+        "Bias": "4V,100mA", "product_type": "Low noise amplifier",
+    }
+    c = MicrochipAdapter()._build_candidate(
+        "MMA044PP3", {"partNumber": "MMA044PP3"}, {}, feed
+    )
+    assert c.raw_params["IP3"] == RawValue(28.0, "dBm")
+
+
 def test_parse_bias_volts():
     assert _parse_bias_volts("4V,102mA") == 4.0
     assert _parse_bias_volts("11V, 410 mA") == 11.0
@@ -132,6 +157,40 @@ def test_parse_size_mm_takes_largest_edge():
 def test_sse_json_extracts_data_line():
     payload = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n'
     assert _sse_json(payload)["result"]["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# _fetch_physical — flat vs. multi-match ('products' list) shapes
+# ---------------------------------------------------------------------------
+
+def test_fetch_physical_flat_shape(monkeypatch):
+    """Unique match: data is a flat object -> returned as-is."""
+    a = MicrochipAdapter()
+    monkeypatch.setattr(
+        a, "_mcp_call",
+        lambda tool, args: {"data": {"partNumber": "MMA035AA", "parametricData": "u"}},
+    )
+    assert a._fetch_physical("MMA035AA")["parametricData"] == "u"
+
+
+def test_fetch_physical_products_list_picks_exact_part(monkeypatch):
+    """Multi-match (MMA044PP3 + /TR + E): pick the exact-partNumber row's feed."""
+    a = MicrochipAdapter()
+    payload = {"data": {"products": [
+        {"partNumber": "MMA044PP3", "parametricData": "good"},
+        {"partNumber": "MMA044PP3/TR", "parametricData": None},
+        {"partNumber": "MMA044PP3E", "parametricData": "eval"},
+    ]}}
+    monkeypatch.setattr(a, "_mcp_call", lambda tool, args: payload)
+    assert a._fetch_physical("MMA044PP3")["parametricData"] == "good"
+
+
+def test_fetch_physical_products_list_without_exact_match_skips(monkeypatch):
+    """Multi-match but our exact part isn't among the rows -> {} (skip)."""
+    a = MicrochipAdapter()
+    payload = {"data": {"products": [{"partNumber": "OTHER", "parametricData": "x"}]}}
+    monkeypatch.setattr(a, "_mcp_call", lambda tool, args: payload)
+    assert a._fetch_physical("MMA044PP3") == {}
 
 
 # ---------------------------------------------------------------------------
