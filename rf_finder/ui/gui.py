@@ -249,7 +249,14 @@ class App:
         errors: list[str] = []
         for rec in self.field_widgets:
             field = rec["field"]
-            if rec["kind"] == "range" and field.comparison == "contains":
+            # A band-only 'contains' field (freq_range, Temperature) needs both
+            # bounds. VDD (single_value_ok) accepts one value OR a range, so a
+            # lone entry is fine there and must not be flagged.
+            if (
+                rec["kind"] == "range"
+                and field.comparison == "contains"
+                and not field.single_value_ok
+            ):
                 has_min = bool(rec["min"].get().strip())
                 has_max = bool(rec["max"].get().strip())
                 if has_min != has_max:

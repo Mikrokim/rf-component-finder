@@ -22,8 +22,9 @@ rows; the Verifier applies constraints.
 Qorvo cells are messier than the other sources, so ``_num`` is more defensive:
 it strips a leading ``>``/``<`` (``"> 40"`` → 40, a guaranteed value that is
 conservatively correct for min/max) and takes the first numeric token (so
-``"35 (S21)"``/``"18 Vdc"`` parse). ``VDD`` may list several supply options
-(``"3, 5, 8"``, ``"5/8"``) → stored as the ``(min, max)`` band.
+``"35 (S21)"``/``"18 Vdc"`` parse). ``VDD`` is parsed by the shared parser
+(``ontology.supply.parse_vdd``): discrete options (``"3, 5, 8"``, ``"5/8"``)
+become a ``list``, a single value or range becomes a ``(low, high)`` interval.
 
 Parameters not on the page (Size, MSL, Temperature) are left to the datasheet
 fallback — see t8-plan.md §6.
@@ -31,7 +32,6 @@ fallback — see t8-plan.md §6.
 
 from __future__ import annotations
 
-import logging
 import re
 
 from selectolax.parser import HTMLParser
@@ -39,8 +39,7 @@ from selectolax.parser import HTMLParser
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
-
-_log = logging.getLogger(__name__)
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -130,39 +129,14 @@ def _num(cell_text: str) -> float | None:
 
 
 def _vdd(cell_text: str) -> tuple[float, float] | list[float] | None:
-    """Parse a supply-voltage cell, else None.
+    """Parse a Qorvo supply-voltage cell via the shared VDD parser.
 
-    Two shapes, distinguished by the cell's syntax:
-
-    - a **continuous range** (``"2 to 4.5"`` → ``(2.0, 4.5)``) or a single value
-      (``"30"`` → ``(30.0, 30.0)``) is returned as a ``(low, high)`` tuple;
-    - **discrete supply options** delimited by ``,`` or ``/`` (``"3, 5, 8"`` →
-      ``[3.0, 5.0, 8.0]``, ``"5/8"`` → ``[5.0, 8.0]``) are returned as a ``list``.
-
-    The distinction matters for matching: a part offering 3/5/8 V does NOT
-    support 4 V, whereas a 2–4.5 V range does. A leading comparator is stripped
-    and a trailing unit ignored (``"18 Vdc"`` → ``(18.0, 18.0)``).
-
-    An unrecognised multi-value shape (2+ numbers, no ``to`` and no ``,``/``/``)
-    is logged and falls back to ``(min, max)`` — the pre-list behaviour, so a
-    novel format never crashes or silently misclassifies as a discrete list.
+    Delegates to :func:`rf_finder.ontology.supply.parse_vdd` so every adapter
+    normalises supply voltage identically: a single value or range becomes a
+    ``(low, high)`` interval, ``,``/``/``-separated options become a discrete
+    ``list``, and a negative/dual-rail or unrecognised cell becomes ``None``.
     """
-    t = (cell_text or "").strip()
-    if not t or t in _MISSING_SENTINELS:
-        return None
-    body = _LEADING_CMP.sub("", t)
-    nums = [float(x) for x in _NUM_RE.findall(body)]
-    if not nums:
-        return None
-    if len(nums) == 1:
-        return (nums[0], nums[0])
-    if "," in body or "/" in body:
-        # Discrete options — de-duplicate, ascending, for a stable value.
-        return sorted(set(nums))
-    if "to" in body.lower():
-        return (min(nums), max(nums))
-    _log.warning("Qorvo _vdd: unrecognised multi-value supply %r → range fallback", t)
-    return (min(nums), max(nums))
+    return parse_vdd(cell_text)
 
 
 # ---------------------------------------------------------------------------

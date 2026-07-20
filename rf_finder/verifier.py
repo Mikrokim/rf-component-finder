@@ -32,23 +32,39 @@ def _compare(constraint: ParamConstraint, raw: RawValue) -> str:
     canonical_unit = PARAMETERS[constraint.canonical_name].canonical_unit
 
     if constraint.comparison == "contains":
+        # The candidate's supply must COVER what the user asked for: a single
+        # requested voltage is the degenerate band (v, v), a requested range is
+        # (low, high). The candidate value's SHAPE (produced by each adapter's
+        # parser) decides how it is compared — one uniform rule, no per-site code.
         req_low, req_high = constraint.range  # type: ignore[misc]
         req_low_c = to_canonical(req_low, constraint.unit, canonical_unit)
         req_high_c = to_canonical(req_high, constraint.unit, canonical_unit)
+        req_is_single = math.isclose(req_low_c, req_high_c, rel_tol=1e-9, abs_tol=1e-9)
 
-        if isinstance(raw.value, list):
-            # Discrete supply options (e.g. VDD "3, 5, 8"): PASS when at least
-            # one supported value falls within the requested band — the part can
-            # be run at a supply that meets the request. Unlike a continuous
-            # range, an option strictly between two listed values does NOT count.
-            for opt in raw.value:
+        value = raw.value
+        if isinstance(value, (int, float)):
+            # Defensive: a bare scalar is a degenerate interval (v, v). Every
+            # adapter should emit a tuple/list, but this keeps a stray scalar
+            # from raising on unpack rather than failing the whole search.
+            value = (float(value), float(value))
+
+        if isinstance(value, list):
+            # Discrete, selectable supply options (e.g. VDD "3, 5, 8"). A part
+            # that only offers fixed voltages matches a SINGLE requested voltage
+            # that is one of those options; it cannot cover a requested RANGE
+            # (fixed points do not span a continuous band), so a range request
+            # never matches such a part.
+            if not req_is_single:
+                return "FAIL"
+            for opt in value:
                 opt_c = to_canonical(opt, raw.unit, canonical_unit)
-                if req_low_c <= opt_c <= req_high_c:
+                if math.isclose(opt_c, req_low_c, rel_tol=1e-9, abs_tol=1e-9):
                     return "PASS"
             return "FAIL"
 
-        # Continuous range candidate (low, high): must cover the whole band.
-        cand_low_raw, cand_high_raw = raw.value  # type: ignore[misc]
+        # Continuous candidate band (low, high): must cover the whole requested
+        # value/range.
+        cand_low_raw, cand_high_raw = value  # type: ignore[misc]
         cand_low = to_canonical(cand_low_raw, raw.unit, canonical_unit)
         cand_high = to_canonical(cand_high_raw, raw.unit, canonical_unit)
 

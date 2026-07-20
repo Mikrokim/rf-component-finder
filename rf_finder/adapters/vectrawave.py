@@ -14,6 +14,11 @@ labels are mapped to the ontology by row label.
 Parameters not on the page (Temperature, Size) and ones VectraWave never
 publishes (IP3, MSL) are left to the datasheet fallback / stay UNKNOWN. See
 specs/.../adapters/vectrawave/t8-plan.md.
+
+Result URL: each part number on the page links to its own product page
+(``/product/<pn>``); that link is read from the header-cell ``<a href>`` and
+used as ``Candidate.url`` (for human-reporter display only). The Datasheet row's
+PDF link is deliberately NOT used as the URL.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from selectolax.parser import HTMLParser
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -94,20 +100,16 @@ def _num(text: str) -> float | None:
     return float(m.group()) if m else None
 
 
-def _vdd(text: str) -> tuple[float, float] | None:
-    """Supply voltage -> a ``(low, high)`` band, else None.
+def _vdd(text: str) -> tuple[float, float] | list[float] | None:
+    """Parse a VectraWave supply-voltage cell via the shared VDD parser.
 
-    A single value -> ``(v, v)``; a dual/multi-rail supply such as ``"+3/-3"``
-    yields ``(min, max)`` of all listed values (``(-3.0, 3.0)``), which behaves
-    correctly under the ontology's ``contains`` rule.
+    Delegates to :func:`rf_finder.ontology.supply.parse_vdd`: a single value
+    ("+8") or range becomes a ``(low, high)`` interval, discrete options become
+    a ``list``, and a negative/dual-rail cell ("+3/-3", "-7.5") becomes ``None``
+    (VDD left UNKNOWN) — those rails belong to control parts, not the amplifier
+    drain supply this project matches.
     """
-    t = (text or "").strip()
-    if not t or t in _MISSING_SENTINELS:
-        return None
-    nums = [float(x) for x in _NUM_RE.findall(t)]
-    if not nums:
-        return None
-    return (min(nums), max(nums))
+    return parse_vdd(text)
 
 
 def _is_amplifier_section(heading: str) -> bool:
@@ -188,36 +190,40 @@ class VectraWaveAdapter(Adapter):
         row_texts = [[c.text(strip=True) for c in cells] for cells in rows]
 
         # Product-header row: first cell empty, remaining cells are part numbers.
+        # Each part-number cell is an <a href="/product/<pn>"> to that part's own
+        # product page — capture the cells too so we can read those links.
         products: list[str] = []
-        for texts in row_texts:
+        product_cells: list = []
+        for cells, texts in zip(rows, row_texts):
             if texts and not texts[0] and any(texts[1:]):
                 products = texts
+                product_cells = cells
                 break
         if not products:
             return []
 
         n_cols = len(products)
         raw_params: dict[int, dict[str, RawValue]] = {i: {} for i in range(1, n_cols)}
-        urls: dict[int, str] = {i: "" for i in range(1, n_cols)}
         freq_low: dict[int, float] = {}
         freq_high: dict[int, float] = {}
 
-        for cells, texts in zip(rows, row_texts):
+        # Result link = the part's own product page (…/product/<pn>), read from
+        # the <a href> on its header cell.  Fall back to the catalogue page for a
+        # part that carries no link.  The Datasheet-row PDF link is NOT used.
+        urls: dict[int, str] = {i: "" for i in range(1, n_cols)}
+        for i in range(1, min(n_cols, len(product_cells))):
+            a = product_cells[i].css_first("a")
+            if a is not None:
+                urls[i] = self._abs_url(a.attributes.get("href", ""))
+
+        for texts in row_texts:
             if not texts or not texts[0]:
                 continue  # repeated product-header / spacer row
             key = _normalize(texts[0])
 
-            # Datasheet row: each product cell holds an <a href> to its PDF.
-            if key == "datasheet":
-                for i in range(1, min(n_cols, len(cells))):
-                    a = cells[i].css_first("a")
-                    if a is not None:
-                        urls[i] = self._abs_url(a.attributes.get("href", ""))
-                continue
-
             mapped = ROW_MAP.get(key)
             if mapped is None:
-                continue  # unmapped label (technology, pae, controlvoltage, ...)
+                continue  # unmapped label (technology, pae, datasheet, controlvoltage, ...)
             canonical, unit = mapped
 
             for i in range(1, min(n_cols, len(texts))):

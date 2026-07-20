@@ -27,6 +27,7 @@ from selectolax.parser import HTMLParser
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -77,17 +78,6 @@ def _num(cell_text: str) -> float | None:
         return float(t)
     except ValueError:
         return None
-
-
-def _range(cell_text: str) -> tuple[float, float] | None:
-    """Parse a ``"low-high"`` string into a (low, high) tuple, else None."""
-    parts = (cell_text or "").split("-")
-    if len(parts) != 2:
-        return None
-    low, high = _num(parts[0]), _num(parts[1])
-    if low is None or high is None:
-        return None
-    return (low, high)
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +183,9 @@ class GuerrillaRFAdapter(Adapter):
             if f_low is not None and f_high is not None:
                 raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="GHz")
 
-            # VDD: "low-high" range string
-            vdd = _range(_cell("vdd range v"))
+            # VDD: parsed by the shared parser (single value, "low-high" range,
+            # or discrete options -> normalized interval/list; else UNKNOWN).
+            vdd = parse_vdd(_cell("vdd range v"))
             if vdd is not None:
                 raw_params["VDD"] = RawValue(value=vdd, unit="V")
 

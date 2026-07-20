@@ -188,14 +188,19 @@ class TestContainsDiscreteList:
         cand = _make_candidate({"VDD": RawValue([3.0, 5.0, 8.0], "V")})
         assert verify(spec, cand).verdicts[0].status == "FAIL"
 
-    def test_requested_band_covers_an_option(self):
-        """A request band 4–6 V catches the 5 V option → PASS."""
+    def test_requested_band_against_discrete_is_not_relevant(self):
+        """A RANGE request (4–6 V) against a discrete supply {3, 5, 8} → FAIL.
+
+        Fixed selectable voltages cannot cover a continuous requested band, so a
+        range query never matches a discrete-list part (even though 5 V is one
+        of the options — that only matters for a single-value request).
+        """
         spec = _make_spec(_range_constraint("VDD", 4.0, 6.0, "V"))
         cand = _make_candidate({"VDD": RawValue([3.0, 5.0, 8.0], "V")})
-        assert verify(spec, cand).verdicts[0].status == "PASS"
+        assert verify(spec, cand).verdicts[0].status == "FAIL"
 
     def test_requested_band_misses_every_option(self):
-        """A request band 9–10 V catches none of {3, 5, 8} → FAIL."""
+        """A request band 9–10 V against {3, 5, 8} → FAIL (a range, discrete part)."""
         spec = _make_spec(_range_constraint("VDD", 9.0, 10.0, "V"))
         cand = _make_candidate({"VDD": RawValue([3.0, 5.0, 8.0], "V")})
         assert verify(spec, cand).verdicts[0].status == "FAIL"

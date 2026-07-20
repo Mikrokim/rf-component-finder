@@ -22,6 +22,7 @@ from selectolax.parser import HTMLParser
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -208,12 +209,11 @@ class MiniCircuitsAdapter(Adapter):
             if f_low is not None and f_high is not None:
                 raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="MHz")
 
-            # VDD: the Voltage column holds a single value; store it as a
-            # degenerate (v, v) range so VDD is a range everywhere (Analog
-            # Devices supplies a real min/max) and compares via "contains".
-            v = _parse_float(_cell_val("voltage v"))
-            if v is not None:
-                raw_params["VDD"] = RawValue(value=(v, v), unit="V")
+            # VDD: the Voltage column holds a single value; the shared parser
+            # normalises it to a degenerate (v, v) interval for the contains rule.
+            vdd = parse_vdd(_cell_val("voltage v"))
+            if vdd is not None:
+                raw_params["VDD"] = RawValue(value=vdd, unit="V")
 
             # Scalar params from COLUMN_MAP
             for norm_key, (canonical, unit) in COLUMN_MAP.items():
