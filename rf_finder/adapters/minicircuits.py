@@ -9,14 +9,21 @@ filtering is client-side only.  This adapter returns ALL rows; the Verifier
 applies all constraints (REQ-4.1).
 
 robots.txt note: /WebStore/Amplifiers.html is allowed.  /WebStore/modelSearch.html
-is disallowed, so that URL is populated in Candidate.url for human reporter use
-only — it is never fetched programmatically.
+is DISALLOWED and is therefore not used at all: Candidate.url is the allowed
+per-model product page /WebStore/dashboard.html?model=<urlencoded> (sitemap-listed),
+which is also where the datasheet link lives.
+
+Datasheet link (case 2): the amplifiers table carries no datasheet link, so
+``search()`` leaves ``datasheet_url`` as None and ``resolve_datasheet_url``
+fetches the product page on demand — after Gate 1, for the handful of candidates
+about to be enriched, rather than once per catalogue row.
 """
 
 from __future__ import annotations
 
 import re
 import time
+import urllib.parse
 
 import httpx
 from selectolax.parser import HTMLParser
@@ -42,6 +49,15 @@ _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A"})
 
 # Minimum seconds between consecutive live HTTP fetches
 _MIN_DELAY_SECONDS = 1.0
+
+# The per-model product page: robots-allowed, sitemap-listed, and the only place
+# the datasheet link is published.  The model MUST be fully percent-encoded — a
+# literal "+" (which most Mini-Circuits models end with) yields HTTP 200 with no
+# datasheet link at all, a silent failure.
+_PRODUCT_PAGE = _BASE_URL + "dashboard.html?model={model}"
+
+# The product page's datasheet anchor is identified by its link text.
+_DATASHEET_LINK_TEXT = "datasheet"
 
 # ---------------------------------------------------------------------------
 # Column mapping: normalised header text -> (canonical_name, unit | None)
@@ -70,6 +86,16 @@ def _normalize_header(raw: str) -> str:
     text = raw.lower()
     text = re.sub(r"[().,:/\\]", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _product_url(model: str) -> str:
+    """The robots-allowed product page for *model*, fully percent-encoded.
+
+    ``safe=""`` is essential: nearly every Mini-Circuits model ends in "+", and
+    the un-encoded form returns a 200 page carrying NO datasheet link — the
+    failure is silent, so the encoding is not cosmetic.
+    """
+    return _PRODUCT_PAGE.format(model=urllib.parse.quote(model, safe=""))
 
 
 def _parse_float(cell_text: str) -> float | None:
@@ -114,14 +140,48 @@ class MiniCircuitsAdapter(Adapter):
         No server-side filtering is applied — the Mini-Circuits server ignores
         the freq filter form fields.  The Verifier applies all constraints.
         """
-        # Enforce minimum inter-request delay
+        return drop_paramless(self._parse_html(self._get(_AMPLIFIERS_URL)))
+
+    def resolve_datasheet_url(self, cand: Candidate) -> str | None:
+        """Fetch the candidate's product page and return its datasheet PDF link.
+
+        Case 2: the amplifiers table has no datasheet link, so this is the only
+        way to obtain one — and it costs one request, which is why the pipeline
+        calls it after Gate 1 and only for candidates it is about to enrich.
+
+        Returns ``None`` (never raises) when the page cannot be fetched or
+        carries no datasheet anchor, per the ``Adapter`` contract.
+        """
+        page_url = cand.url or _product_url(cand.model)
+        try:
+            html = self._get(page_url)
+        except AdapterError:
+            return None
+
+        for a_tag in HTMLParser(html).css("a"):
+            if a_tag.text(strip=True).strip().lower() != _DATASHEET_LINK_TEXT:
+                continue
+            href = a_tag.attributes.get("href") or ""
+            if href:
+                # The datasheet href is ROOT-relative ("/pdfs/<model>.pdf"), so it
+                # must be joined against the host — joining it onto _BASE_URL
+                # would yield /WebStore/pdfs/... and 404.
+                return urllib.parse.urljoin(page_url, href)
+        return None
+
+    # ------------------------------------------------------------------
+    # Internal fetch (rate-limited; shared by search and link resolution)
+    # ------------------------------------------------------------------
+
+    def _get(self, url: str) -> str:
+        """GET *url* behind the politeness guard; raise AdapterError on failure."""
         elapsed = time.time() - self._last_fetch_time
         if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
             time.sleep(_MIN_DELAY_SECONDS - elapsed)
 
         try:
             response = httpx.get(
-                _AMPLIFIERS_URL,
+                url,
                 headers={
                     "User-Agent": _USER_AGENT,
                     "Accept": (
@@ -138,11 +198,11 @@ class MiniCircuitsAdapter(Adapter):
         except httpx.HTTPError as exc:
             raise AdapterError(
                 manufacturer=self.manufacturer,
-                context=f"HTTP error fetching {_AMPLIFIERS_URL}",
+                context=f"HTTP error fetching {url}",
                 cause=exc,
             ) from exc
 
-        return drop_paramless(self._parse_html(response.text))
+        return response.text
 
     # ------------------------------------------------------------------
     # Internal parse method (exposed for tests to call directly)
@@ -205,19 +265,15 @@ class MiniCircuitsAdapter(Adapter):
             first_td = cells[0]
             a_tag = first_td.css_first("a")
             model_name = a_tag.text(strip=True) if a_tag else cell_texts[0]
-            model_href = a_tag.attributes.get("href", "") if a_tag else ""
 
             if not model_name:
                 continue
 
-            # Product URL -- populated for reporter display only; never fetched
-            if model_href:
-                if model_href.startswith("http"):
-                    url = model_href
-                else:
-                    url = _BASE_URL + model_href.lstrip("/")
-            else:
-                url = _BASE_URL + f"modelSearch.html?model={model_name}"
+            # Product URL: the row's own <a href> is modelSearch.html, which
+            # robots DISALLOWS, so it is ignored entirely.  dashboard.html is the
+            # allowed product page — the one a user should land on, and the one
+            # resolve_datasheet_url reads the datasheet link from.
+            url = _product_url(model_name)
 
             # ---- Build raw_params ----------------------------------------
             raw_params: dict[str, RawValue] = {}

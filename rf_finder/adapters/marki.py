@@ -37,12 +37,16 @@ fetched each product page for these three params; that pass was removed in favou
 of table-only extraction.)
 
 MSL is likewise always UNKNOWN — it is not present anywhere in the site HTML as of
-June 2026, only in datasheet PDFs / compliance docs, which are NOT fetched
-programmatically.  Flag parts for manual datasheet review if the Verifier requires
-MSL / Size / VDD / Temperature.
+June 2026, only in datasheet PDFs.
 
-robots.txt: /search/ is allowed; product pages and datasheet PDFs are not fetched
-at all.  Compliance: browser User-Agent + a minimum delay between live fetches.
+Datasheet link (case 2): the search table's Datasheet column links to a landing
+PAGE, not a PDF, so ``search()`` carries that page URL in ``datasheet_url`` and
+``resolve_datasheet_url`` follows it — on demand, per candidate — to the real
+``/assets/{uuid}/….pdf``.  This adapter therefore now DOES fetch beyond /search/
+(one page per candidate about to be enriched); robots.txt allows both hops.
+
+robots.txt: /search/, the per-part /…/datasheet/ pages and /assets/*.pdf are all
+allowed (the file is a deny-list of named bad bots; ``*`` is unrestricted).  Compliance: browser User-Agent + a minimum delay between live fetches.
 Cloudflare: a browser-style User-Agent avoids the challenge for these URLs; if a
 large ``item_per_page`` is challenged, the fetch falls back to 50-per-page paging.
 """
@@ -51,6 +55,7 @@ from __future__ import annotations
 
 import re
 import time
+from urllib.parse import urljoin
 
 import httpx
 from selectolax.parser import HTMLParser
@@ -93,6 +98,15 @@ _MAX_PAGES = 50  # safety bound for the paging loop
 # (GHz) and handled separately.  Headers not listed here — part number, BUY NOW,
 # Subfamily, Datasheet, SnP, Package Type, Status — are ignored.
 # ---------------------------------------------------------------------------
+
+# The normalised header of the column carrying the per-part datasheet LANDING
+# PAGE (not the PDF), and the exact link text of the PDF on that page.  The page
+# also carries two site-wide "Online Catalog" PDFs — real, parseable PDFs — so
+# matching anything looser than this text would hand the extractor a catalogue
+# and, because that counts as "datasheet read", DROP the part instead of
+# reporting it not-verified.
+_DATASHEET_COLUMN = "datasheet"
+_DATASHEET_LINK_TEXT = "download pdf"
 
 SCALAR_COLUMN_MAP: dict[str, tuple[str, str]] = {
     "gain db":  ("Gain", "dB"),
@@ -148,6 +162,25 @@ def _header_names(table) -> list[str]:
     return [_normalize_header(th.text(strip=True)) for th in header_rows[-1].css("th")]
 
 
+def _row_datasheet_page(cells, data_headers: list[str]) -> str | None:
+    """The href of the row's ``Datasheet`` column, absolutized — or ``None``.
+
+    This is a landing PAGE (``/products/{package}/amplifiers/{model}/datasheet/``),
+    NOT the PDF; ``resolve_datasheet_url`` follows it.  It is READ from the column
+    rather than derived from the product URL: the two coincide on every live row
+    today, but a constructed URL is exactly how the Mini-Circuits datasheet lookup
+    failed silently.
+    """
+    for i, cell in enumerate(cells):
+        if i >= len(data_headers) or data_headers[i] != _DATASHEET_COLUMN:
+            continue
+        a_tag = cell.css_first("a")
+        href = (a_tag.attributes.get("href") or "") if a_tag is not None else ""
+        if href:
+            return urljoin(_BASE_URL, href)
+    return None
+
+
 def _row_model_and_url(row) -> tuple[str, str] | None:
     """Extract (model, product_url) from a row's leading ``<th><a>``; None if absent."""
     a_tag = row.css_first("th a")
@@ -193,6 +226,34 @@ class MarkiMicrowaveAdapter(Adapter):
         applied; the Verifier applies all constraints.
         """
         return self._fetch_search_candidates()
+
+    def resolve_datasheet_url(self, cand: Candidate) -> str | None:
+        """Follow the row's datasheet landing page and return the real PDF link.
+
+        Case 2: the table's Datasheet column links to an HTML page, and the PDF
+        lives on it under an ``/assets/{uuid}/`` path that cannot be constructed
+        from the model — so one request per candidate is unavoidable.  The
+        pipeline only calls this for candidates it is about to enrich.
+
+        Returns ``None`` on any failure, and NEVER falls back to
+        ``cand.datasheet_url`` (the base-class default does): that value is an
+        HTML page, which the caller would then try to parse as a PDF.
+        """
+        page_url = cand.datasheet_url
+        if not page_url:
+            return None
+        try:
+            html = self._request(page_url).text
+        except AdapterError:
+            return None
+
+        for a_tag in HTMLParser(html).css("a"):
+            if a_tag.text(strip=True).lower() != _DATASHEET_LINK_TEXT:
+                continue
+            href = a_tag.attributes.get("href") or ""
+            if href:
+                return urljoin(page_url, href)
+        return None
 
     # ------------------------------------------------------------------
     # Fetch + parse the search table
@@ -270,7 +331,8 @@ class MarkiMicrowaveAdapter(Adapter):
                 continue
             model, url = model_url
 
-            raw_params = self._row_params(row.css("td"), data_headers)
+            cells = row.css("td")
+            raw_params = self._row_params(cells, data_headers)
             candidates.append(
                 Candidate(
                     model=model,
@@ -278,6 +340,9 @@ class MarkiMicrowaveAdapter(Adapter):
                     url=url,
                     raw_params=raw_params,
                     source="table",
+                    # NOT the PDF: the Datasheet column links to a landing PAGE.
+                    # resolve_datasheet_url turns it into the real PDF on demand.
+                    datasheet_url=_row_datasheet_page(cells, data_headers),
                 )
             )
 

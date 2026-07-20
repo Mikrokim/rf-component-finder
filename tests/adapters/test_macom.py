@@ -153,3 +153,26 @@ def test_search_live():
     results = MacomAdapter().search(spec)
     assert len(results) > 500
     assert all(c.manufacturer == "MACOM" for c in results)
+
+
+# ---------------------------------------------------------------------------
+# Datasheet link (case 1: already in the fetched data-part JSON)
+# ---------------------------------------------------------------------------
+
+def test_datasheet_url_comes_from_the_data_part_blob() -> None:
+    """The link is absolute on cdn.macom.com — no extra request, no absolutize."""
+    cand = _by_model("MAAL-011182")
+    assert cand.datasheet_url == "https://cdn.macom.com/datasheets/MAAL-011182.pdf"
+
+
+def test_every_fixture_part_carries_its_own_datasheet() -> None:
+    for cand in _load_candidates():
+        assert cand.datasheet_url, f"{cand.model} lost its datasheet link"
+        assert cand.datasheet_url.startswith("https://")
+
+
+def test_part_without_datasheet_href_stays_none() -> None:
+    """~2% of live parts omit the field; those genuinely have no datasheet."""
+    cand = MacomAdapter()._build_candidate({"partNumber": "NO-DS-PART", "specs": []})
+    assert cand is not None
+    assert cand.datasheet_url is None

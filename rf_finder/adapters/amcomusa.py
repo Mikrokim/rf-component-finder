@@ -140,6 +140,27 @@ def _freq_role_and_unit(norm_header: str) -> tuple[str, str] | None:
     return role, unit
 
 
+def _row_datasheet_url(cells) -> str | None:
+    """The row's datasheet PDF link — its LAST cell holding an ``<a>`` to a PDF.
+
+    The link is already in this response (case 1), on an absolute CloudFront URL
+    (``http://d2f6h2rm95zg9t.cloudfront.net/…/AM001019SF_1H_….pdf``), so it costs
+    no extra request and needs no absolutizing.
+
+    It is found by SCANNING for the last ``.pdf`` anchor rather than by a fixed
+    column index: the column set differs per category, and the datasheet column
+    has an EMPTY header — which is exactly why the parse loop skips it (a blank
+    ``col_names`` entry).  Returns ``None`` when the row publishes no datasheet.
+    """
+    found: str | None = None
+    for cell in cells:
+        for a_tag in cell.css("a"):
+            href = (a_tag.attributes.get("href") or "").strip()
+            if href.lower().split("?")[0].endswith(".pdf"):
+                found = href
+    return found
+
+
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
@@ -355,6 +376,7 @@ class AmcomUSAAdapter(Adapter):
                     model=model_name,
                     manufacturer=self.manufacturer,
                     url=url,
+                    datasheet_url=_row_datasheet_url(cells),
                     raw_params=raw_params,
                     source="table",
                 )

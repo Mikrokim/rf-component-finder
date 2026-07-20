@@ -41,9 +41,15 @@ verification fails (verified live — a control fetch of another vendor succeeds
 with verification on).  ``_VERIFY_TLS`` is therefore False for this host; flip it
 to True on a network that trusts the site's certificate.
 
-robots.txt note: ``Disallow:`` is empty (everything allowed).  The datasheet PDF
-URL is populated in ``Candidate.url`` for human-reporter use only — it is never
-fetched programmatically.
+robots.txt note: ``Disallow:`` is empty (everything allowed), including the
+datasheet PDF path.
+
+Datasheet link (case 1): every product's ``Datasheet`` field carries an absolute
+PDF URL in the same JSON response, so ``search()`` fills ``datasheet_url``
+directly — no extra request.  ``Candidate.url`` is the catalogue page filtered to
+the product's category (``product.html?category=<id>``): rwmmic publishes no
+per-part page at all, since ``product.html`` is an SPA whose only deep links are
+per-category.
 """
 
 from __future__ import annotations
@@ -239,12 +245,15 @@ class RwmmicAdapter(Adapter):
             if _AMPLIFIER_KEYWORD not in name.lower():
                 continue  # skip switches, mixers, attenuators, filters, …
 
+            category_id = category.get("id")
             for product in group.get("products") or []:
-                candidates.extend(self._product_to_candidates(product))
+                candidates.extend(self._product_to_candidates(product, category_id))
 
         return candidates
 
-    def _product_to_candidates(self, product: dict) -> list[Candidate]:
+    def _product_to_candidates(
+        self, product: dict, category_id: object = None
+    ) -> list[Candidate]:
         """Convert one product record into one Candidate PER operating point.
 
         Some parts are characterised at several coupled operating points (bias
@@ -277,8 +286,16 @@ class RwmmicAdapter(Adapter):
         if not model_name:
             return []
 
-        # Product URL — the datasheet link, for reporter display only (never fetched).
-        url = values.get("datasheet", "").strip() or (_BASE_URL + "product.html")
+        # Datasheet: the API publishes an absolute PDF link per product (case 1),
+        # so it needs no extra request and no absolutizing.
+        datasheet_url = values.get("datasheet", "").strip() or None
+
+        # Product URL: rwmmic has NO per-part page — product.html is an SPA whose
+        # only deep links are per-category — so the closest thing to a product
+        # page is the catalogue filtered to this product's category.
+        url = _BASE_URL + "product.html"
+        if category_id is not None:
+            url = f"{url}?category={category_id}"
 
         # ---- Gather the per-field value lists (split coupled "/" values) -----
         # Each entry: (canonical_name, unit, [value, ...]).  Frequency bounds are
@@ -343,6 +360,7 @@ class RwmmicAdapter(Adapter):
                     url=url,
                     raw_params=raw_params,
                     source="table",
+                    datasheet_url=datasheet_url,
                 )
             )
 

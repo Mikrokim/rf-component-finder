@@ -150,10 +150,19 @@ def test_mismatched_value_counts_fall_back_safely():
     assert "P1dB" not in cands[0].raw_params
 
 
-def test_url_is_datasheet_link():
+def test_datasheet_url_is_the_absolute_pdf_link():
+    """Case 1: the API's own link, carried as-is — no extra request, no absolutize."""
     c = _by_model("RWLA1001")
-    assert c.url.endswith("RWLA1001.pdf")
-    assert "rwmmic.com" in c.url
+    assert c.datasheet_url is not None
+    assert c.datasheet_url.startswith("https://")
+    assert c.datasheet_url.endswith("RWLA1001.pdf")
+
+
+def test_url_is_the_category_page_not_the_pdf():
+    """rwmmic has no per-part page, so url is the catalogue filtered by category."""
+    c = _by_model("RWLA1001")
+    assert c.url.endswith("product.html?category=67")
+    assert ".pdf" not in c.url
 
 
 def test_bad_json_raises_adaptererror():

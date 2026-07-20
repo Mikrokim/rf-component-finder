@@ -34,10 +34,13 @@ outcome.
 from __future__ import annotations
 
 import dataclasses
+import logging
 
 from rf_finder.models import Candidate, QuerySpec, VerifiedCandidate
 from rf_finder.search import _sources_for
 from rf_finder.verifier import verify
+
+_log = logging.getLogger(__name__)
 
 # D8: a not-verified candidate is shown only when at least this share of the
 # user's requested parameters verify as PASS.
@@ -56,7 +59,16 @@ def run_pipeline(spec: QuerySpec, *, on_source=None) -> list[VerifiedCandidate]:
     """
     results: list[VerifiedCandidate] = []
     for adapter, cand in _retrieve(spec, on_source):
-        graded = _grade(spec, adapter, cand)
+        try:
+            graded = _grade(spec, adapter, cand)
+        except Exception:
+            # D6: one candidate must never abort the run. Retrieval, resolution
+            # and enrichment are each contained on their own; this guard covers
+            # the grading itself — verify() can raise on a value/unit pair the
+            # ontology cannot convert, and that is one candidate's problem.
+            _log.warning("skipping %s (%s): grading raised", cand.model, cand.manufacturer,
+                         exc_info=True)
+            continue
         if graded is not None:
             results.append(graded)
 

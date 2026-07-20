@@ -41,6 +41,20 @@ One request returns the entire category (all 1017 amplifiers, ~6.3 MB).
 
 ---
 
+## 1b. Datasheet link — where it lives (verified live 2026-07-20)
+
+**Case 1 — the link is in the `data-part` JSON `search()` already parses.**
+
+Each `data-part` blob carries `datasheetHref`: live **990/1014 parts (97%)**, all absolute on
+`cdn.macom.com` (e.g. `https://cdn.macom.com/datasheets/MRF454.pdf`); `HEAD` → 200
+`application/pdf`. No extra request, no absolutize.
+
+- Currently discarded — `_build_candidate` reads only `partNumber`/`specs`/`partUrl`.
+- www robots is `Allow: /`; `cdn.macom.com` robots permits the datasheet path.
+- The ~3% without the field legitimately get `datasheet_url = None`.
+
+---
+
 ## 2. How macom.com serves product data (investigation findings)
 
 These were established by live inspection of the site (REQ-3.3 decision rule:

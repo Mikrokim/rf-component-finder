@@ -80,10 +80,27 @@ def test_no_ip3_msl_size_temp_from_table() -> None:
             assert absent not in c.raw_params
 
 
-def test_url_is_datasheet_pdf() -> None:
-    assert _by("VM042D").url == (
+def test_datasheet_url_is_the_absolutized_pdf() -> None:
+    """Case 1: the row's own href, absolutized — the site publishes it relative."""
+    assert _by("VM042D").datasheet_url == (
         "https://vectrawave.com/wp-content/uploads/2025/02/VM042D-DS-Rev3.0-Ed1.1.pdf"
     )
+
+
+def test_url_is_the_catalogue_page_not_the_pdf() -> None:
+    c = _by("VM042D")
+    assert c.url == "https://vectrawave.com/search-engine-mmic"
+    assert ".pdf" not in c.url
+
+
+def test_empty_href_datasheet_becomes_none() -> None:
+    """A third of the live parts render ``<a href="">Download</a>``.
+
+    The anchor exists, so its presence proves nothing; the value must be None —
+    not "" and certainly not the site root — or the pipeline would try to parse
+    a link-shaped non-link as a PDF.
+    """
+    assert _by("VM101D").datasheet_url is None
 
 
 def test_missing_modules_raises_adaptererror() -> None:

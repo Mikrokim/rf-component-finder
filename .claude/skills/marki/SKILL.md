@@ -46,6 +46,31 @@ align to `headers[1:]`, not `headers` — an off-by-one if mapped naively.
 
 ---
 
+## 1b. Datasheet link — where it lives (verified live 2026-07-20)
+
+**Case 2 — the `Datasheet` column links to an HTML page, not a PDF.**
+
+All **123/123** amplifier rows carry an `<a href>` in the `Datasheet` column, but it is a
+RELATIVE link to a landing page: `/products/{package}/amplifiers/{model}/datasheet/` →
+`200 text/html`. Feeding it to `datasheet_text_from_url` fails the `%PDF` guard.
+
+The real PDF sits on that page as `https://markimicrowave.com/assets/{uuid}/{MODEL}-….pdf`
+— the `{uuid}` makes it **NOT constructable**, so the hop is mandatory.
+
+- **Selector: the `<a>` whose text is `Download PDF`.** Never "the first `.pdf` href" —
+  every page also carries two `Online Catalog` links (`MM_Catalog_*.pdf`). Those are valid
+  PDFs, so grabbing one would count as "datasheet read" and **drop** the part instead of
+  leaving it `not-verified`.
+- Read the first-hop URL from the `Datasheet` column; do NOT build it from `Candidate.url`
+  (they match on 123/123 rows today, but a constructed URL is the Mini-Circuits failure mode).
+- Verified end-to-end: ADM-11425PSM `%PDF-1.4`, 1.4 MB, 9916 chars; AMM-11561CH 13516;
+  AMM-11059CH 12819; AMM-10861PSM 10537.
+- **Compliance:** robots ALLOWS both hops (`/…/datasheet/` and `/assets/*.pdf`; the file is
+  a deny-list of named bad bots, `*` unrestricted). §3's "datasheet PDFs are not fetched at
+  all" describes the table-only adapter's SCOPE — the orchestration pipeline does fetch them.
+
+---
+
 ## 2. How markimicrowave.com serves product data (investigation findings)
 
 REQ-3.3 decision rule (*official API → parametric URL → scrape*):

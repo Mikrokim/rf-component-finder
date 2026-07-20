@@ -41,6 +41,17 @@ _CAT_ID = 3003
 _DATA_URL = f"https://www.analog.com/cdp/pst2/data/standard/{_CAT_ID}.js"
 _PRODUCT_URL = "https://www.analog.com/en/products/{model}.html"
 
+# Datasheet: ADI's parametric feed carries NO document link of any kind (scanned
+# live: zero occurrences of ".pdf", "datasheet" or "/media/"; its only keys are
+# categoryId/data/description/displayValue/generic/value).  But the site serves
+# every part's datasheet from a per-model path, so the link is derivable from the
+# part number the feed already gives us — case 1 in effect: no extra request.
+# Verified in a browser for ADL6346B and HMC1131 (two different families, the
+# second a legacy Hittite part): both open the PDF.  robots.txt (reachable only
+# at https://www.analog.com/cdp/robots.txt from behind a filtering proxy) allows
+# both this path and /media/en/technical-documentation/data-sheets/.
+_DATASHEET_URL = "https://www.analog.com/en/{model}/datasheet"
+
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -213,6 +224,7 @@ class AnalogDevicesAdapter(Adapter):
                     url=_PRODUCT_URL.format(model=str(model).lower()),
                     raw_params=raw_params,
                     source="table",
+                    datasheet_url=_DATASHEET_URL.format(model=str(model)),
                 )
             )
 

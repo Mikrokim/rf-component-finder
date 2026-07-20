@@ -36,6 +36,36 @@ applies all constraints.
 
 ---
 
+## 1b. Datasheet link — where it lives (verified live 2026-07-20)
+
+**Case 2 — the link is NOT on the page `search()` scrapes.**
+
+`Amplifiers.html` carries no datasheet link at all. The table's `<a href>` is
+`modelSearch.html?model=X`, which **robots DISALLOWS**. The allowed product page is
+`dashboard.html?model=<urlencoded>` (sitemap-listed); it carries an `<a>` whose text is
+`DATASHEET`. `/pdfs/` is robots-allowed.
+
+- **`+` MUST be percent-encoded `%2B`** — the un-encoded form returns **200 with no
+  datasheet link at all**, a silent failure. `urllib.parse.quote(model, safe="")`.
+- Do NOT derive the PDF path from the model: measured 37/40, and it 404s systematically
+  in the ZFL/ZHL/ZVA families where suffix variants share a base datasheet
+  (`ZHL-10M4G21W1X+` → `ZHL-10M4G21W1+.pdf`). The product page is authoritative.
+- **The datasheet href is ROOT-relative** — `/pdfs/<model>.pdf`, not
+  `WebStore/pdfs/...`. Join it against the HOST (`urljoin(page_url, href)`); joining it
+  onto `_BASE_URL` yields `/WebStore/pdfs/...` and a 404. Caught live: the first
+  implementation did exactly that.
+- **The product page carries ~25 other PDFs** — app notes (`/app/AN…`), case styles,
+  PCNs, S-parameter files, the patent guide. They are all valid PDFs, so picking "the
+  first `.pdf`" would look successful and silently feed the extractor the wrong document.
+  Match the anchor whose text is exactly `DATASHEET`.
+- Implementation (`resolve_datasheet_url`, fetched on demand after Gate 1 — never per
+  catalogue row from `search()`): verified live — `ZHL-2-S+` → 4654 chars,
+  `ZX60-P33ULN+` → 5286 chars via `datasheet_text_from_url`.
+- **`Candidate.url` is now `dashboard.html?model=<urlencoded>`** (was the disallowed
+  `modelSearch.html`), which resolves OQ-2 in §7: the row's own `<a href>` is ignored.
+
+---
+
 ## 2. How minicircuits.com serves product data (investigation findings)
 
 REQ-3.3 decision rule (*official API → parametric URL → scrape*):

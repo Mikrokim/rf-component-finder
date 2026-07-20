@@ -45,6 +45,23 @@ all constraints.
 
 ---
 
+## 1b. Datasheet link — where it lives (verified live 2026-07-20)
+
+**Case 1 — the link is in the `?function=` page `search()` already fetches.**
+
+Each `tr.product-row` carries an `a.doc-link` whose href is an ABSOLUTE PDF on the same
+host: `https://www.ums-rf.com/wp-content/uploads/YYYY/MM/{MODEL}-Full-….pdf` — same HTML
+response as the row's params, no extra request. Currently NOT parsed (`_build_candidate`
+reads `a.product-link` + `td.characteristic-cell` only).
+
+- Verified end-to-end: the project's `datasheet_text_from_url` fetched+parsed CHA1008-99F
+  (1390 chars). robots ALLOWS it (only `/wp-admin/` disallowed).
+- **Caveat:** one fetch transiently returned `text/html` instead of the PDF (rate-limit or
+  hiccup); a retry succeeded. `datasheet_text_from_url` has no retry, so a transient miss
+  leaves that candidate unenriched (graceful → `not-verified`). Consider adding a retry.
+
+---
+
 ## 2. How ums-rf.com serves product data (investigation findings)
 
 REQ-3.3 decision rule (*official API → parametric URL → scrape*):

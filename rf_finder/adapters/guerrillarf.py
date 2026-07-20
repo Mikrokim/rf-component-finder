@@ -38,6 +38,10 @@ _DETAIL_URL = "https://www.guerrilla-rf.com/products/detail/sku/{model}"
 
 _TABLE_IDS = ("genericAmpFunctionTbl", "satPATbl")
 
+# The datasheet PDF is served directly from this path; the same page also links
+# it through /products/DataSheet?… , which returns HTML (see _datasheet_href).
+_DIRECT_PDF_DIR = "/includes/prodFiles/"
+
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -69,6 +73,36 @@ _SPECIAL = frozenset({"model", "freq_low", "freq_high", "VDD"})
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _datasheet_href(html: str, model: str) -> str | None:
+    """The detail page's MAIN datasheet PDF for *model* — or ``None``.
+
+    The page offers several PDFs and three of the four decoys are traps:
+
+    * ``/products/DataSheet?sku=…&file_name={MODEL}DS.pdf`` — a viewer page that
+      returns **text/html** while its URL still ends in ``DS.pdf``.  Matching on
+      the filename alone would take it, and ``datasheet_text_from_url`` would then
+      fail the ``%PDF`` guard — a silent loss.
+    * per-frequency "CustomTunes" variants (``GRF2003 1000-5000 MHz.pdf``) live in
+      the **same** ``/includes/prodFiles/{sku}/`` directory as the datasheet, so
+      the directory does not identify it either.
+    * application notes under ``/includes/prodFiles/AppNotes/`` — real PDFs, so
+      picking one would count as "datasheet read" and DROP the candidate.
+
+    The anchor text does not separate them either: both the direct link and the
+    HTML wrapper are labelled "Data Sheet".  What does separate them is the
+    filename being exactly ``{MODEL}DS.pdf`` under the direct ``/includes/``
+    path — anchored on the model we already hold.
+    """
+    wanted = f"{model.lower()}ds.pdf"
+    for a_tag in HTMLParser(html).css("a"):
+        href = (a_tag.attributes.get("href") or "").strip()
+        if _DIRECT_PDF_DIR not in href:
+            continue
+        if href.rsplit("/", 1)[-1].lower() == wanted:
+            return href
+    return None
 
 
 def _normalize_header(raw: str) -> str:
@@ -116,13 +150,32 @@ class GuerrillaRFAdapter(Adapter):
 
     def search(self, spec: QuerySpec) -> list[Candidate]:
         """Fetch the amplifiers page and return all rows as Candidates."""
+        return drop_paramless(self._parse_html(self._get(_PAGE_URL)))
+
+    def resolve_datasheet_url(self, cand: Candidate) -> str | None:
+        """Fetch the part's detail page and return its main datasheet PDF link.
+
+        Case 2: the amplifiers table carries no datasheet link, so this costs one
+        request — paid only for a candidate the pipeline is about to enrich.
+
+        Picking the right PDF is the whole difficulty (see ``_datasheet_href``);
+        returns ``None`` on any failure, per the ``Adapter`` contract.
+        """
+        try:
+            html = self._get(_DETAIL_URL.format(model=cand.model))
+        except AdapterError:
+            return None
+        return _datasheet_href(html, cand.model)
+
+    def _get(self, url: str) -> str:
+        """GET *url* behind the politeness guard; raise AdapterError on failure."""
         elapsed = time.time() - self._last_fetch_time
         if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
             time.sleep(_MIN_DELAY_SECONDS - elapsed)
 
         try:
             response = httpx.get(
-                _PAGE_URL,
+                url,
                 headers={
                     "User-Agent": _USER_AGENT,
                     "Accept": (
@@ -139,11 +192,11 @@ class GuerrillaRFAdapter(Adapter):
         except httpx.HTTPError as exc:
             raise AdapterError(
                 manufacturer=self.manufacturer,
-                context=f"HTTP error fetching {_PAGE_URL}",
+                context=f"HTTP error fetching {url}",
                 cause=exc,
             ) from exc
 
-        return drop_paramless(self._parse_html(response.text))
+        return response.text
 
     def _parse_html(self, html: str) -> list[Candidate]:
         """Parse both amplifier tables; return a combined list of Candidates.

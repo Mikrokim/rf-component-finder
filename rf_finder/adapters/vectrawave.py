@@ -221,7 +221,7 @@ class VectraWaveAdapter(Adapter):
 
         n_cols = len(products)
         raw_params: dict[int, dict[str, RawValue]] = {i: {} for i in range(1, n_cols)}
-        urls: dict[int, str] = {i: "" for i in range(1, n_cols)}
+        datasheets: dict[int, str] = {i: "" for i in range(1, n_cols)}
         freq_low: dict[int, float] = {}
         freq_high: dict[int, float] = {}
 
@@ -230,12 +230,16 @@ class VectraWaveAdapter(Adapter):
                 continue  # repeated product-header / spacer row
             key = _normalize(texts[0])
 
-            # Datasheet row: each product cell holds an <a href> to its PDF.
+            # Datasheet row: each product cell holds an <a href> to its PDF —
+            # relative, so it must be absolutized.  Beware: a third of the parts
+            # render <a href="">Download</a>, an anchor with an EMPTY href (and
+            # selectolax returns None for it, not ""), so the presence of an <a>
+            # says nothing.  _abs_url maps those to "", which becomes None below.
             if key == "datasheet":
                 for i in range(1, min(n_cols, len(cells))):
                     a = cells[i].css_first("a")
                     if a is not None:
-                        urls[i] = self._abs_url(a.attributes.get("href", ""))
+                        datasheets[i] = self._abs_url(a.attributes.get("href", ""))
                 continue
 
             mapped = ROW_MAP.get(key)
@@ -271,9 +275,13 @@ class VectraWaveAdapter(Adapter):
                 Candidate(
                     model=model,
                     manufacturer=self.manufacturer,
-                    url=urls[i] or _PAGE_URL,
+                    url=_PAGE_URL,
                     raw_params=rp,
                     source="table",
+                    # "" (no href / empty href) MUST become None: the field means
+                    # "a datasheet PDF to download", and an empty string would be
+                    # a link-shaped value that is not one.
+                    datasheet_url=datasheets[i] or None,
                 )
             )
         return out
