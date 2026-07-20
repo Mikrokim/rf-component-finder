@@ -308,6 +308,13 @@ _CATEGORICAL_KEYWORDS = {
     "package": ["package", "pkg", "case", "outline", "body"],
 }
 
+# The MSL level as written in the datasheet: "MSL 1", "(MSL) 3", "msl3".
+# Anchored on the "MSL" abbreviation ONLY (not "Moisture Sensitivity Level",
+# whose adca line carries a stray "260°C"). The trailing \b rejects multi-digit
+# numbers ("MSL 260" -> no word-boundary between 2 and 6), so 260/-- /[2] traps
+# are all sidestepped. Validated 5/5 with zero false-positives on the survey.
+_MSL_LEVEL_RE = re.compile(r"MSL[\s:\)]*([1-6][a-z]?)\b", re.I)
+
 # An "A x B unit" physical-dimension pattern: two numbers separated by x or ×,
 # with the unit on the second (an optional matching unit may follow the first).
 _DIM_RE = re.compile(
@@ -382,4 +389,24 @@ def _ground_categorical(name: str, spec, datasheet_text: str):
     keywords = _CATEGORICAL_KEYWORDS.get(name)
     if keywords and not any(k in datasheet_text.lower() for k in keywords):
         return None
+    if name == "MSL":
+        return _extract_msl_level(datasheet_text, spec)
     return spec
+
+
+def _extract_msl_level(datasheet_text: str, spec):
+    """Override the model's MSL answer with the level parsed from the text.
+
+    The small model returns MSL unreliably ("--", "MSL3"); when the datasheet
+    states an "MSL <n>" level, trust the TEXT, not the model. Returns a spec
+    whose ``value`` is the parsed level ("1", "3", "2a"). If no clean level is
+    found, fall back to the model's own answer (which is null when the model
+    likewise found nothing) rather than fabricating one.
+    """
+    m = _MSL_LEVEL_RE.search(datasheet_text)
+    if not m:
+        return spec
+    return {
+        "unit": None, "min": None, "typ": None, "max": None,
+        "value": m.group(1), "condition": None,
+    }

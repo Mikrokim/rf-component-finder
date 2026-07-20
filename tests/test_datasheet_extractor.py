@@ -254,8 +254,35 @@ def test_ground_categorical_absent_is_nulled():
 
 
 def test_ground_categorical_present_is_kept():
-    spec = {"value": "1"}
-    assert _ground_categorical("MSL", spec, "Moisture Sensitivity Level MSL 1") is spec
+    # A categorical WITHOUT an override (package) is kept as-is when its
+    # keyword is present. (MSL is re-derived from the text — see its own tests.)
+    spec = {"value": "QFN"}
+    assert _ground_categorical("package", spec, "Package outline: QFN") is spec
+
+
+def test_msl_level_overrides_unreliable_model_value():
+    # grf: model returns the trailing "--"; the text's "MSL 1" wins.
+    out = _ground_categorical("MSL", {"value": "--"}, "Moisture Sensitivity Level MSL 1 --")
+    assert out["value"] == "1"
+
+
+def test_msl_level_avoids_260_trap():
+    # adca: "(MSL) 3" is the level; the nearby "...Level 260°C" must not leak.
+    out = _ground_categorical("MSL", {"value": "x"}, "(MSL) 3 info. Moisture Sensitivity Level 260°C")
+    assert out["value"] == "3"
+
+
+def test_msl_level_avoids_footnote_trap():
+    # hmc: "msl3" is the level; the "msl rating [2]" footnote must not leak.
+    out = _ground_categorical("MSL", {"value": "MSL3"}, "matte sn msl3. msl rating [2]")
+    assert out["value"] == "3"
+
+
+def test_msl_no_clean_level_falls_back_to_model():
+    # Keyword present but no "MSL <n>" pattern -> keep the model's own answer
+    # (which is null when the model likewise found nothing).
+    spec = {"value": None}
+    assert _ground_categorical("MSL", spec, "moisture sensitive device") is spec
 
 
 def test_ground_categorical_non_categorical_passes_through():
