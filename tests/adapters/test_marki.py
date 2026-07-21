@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from rf_finder.adapters.base import AdapterError
 from rf_finder.adapters.marki import MarkiMicrowaveAdapter
 from rf_finder.models import Candidate, ParamConstraint, QuerySpec, RawValue
 
@@ -171,3 +172,77 @@ def test_search_live():
     assert len(results) > 100  # catalogue is ~123 amplifiers
     assert all(c.manufacturer == "Marki Microwave" for c in results)
     assert all("markimicrowave.com" in c.url for c in results)
+
+
+# ---------------------------------------------------------------------------
+# Datasheet link (case 2, with a twist: search() reads the landing PAGE from
+# the Datasheet column; resolve_datasheet_url upgrades it to the real PDF)
+# ---------------------------------------------------------------------------
+
+_LANDING_HTML = """
+<html><body>
+  <a href="https://markimicrowave.com/assets/9af9-uuid/MM_Catalog_SMT_Die.pdf">Online Catalog</a>
+  <a href="https://markimicrowave.com/assets/abc123/ADM-11425PSM Amplifier.pdf">Download PDF</a>
+</body></html>
+"""
+
+
+def test_search_reads_the_landing_page_and_makes_no_per_part_request() -> None:
+    """search() carries the Datasheet-column landing PAGE, not the PDF, no fetch."""
+    cands = _load_candidates()
+    cand = next(c for c in cands if c.model == "ADM-11425PSM")
+    assert cand.datasheet_url == (
+        "https://markimicrowave.com/products/surface-mount/amplifiers/adm-11425psm/datasheet/"
+    )
+    assert cand.datasheet_url.endswith("/datasheet/")  # a page, not a .pdf
+
+
+def test_resolve_returns_the_download_pdf_not_the_catalogue(monkeypatch) -> None:
+    """The page also links an 'Online Catalog' PDF — a valid PDF that is a trap."""
+    adapter = MarkiMicrowaveAdapter()
+
+    class _Resp:
+        text = _LANDING_HTML
+
+    monkeypatch.setattr(adapter, "_request", lambda url: _Resp())
+    cand = Candidate(model="ADM-11425PSM", manufacturer="Marki Microwave", url="x",
+                     raw_params={}, source="table",
+                     datasheet_url="https://markimicrowave.com/…/adm-11425psm/datasheet/")
+    got = adapter.resolve_datasheet_url(cand)
+    assert got == "https://markimicrowave.com/assets/abc123/ADM-11425PSM Amplifier.pdf"
+    assert "Catalog" not in got
+
+
+def test_resolve_returns_none_on_fetch_failure(monkeypatch) -> None:
+    adapter = MarkiMicrowaveAdapter()
+
+    def _fail(url):
+        raise AdapterError(manufacturer="Marki Microwave", context="boom")
+
+    monkeypatch.setattr(adapter, "_request", _fail)
+    cand = Candidate(model="X", manufacturer="Marki Microwave", url="x",
+                     raw_params={}, source="table",
+                     datasheet_url="https://markimicrowave.com/x/datasheet/")
+    assert adapter.resolve_datasheet_url(cand) is None
+
+
+def test_resolve_never_falls_back_to_the_html_landing_page(monkeypatch) -> None:
+    """A page with no 'Download PDF' link must yield None, NOT the HTML page URL."""
+    adapter = MarkiMicrowaveAdapter()
+
+    class _Resp:
+        text = "<html><body>no download link</body></html>"
+
+    landing = "https://markimicrowave.com/x/datasheet/"
+    monkeypatch.setattr(adapter, "_request", lambda url: _Resp())
+    cand = Candidate(model="X", manufacturer="Marki Microwave", url="x",
+                     raw_params={}, source="table", datasheet_url=landing)
+    got = adapter.resolve_datasheet_url(cand)
+    assert got is None and got != landing
+
+
+def test_resolve_returns_none_when_candidate_has_no_landing_page() -> None:
+    adapter = MarkiMicrowaveAdapter()
+    cand = Candidate(model="X", manufacturer="Marki Microwave", url="x",
+                     raw_params={}, source="table", datasheet_url=None)
+    assert adapter.resolve_datasheet_url(cand) is None

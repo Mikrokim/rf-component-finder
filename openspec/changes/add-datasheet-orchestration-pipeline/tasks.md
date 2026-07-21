@@ -112,24 +112,24 @@ The remaining sources per §6's findings — one task per adapter (3rWave needs 
       - **Selector (from the product page):** the `<a>` whose text is exactly **`Product Data Sheet`**. A part carries MANY `/products/d/` links — QPA2213D has 9 (app notes, S-parameters, Gerber, white paper, video, sibling parts). Taking any other is the "valid-but-wrong PDF DROPS the candidate" trap.
       - robots ALLOWS both `/products/p/` and `/products/d/` (`Disallow: /*?* , /api , /*.pdsc` only).
       **Still unverified — the blocker:** whether the **catalogue row itself** carries the datasheet `/products/d/` link (→ case 1, inline in `search()`) or only the product page does (→ case 2, override `resolve_datasheet_url` — the only path that works from THIS network anyway). `tests/fixtures/qorvo_product_list.html` has **0** `/products/d/` links, so this cannot be settled from what we hold. **To unblock:** one successful fetch of `https://www.qorvo.com/products/product-list/` from an unfiltered network — inspect a row for a `/products/d/` datasheet link; if present, case 1 (and refresh the fixture with such a row); if absent, case 2 via the product page using the `Product Data Sheet` selector above
-- [ ] 7.7 Per-adapter test: a case-1 adapter's candidates carry an absolute `datasheet_url` from the source page, with no extra request
-- [ ] 7.8 Per-adapter test (case 2): `search()` makes NO per-part request and leaves `datasheet_url` as `None`; `resolve_datasheet_url` returns the absolute PDF link from a stubbed product page; a stubbed fetch failure and a product page with no datasheet link both return `None` without raising
-- [ ] 7.9 Mini-Circuits regression test: a model whose name contains `+` is URL-encoded (`%2B`) when building the product-page URL — the un-encoded form silently yields a 200 page with no datasheet link
-- [ ] 7.10 Microchip: when a part's `datasheetUrl` is absent, fall back to the packaging-variant base part's link — strip a trailing `/TR`, `TR` or `E` and reuse that part's `datasheetUrl` **from the same already-fetched `_enumerate` result set**; zero extra requests, still case 1. Live, this recovers 5 of the 13 link-less parts (`MMA043PP4/TR`→`MMA043PP4`, `MMA044PP3/TR`→`MMA044PP3`, `MMA047PP4TR`→`MMA047PP4`, `MMA085PP4`/`MMA085PP4E`→`MMA085PP4/TR`) — same die, different reel/packaging, one datasheet. Do NOT use the record's `basePartNumber` field: live it holds a marketing string (`LOW-NOISE-AMPLIFIER-WIDEBAND`), not a part number. When no sibling with a link exists, leave `datasheet_url = None` — unchanged behaviour (D7 condition 1), so this can only add coverage, never remove it. Test: a link-less variant inherits its base part's URL; a link-less part with no sibling stays `None`
+- [x] 7.7 Per-adapter test: a case-1 adapter's candidates carry an absolute `datasheet_url` from the source page, with no extra request
+- [x] 7.8 Per-adapter test (case 2): `search()` makes NO per-part request and leaves `datasheet_url` as `None`; `resolve_datasheet_url` returns the absolute PDF link from a stubbed product page; a stubbed fetch failure and a product page with no datasheet link both return `None` without raising
+- [x] 7.9 Mini-Circuits regression test: a model whose name contains `+` is URL-encoded (`%2B`) when building the product-page URL — the un-encoded form silently yields a 200 page with no datasheet link
+- [x] 7.10 Microchip: when a part's `datasheetUrl` is absent, fall back to the packaging-variant base part's link — strip a trailing `/TR`, `TR` or `E` and reuse that part's `datasheetUrl` **from the same already-fetched `_enumerate` result set**; zero extra requests, still case 1. Live, this recovers 5 of the 13 link-less parts (`MMA043PP4/TR`→`MMA043PP4`, `MMA044PP3/TR`→`MMA044PP3`, `MMA047PP4TR`→`MMA047PP4`, `MMA085PP4`/`MMA085PP4E`→`MMA085PP4/TR`) — same die, different reel/packaging, one datasheet. Do NOT use the record's `basePartNumber` field: live it holds a marketing string (`LOW-NOISE-AMPLIFIER-WIDEBAND`), not a part number. When no sibling with a link exists, leave `datasheet_url = None` — unchanged behaviour (D7 condition 1), so this can only add coverage, never remove it. Test: a link-less variant inherits its base part's URL; a link-less part with no sibling stays `None`
 
 ## 8. End-to-end tests for the pipeline
 
-- [ ] 8.1 Gate 1 drops a candidate whose table parameter `FAIL`s (never resolved, never enriched)
-- [ ] 8.2 A survivor with a site-missing param is enriched from a stubbed datasheet and returned as a `match` when the datasheet value passes
-- [ ] 8.3 A survivor whose datasheet value `FAIL`s is dropped by Gate 2 (even if another requested param is unverified)
-- [ ] 8.4 A survivor whose datasheet is read successfully but is silent on a site-missing param (stays `UNKNOWN`) is dropped by Gate 2 — not `not-verified`
-- [ ] 8.5 A survivor whose datasheet is inaccessible (no link after resolution, or a stubbed fetch/parse/extractor failure) is returned as `not-verified` when it clears 80% coverage; the same case below 80% coverage is dropped
-- [ ] 8.6 Only site-missing params are requested from the extractor (table-answered params are not re-requested)
-- [ ] 8.7 A raising adapter / failing datasheet / failing resolution does not abort the run
-- [ ] 8.8 The returned result exposes product name, manufacturer, product URL, and the outcome tag; it exposes neither `source` nor `datasheet_url`
-- [ ] 8.9 A candidate enriched from its datasheet surfaces the datasheet's PARAMETERS in its verdicts, while the datasheet link itself stays out of the result
-- [ ] 8.10 Resolution is attempted only for Gate 1 survivors with a missing param — NOT for a survivor whose params all passed from the table, and NOT for candidates dropped at Gate 1
-- [ ] 8.11 The pipeline asks the producing adapter to resolve, and holds no per-site logic (a fake case-2 adapter's `resolve_datasheet_url` is called for its own candidates only)
+- [x] 8.1 Gate 1 drops a candidate whose table parameter `FAIL`s (never resolved, never enriched)
+- [x] 8.2 A survivor with a site-missing param is enriched from a stubbed datasheet and returned as a `match` when the datasheet value passes
+- [x] 8.3 A survivor whose datasheet value `FAIL`s is dropped by Gate 2 (even if another requested param is unverified)
+- [x] 8.4 A survivor whose datasheet is read successfully but is silent on a site-missing param (stays `UNKNOWN`) is dropped by Gate 2 — not `not-verified`
+- [x] 8.5 A survivor whose datasheet is inaccessible (no link after resolution, or a stubbed fetch/parse/extractor failure) is returned as `not-verified` when it clears 80% coverage; the same case below 80% coverage is dropped
+- [x] 8.6 Only site-missing params are requested from the extractor (table-answered params are not re-requested)
+- [x] 8.7 A raising adapter / failing datasheet / failing resolution does not abort the run
+- [x] 8.8 The returned result exposes product name, manufacturer, product URL, and the outcome tag; it exposes neither `source` nor `datasheet_url`
+- [x] 8.9 A candidate enriched from its datasheet surfaces the datasheet's PARAMETERS in its verdicts, while the datasheet link itself stays out of the result
+- [x] 8.10 Resolution is attempted only for Gate 1 survivors with a missing param — NOT for a survivor whose params all passed from the table, and NOT for candidates dropped at Gate 1
+- [x] 8.11 The pipeline asks the producing adapter to resolve, and holds no per-site logic (a fake case-2 adapter's `resolve_datasheet_url` is called for its own candidates only)
 
 ## 9. Validate
 

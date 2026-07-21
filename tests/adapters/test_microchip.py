@@ -15,6 +15,8 @@ import pytest
 from rf_finder.adapters.base import ADAPTERS, AdapterError
 from rf_finder.adapters.microchip import (
     MicrochipAdapter,
+    _base_part,
+    _fill_variant_datasheets,
     _is_amplifier,
     _parse_bias_volts,
     _parse_freq,
@@ -184,3 +186,50 @@ def test_search_live():
     assert len(results) > 20  # low hundreds enumerated; tens are RF amplifiers
     assert all(c.manufacturer == "Microchip" for c in results)
     assert all("freq_range" in c.raw_params for c in results)
+
+
+# ---------------------------------------------------------------------------
+# 7.10 — packaging-variant datasheet fallback
+# ---------------------------------------------------------------------------
+
+def _C(model: str, url: str | None = None) -> Candidate:
+    return Candidate(model=model, manufacturer="Microchip", url="x",
+                     raw_params={}, source="table", datasheet_url=url)
+
+
+def test_base_part_strips_packaging_suffixes() -> None:
+    assert _base_part("MMA043PP4/TR") == "MMA043PP4"   # /TR before TR
+    assert _base_part("MMA047PP4TR") == "MMA047PP4"
+    assert _base_part("MMA085PP4E") == "MMA085PP4"
+    assert _base_part("MMA044AA") == "MMA044AA"        # base part unchanged
+
+
+def test_link_less_variant_inherits_the_base_parts_datasheet() -> None:
+    ds = "https://ww1.microchip.com/downloads/MMA085PP4-DS.pdf"
+    out = {c.model: c.datasheet_url for c in _fill_variant_datasheets([
+        _C("MMA085PP4/TR", ds),   # the base carries the link
+        _C("MMA085PP4"),          # link-less variants...
+        _C("MMA085PP4E"),
+    ])}
+    assert out == {"MMA085PP4/TR": ds, "MMA085PP4": ds, "MMA085PP4E": ds}
+
+
+def test_part_with_no_linked_sibling_stays_none() -> None:
+    out = {c.model: c.datasheet_url for c in _fill_variant_datasheets([_C("MMA044AA")])}
+    assert out["MMA044AA"] is None
+
+
+def test_fallback_never_overwrites_an_existing_link() -> None:
+    own = "https://ww1.microchip.com/downloads/OWN.pdf"
+    sib = "https://ww1.microchip.com/downloads/SIB.pdf"
+    out = {c.model: c.datasheet_url for c in _fill_variant_datasheets([
+        _C("MMA043PP4", sib),
+        _C("MMA043PP4/TR", own),  # already has its own — must be kept
+    ])}
+    assert out["MMA043PP4/TR"] == own
+
+
+def test_fallback_makes_no_request_and_only_uses_this_result_set() -> None:
+    # A variant whose base is NOT in the set cannot be filled (no lookup elsewhere).
+    out = {c.model: c.datasheet_url for c in _fill_variant_datasheets([_C("MMA043PP4/TR")])}
+    assert out["MMA043PP4/TR"] is None
