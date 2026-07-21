@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER
+from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER, DATASHEET_TEMPERATURE
 from rf_finder.datasheet import (
     EXTRACT_RF_PARAMETERS_INSTRUCTION,
     extract_rf_parameters,
@@ -55,7 +55,8 @@ class MockRuntime:
     calls: list[dict] = field(default_factory=list)
 
     def run(
-        self, *, instruction: str, provider: str, input: dict, model=None
+        self, *, instruction: str, provider: str, input: dict, model=None,
+        temperature=None,
     ) -> _Result:
         self.calls.append(
             {
@@ -63,6 +64,7 @@ class MockRuntime:
                 "provider": provider,
                 "input": input,
                 "model": model,
+                "temperature": temperature,
             }
         )
         return self.provider_map[provider].respond()
@@ -162,6 +164,18 @@ def test_model_comes_from_config_variable_not_a_parameter():
 
     (call,) = rt.calls
     assert call["model"] == DATASHEET_MODEL
+
+
+def test_temperature_comes_from_config_variable():
+    # The sampling temperature is read from DATASHEET_TEMPERATURE in
+    # rf_finder.config and forwarded to the runtime, so extraction stays
+    # deterministic ("COPY EXACTLY") rather than at the provider's default.
+    rt = _runtime(json.dumps({"gain": None}))
+
+    extract_rf_parameters("...", ["gain"], runtime=rt)
+
+    (call,) = rt.calls
+    assert call["temperature"] == DATASHEET_TEMPERATURE
 
 
 # ---------------------------------------------------------------------------

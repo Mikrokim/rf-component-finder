@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 
-from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER
+from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER, DATASHEET_TEMPERATURE
 
 EXTRACT_RF_PARAMETERS_INSTRUCTION = """\
 You are an RF component datasheet parameter extraction engine.
@@ -215,8 +215,10 @@ def extract_rf_parameters(
     all six fields (missing ones as ``None``), normalised so the shape is
     uniform regardless of how much of the schema the model spelled out.
 
-    The model and provider are taken from the ``DATASHEET_MODEL`` and
-    ``DATASHEET_PROVIDER`` variables in ``rf_finder.config``, not passed in.
+    The model, provider, and sampling temperature are taken from the
+    ``DATASHEET_MODEL``, ``DATASHEET_PROVIDER`` and ``DATASHEET_TEMPERATURE``
+    variables in ``rf_finder.config``, not passed in. The temperature defaults
+    to ``0.0`` so extraction is deterministic ("COPY EXACTLY / never guess").
     ``runtime`` lets callers/tests supply their own GenAIFabric instance (e.g.
     one whose provider_map holds a MockProvider); default is the shared runtime.
 
@@ -233,6 +235,7 @@ def extract_rf_parameters(
             "datasheet": datasheet_text,
             "requested_parameters": requested_parameters,
         },
+        temperature=DATASHEET_TEMPERATURE,
     )
 
     if not result.success:

@@ -56,6 +56,12 @@ def load_max_results(path: str | Path | None = None) -> int:
 DATASHEET_PROVIDER = os.environ.get("RF_LLM_PROVIDER", "gemini")
 #e.g. gemini-2.5-flash (cheap/fast) | gemini-2.5-pro (higher accuracy) | gemini-3.5-flash
 DATASHEET_MODEL = os.environ.get("RF_LLM_MODEL", "gemini-2.5-flash")
+
+#: Sampling temperature for the datasheet extractor. Datasheet extraction is a
+#: deterministic transcription task ("COPY EXACTLY / never guess"), so the
+#: default is 0.0 for reproducible output; override with RF_LLM_TEMPERATURE.
+#: (Passing None would fall back to the provider's own default, e.g. Gemini's.)
+DATASHEET_TEMPERATURE = float(os.environ.get("RF_LLM_TEMPERATURE", "0.0"))
  
 # LLM used to extract parameters from datasheet PDFs.
 # Edit these to change the model/provider — no config file, no arguments.

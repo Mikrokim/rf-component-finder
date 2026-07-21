@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
-llm = ["genai-fabric==0.1.0", "google-genai"]
+llm = ["genai-fabric==0.1.3", "google-genai"]
 
 [project.scripts]
 rf-finder = "rf_finder.__main__:main"
