@@ -17,3 +17,10 @@
 - [x] 3.1 Run `python -m pytest tests/test_datasheet_extractors.py -v` and confirm all pass.
 - [x] 3.2 Run the full existing suite to confirm no regression.
 - [x] 3.3 Run `openspec validate datasheet-code-extractors` and resolve any issues.
+
+## 4. Held-out fixes (bugs surfaced by new datasheets after the initial land)
+
+- [x] 4.1 TEMPERATURE: add a tier-0 split-label handler — pair `Maximum Operating Temperature N` with `Minimum Operating Temperature M`, reading a single unit-adjacent number per label so a following Storage value cannot leak in (marki silently returned `(85, 125)` instead of `(-54, 85)`). Falls through to tier-1/tier-2 unchanged.
+- [x] 4.2 SIZE: add a bill-of-materials / discrete-component distractor (`CAP`/capacitor/`µF`/`nF`/`pF`) so an eval-board capacitor row is not read as the product size; `Ω` is deliberately excluded so a `50Ω` impedance next to a die size is not caught (MAPC-A4029 silently returned a capacitor's `0.98x1.97in` instead of `None`).
+- [x] 4.3 Add three source-verified held-out datasheets to the test suite (marki, mapc_a4029, mma016aa) under `evals/pdfs/`, plus plain-text unit scenarios for the split-label and BOM behaviours.
+- [x] 4.4 Confirm zero regression: TEMP 8/8 (7 gold + marki) and SIZE 12/12 (7 gold + 5 verified) in the dev harness; full pytest suite green.

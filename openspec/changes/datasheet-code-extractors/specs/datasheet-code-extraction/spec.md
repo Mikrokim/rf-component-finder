@@ -32,7 +32,15 @@ operating label is present it SHALL fall back to a bare `Temperature Range` only
 when that label's left context is not a storage/junction/mounting/reflow label.
 It SHALL normalize the PDF private-use degree glyph `U+F0B0` to `°`, accept a
 number only when it is signed or immediately adjacent to a temperature unit, and
-treat en dash and em dash as a minus sign.
+treat en dash and em dash as a minus sign. When the range is stated as two
+separate labels (`Maximum Operating Temperature N` and `Minimum Operating
+Temperature M`) rather than `A to B`, it SHALL pair those two labelled values and
+SHALL NOT let an adjacent Storage value leak into the range.
+
+#### Scenario: Split Maximum/Minimum Operating Temperature labels
+
+- **WHEN** the text contains "Maximum Operating Temperature 85 °C Maximum Storage Temperature 125 °C Minimum Operating Temperature -54 °C"
+- **THEN** `temp_range` returns `(-54, 85)` and not `(85, 125)`
 
 #### Scenario: Storage range is excluded
 
@@ -65,8 +73,14 @@ treat en dash and em dash as a minus sign.
 accepting a candidate only when its context contains a length unit
 (mm/µm/mils/inch, including curly-quote inches) or a size keyword
 (package/die/chip/size), and rejecting candidates whose context contains a
-distractor (thru-hole, diameter, tolerance, bond pad, MTTF, hours, `×10`) or a
-zero dimension.
+distractor (thru-hole, diameter, tolerance, bond pad, MTTF, hours, `×10`), an
+eval-board bill-of-materials / discrete-component marker (a `CAP`/capacitor label
+or a capacitance value such as `µF`/`nF`/`pF`), or a zero dimension.
+
+#### Scenario: Bill-of-materials capacitor dimension is rejected
+
+- **WHEN** the only `A×B` in the text is an eval-board part row "CAP, 3300 uF, ±20%, 100V, 0.98x1.97in" and no product size is stated
+- **THEN** `size_dims` returns `None`
 
 #### Scenario: Package size is selected over a bond-pad dimension
 

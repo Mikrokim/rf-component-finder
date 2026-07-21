@@ -32,6 +32,29 @@ _T_DIGITS = re.compile(r"\d{1,3}")
 _T_UNIT_AFTER = re.compile(r"\s*(?:°|℃|℉|[CF]\b)", re.I)
 _T_SPAN = 70
 
+# tier-0: some parts state the range as two SEPARATE labels — "Maximum Operating
+# Temperature 85 °C" and "Minimum Operating Temperature -54 °C" — not "A to B".
+# Read each label's own unit-adjacent number and pair them; a following Storage
+# value can't leak in because each label captures a single number. The gap before
+# the number must not swallow the sign, so it excludes sign characters.
+_T_OP = r"operating\s+(?:case\s+|junction\s+|ambient\s+)?temp\w*"
+_T_GAP = r"[^\d+\-−–—‒]{0,6}"
+_T_MAXOP = re.compile(rf"max(?:imum)?\s+{_T_OP}{_T_GAP}([+-−–—‒]?\d{{1,3}})\s*(?:°|℃|℉|[CF]\b)", re.I)
+_T_MINOP = re.compile(rf"min(?:imum)?\s+{_T_OP}{_T_GAP}([+-−–—‒]?\d{{1,3}})\s*(?:°|℃|℉|[CF]\b)", re.I)
+
+
+def _signed_int(s: str) -> int:
+    return -int(re.sub(r"\D", "", s)) if s[0] in "-−–—‒" else int(re.sub(r"\D", "", s))
+
+
+def _temp_split(text: str):
+    """(min, max) from separate 'Maximum/Minimum Operating Temperature' labels."""
+    mx, mn = _T_MAXOP.search(text), _T_MINOP.search(text)
+    if mx and mn:
+        hi, lo = _signed_int(mx.group(1)), _signed_int(mn.group(1))
+        return (min(lo, hi), max(lo, hi))
+    return None
+
 
 def _temp_nums(span: str) -> list[int]:
     """Temperature-plausible numbers in a span, accepting only signed or
@@ -69,9 +92,11 @@ def temp_range(text: str):
     Selects the operating range and never the storage range.
     """
     text = text.replace(_DEG, "°")
-    r = _temp_from(text, _T_ANCHOR.finditer(text), check_left=False)
+    r = _temp_split(text)                                             # tier 0: split labels
     if r is None:
-        r = _temp_from(text, _T_ANCHOR2.finditer(text), check_left=True)
+        r = _temp_from(text, _T_ANCHOR.finditer(text), check_left=False)   # tier 1: operating
+    if r is None:
+        r = _temp_from(text, _T_ANCHOR2.finditer(text), check_left=True)   # tier 2: bare range
     return r
 
 
@@ -86,6 +111,12 @@ _S_PREFER = re.compile(
 _S_DISTRACT = re.compile(
     r"thru\s*hole|diameter|tolerance|deep|dimensions in mils|drill|bond\s*pad|"
     r"mttf|hours|cycles|\bx\s*10\b", re.I)
+# an eval-board bill-of-materials / discrete-component row (a capacitor, a
+# capacitance value): its dimension is the component's, not the product's. A
+# digit before the F unit keeps this off a package unit like "µm", and Ω is
+# deliberately excluded so a "50Ω" impedance next to a die size is not caught.
+_S_BOM = re.compile(
+    r"\bCAP\b|capacitor|\bBOM\b|bill\s+of\s+material|\d\s*[µuμ]F\b|\d\s*[np]F\b", re.I)
 
 
 def size_dims(text: str):
@@ -101,7 +132,7 @@ def size_dims(text: str):
         if a == 0 or b == 0:
             continue
         ctx = text[max(0, m.start() - 50):m.end() + 20]
-        if _S_DISTRACT.search(ctx):
+        if _S_DISTRACT.search(ctx) or _S_BOM.search(ctx):
             continue
         if not (_S_UNIT.search(ctx) or _S_PREFER.search(ctx)):
             continue

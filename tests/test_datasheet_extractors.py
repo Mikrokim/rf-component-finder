@@ -36,6 +36,9 @@ HELD_OUT = [
     ("max22707", (-40, 125), (3.0, 3.0), None),      # Maxim/ADI, MSL absent
     ("cmd240c4", (-40, 85), (4.0, 4.0), "1"),        # Custom MMIC, MSL present
     ("qpl7420", (-40, 100), (3.0, 3.0), "2"),        # Qorvo, MSL present, -40/100
+    ("marki", (-54, 85), (4.0, 4.0), "1"),           # split Max/Min Operating Temp labels
+    ("mapc_a4029", (-40, 125), None, None),          # SIZE absent: only a BOM capacitor dim
+    ("mma016aa", (-55, 85), (0.76, 0.66), None),     # bare die, MSL absent
 ]
 
 
@@ -96,6 +99,18 @@ def test_temp_en_dash_is_minus():
 
 def test_temp_bare_range_fallback_when_not_storage():
     assert temp_range("Gain 20 dB. Temperature Range -40°C to +125°C 16-Lead LFCSP") == (-40, 125)
+
+
+def test_temp_split_max_min_operating_labels():
+    # separate labels, not "A to B"; the trailing Storage 125 must not leak in
+    t = ("Maximum Operating Temperature 85 °C Maximum Storage Temperature 125 °C "
+         "Minimum Operating Temperature -54 °C Minimum Storage Temperature -65 °C")
+    assert temp_range(t) == (-54, 85)
+
+
+def test_size_rejects_bom_capacitor_dimension():
+    # an eval-board bill-of-materials capacitor row, not the product's size
+    assert size_dims("C6 CAP, 3300 uF, ±20%, 100V, +85°C, 0.98x1.97in UKW2A332MRD") is None
 
 
 def test_size_rejects_mttf_scientific_notation():
