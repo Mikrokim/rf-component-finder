@@ -16,6 +16,9 @@ import json
 import os
 from typing import Any, Callable
 
+from rf_finder.agent import run_log
+from rf_finder.agent.run_log import block_to_event, make_run_logger
+
 # Repo root: .../rf-component-finder/  (this module is at rf_finder/agent/).
 # Claude runs with this as cwd so setting_sources can discover .claude/skills/.
 PROJECT_ROOT = os.path.dirname(
@@ -52,7 +55,25 @@ COMPONENT_SCHEMA: dict[str, Any] = {
                     },
                     "required": ["model", "manufacturer", "url"],
                 },
-            }
+            },
+            # Optional: a part this verify DROPPED, with a structured reason, so a
+            # rejection is logged with its cause instead of vanishing. Populated by
+            # rf-verify's fenced reject block; absent-and-empty is fine (an empty
+            # components list is still recorded as a reason-less rejection).
+            "rejected": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "model": {"type": "string"},
+                        "param": {"type": "string"},
+                        "found": {"type": ["string", "number", "null"]},
+                        "required": {"type": ["string", "number", "null"]},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["model", "reason"],
+                },
+            },
         },
         "required": ["components"],
     },
@@ -137,6 +158,8 @@ async def run_agent_skill(
     on_text: Callable[[str], None] = print,
     output_format: dict[str, Any] | None = None,
     on_result: Callable[[dict[str, Any]], None] | None = None,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+    agent_id: str = "agent",
 ) -> Any:
     """The SDK connection itself — the one place that talks to Claude.
 
@@ -184,6 +207,13 @@ async def run_agent_skill(
                 text = getattr(block, "text", None)
                 if text:
                     on_text(text)  # live progress for the caller
+                    continue
+                # Non-text blocks (tool use / result) are the run's ground-truth
+                # actions — capture them as events when a sink is attached.
+                if on_event is not None:
+                    ev = block_to_event(block, agent_id)
+                    if ev is not None:
+                        on_event(ev)
         elif isinstance(message, ResultMessage):
             on_text(f"\n[done: {message.subtype}]")
             result_text = message.result
@@ -197,6 +227,16 @@ async def run_agent_skill(
                 "tokens": _sum_tokens(getattr(message, "usage", None)),
                 "token_breakdown": _token_breakdown(getattr(message, "usage", None)),
             }
+
+    if on_event is not None:
+        on_event({
+            "kind": run_log.AGENT_FINISHED,
+            "agent_id": agent_id,
+            "subtype": meta.get("subtype"),
+            "is_error": meta.get("is_error"),
+            "num_turns": meta.get("num_turns"),
+            "tokens": meta.get("tokens"),
+        })
 
     if on_result is not None:
         on_result(meta)
@@ -241,6 +281,17 @@ _VERIFY_TOOLS_TEST = ["Skill", "Read"]
 def _test_mode() -> bool:
     """True when ``RF_SKILL_MODE`` selects the offline test skills."""
     return os.environ.get("RF_SKILL_MODE", "real").strip().lower() == "test"
+
+
+def _logging_enabled() -> bool:
+    """True when ``RF_LOG`` turns on AI Search run logging.
+
+    Mirrors ``_test_mode()``: read once from the environment (loaded from
+    ``.env``), tolerant of case/whitespace. Only the explicit ``on`` token
+    enables logging; unset, empty, or anything unknown is off — so logging never
+    turns itself on by accident.
+    """
+    return os.environ.get("RF_LOG", "").strip().lower() == "on"
 
 
 def _resolve_skills() -> tuple[str, list[str], str, list[str]]:
@@ -304,22 +355,25 @@ DISCOVERY_SCHEMA: dict[str, Any] = {
 }
 
 _CANDIDATE_MARKER = "@@CANDIDATE@@"
+_REJECT_MARKER = "@@REJECT@@"
 
 
-def _extract_candidates(buffer: str) -> tuple[str, list[dict[str, Any]]]:
-    """Pull ``@@CANDIDATE@@ {json}`` lines out of streamed discovery text.
+def _extract_marked(buffer: str, marker: str) -> tuple[str, list[dict[str, Any]]]:
+    """Pull ``<marker> {json}`` lines out of streamed discovery text.
 
     Buffered line parsing: only complete lines (those followed by a newline) are
     parsed; the trailing partial line is returned to be completed by the next
-    chunk. Returns ``(remainder, [candidate, ...])``.
+    chunk. Every complete line is scanned, so calling this once per marker on the
+    SAME buffer never loses a line (each call ignores lines it does not own and
+    returns the identical trailing remainder). Returns ``(remainder, [obj, ...])``.
     """
     *lines, remainder = buffer.split("\n")
     found: list[dict[str, Any]] = []
     for line in lines:
         line = line.strip()
-        if not line.startswith(_CANDIDATE_MARKER):
+        if not line.startswith(marker):
             continue
-        payload = line[len(_CANDIDATE_MARKER):].strip()
+        payload = line[len(marker):].strip()
         try:
             obj = json.loads(payload)
         except (ValueError, TypeError):
@@ -329,12 +383,38 @@ def _extract_candidates(buffer: str) -> tuple[str, list[dict[str, Any]]]:
     return remainder, found
 
 
+def _extract_candidates(buffer: str) -> tuple[str, list[dict[str, Any]]]:
+    """``@@CANDIDATE@@ {json}`` lines from streamed discovery text (see
+    :func:`_extract_marked`)."""
+    return _extract_marked(buffer, _CANDIDATE_MARKER)
+
+
+def _extract_rejects(buffer: str) -> tuple[str, list[dict[str, Any]]]:
+    """``@@REJECT@@ {json}`` lines — parts discovery dropped at the site screen
+    (see :func:`_extract_marked`). Symmetric to :func:`_extract_candidates`."""
+    return _extract_marked(buffer, _REJECT_MARKER)
+
+
 def _candidate_key(candidate: dict[str, Any]) -> tuple[str, str]:
     """Dedup key for a candidate: (model, manufacturer), case-insensitive."""
     return (
         str(candidate.get("model", "")).strip().lower(),
         str(candidate.get("manufacturer", "")).strip().lower(),
     )
+
+
+def _reject_reason(reject: dict[str, Any]) -> str:
+    """Human reason for a structured verify reject with no explicit ``reason``.
+
+    Falls back to ``"<param>: found <found> vs required <required>"`` from the
+    fields the schema carries, so a rejection is never reasonless in the log.
+    """
+    param = reject.get("param")
+    if not param:
+        return "rejected"
+    found = reject.get("found")
+    required = reject.get("required")
+    return f"{param}: found {found} vs required {required}"
 
 
 def _discovery_prompt(spec_text: str, skill: str = DISCOVERY_SKILL) -> str:
@@ -402,11 +482,17 @@ async def run_rf_search_pipelined(
     on_result: Callable[[dict[str, Any]], None] | None = None,
     on_component: Callable[[dict[str, Any]], None] | None = None,
     on_tokens: Callable[[dict[str, Any]], None] | None = None,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
     stop_event: Any = None,
     max_concurrency: int = 4,
 ) -> Any:
     """Conductor: run ``rf-discovery`` (streaming) and fire one ``rf-verify`` run
     per candidate the instant it surfaces.
+
+    Run logging is owned here: an ``RF_LOG``-driven :class:`RunLogger` (or a
+    no-op) captures the whole run to ``runs/<timestamp>/`` and a live console
+    feed — no GUI or skill involvement. ``on_event`` is an optional extra sink
+    (used by tests) that receives the same events regardless of ``RF_LOG``.
 
     This is the hard guarantee that each component is handled independently: every
     candidate becomes its OWN ``rf-verify`` agent call, so a match reaches
@@ -441,6 +527,18 @@ async def run_rf_search_pipelined(
     sem = asyncio.Semaphore(max(1, max_concurrency))
     stopped = False
 
+    # Run logging: RF_LOG decides file+console; `emit` also forwards to an
+    # optional external sink so callers/tests can observe events unconditionally.
+    logger = make_run_logger(_logging_enabled(), os.path.join(PROJECT_ROOT, "runs"))
+    rejected_count = 0   # rebindable via `nonlocal` in the verify closure
+
+    def emit(event: dict[str, Any]) -> None:
+        logger.emit(event)
+        if on_event is not None:
+            on_event(event)
+
+    emit({"kind": run_log.RUN_STARTED, "agent_id": "run", "run_dir": logger.run_dir})
+
     def _accumulate(m: dict[str, Any]) -> None:
         totals["tokens"] += (m.get("tokens") or 0)
         totals["num_turns"] += (m.get("num_turns") or 0)
@@ -457,6 +555,8 @@ async def run_rf_search_pipelined(
             })
 
     async def _verify(candidate: dict[str, Any]) -> None:
+        nonlocal rejected_count
+        agent_id = f"verify[{candidate.get('model', '?')}]"
         async with sem:
             if stop_event is not None and stop_event.is_set():
                 return
@@ -469,21 +569,60 @@ async def run_rf_search_pipelined(
                     on_text=on_text,
                     output_format=COMPONENT_SCHEMA,
                     on_result=_accumulate,
+                    on_event=emit,
+                    agent_id=agent_id,
                 )
             except Exception:
                 # One failed verify (error/rate-limit on that call) must not kill
-                # the whole pipeline; its candidate is simply dropped.
+                # the whole pipeline; its candidate is dropped — but no longer
+                # silently: the drop is recorded so it is visible in the log.
+                rejected_count += 1
+                emit({
+                    "kind": run_log.VERIFY_RESULT, "agent_id": agent_id,
+                    "status": "rejected", "reason": "verify failed (error/rate-limit)",
+                })
                 return
-            for comp in (result or {}).get("components", []):
+            comps = (result or {}).get("components", [])
+            for comp in comps:
                 components.append(comp)
                 if on_component is not None:
                     on_component(comp)
+                emit({
+                    "kind": run_log.VERIFY_RESULT, "agent_id": agent_id,
+                    "status": "kept", "model": comp.get("model"),
+                    "verdict": comp.get("verdict", ""),
+                })
+            # Structured rejects (rf-verify's `rejected[]`, when present) carry a
+            # reason; otherwise an empty result is itself a rejection.
+            rejects = (result or {}).get("rejected", [])
+            for r in rejects:
+                rejected_count += 1
+                emit({
+                    "kind": run_log.VERIFY_RESULT, "agent_id": agent_id,
+                    "status": "rejected", "model": r.get("model", candidate.get("model")),
+                    "param": r.get("param"), "found": r.get("found"),
+                    "required": r.get("required"),
+                    "reason": r.get("reason") or _reject_reason(r),
+                })
+            if not comps and not rejects:
+                rejected_count += 1
+                emit({
+                    "kind": run_log.VERIFY_RESULT, "agent_id": agent_id,
+                    "status": "rejected", "reason": "no qualifying match",
+                })
 
     def _spawn(candidate: dict[str, Any]) -> None:
         key = _candidate_key(candidate)
         if key in seen:
             return
         seen.add(key)
+        emit({
+            "kind": run_log.CANDIDATE_FOUND, "agent_id": "discovery",
+            "model": candidate.get("model"),
+            "manufacturer": candidate.get("manufacturer", ""),
+            "url": candidate.get("url", ""),
+            "screened": candidate.get("screened"),
+        })
         tasks.append(asyncio.create_task(_verify(candidate)))
 
     options = ClaudeAgentOptions(
@@ -512,9 +651,28 @@ async def run_rf_search_pipelined(
                     text = getattr(block, "text", None)
                     if text:
                         on_text(text)
-                        buffer, fresh = _extract_candidates(buffer + text)
+                        combined = buffer + text
+                        buffer, fresh = _extract_candidates(combined)
                         for cand in fresh:
                             _spawn(cand)   # verify starts NOW, mid-discovery
+                        # Same combined buffer, other marker — the two scans
+                        # return the identical remainder, so nothing is lost.
+                        _, rejects = _extract_rejects(combined)
+                        for rej in rejects:
+                            rejected_count += 1
+                            emit({
+                                "kind": run_log.REJECT, "agent_id": "discovery",
+                                "model": rej.get("model"),
+                                "manufacturer": rej.get("manufacturer", ""),
+                                "param": rej.get("param"),
+                                "site_value": rej.get("site_value"),
+                                "reason": rej.get("reason", ""),
+                            })
+                        continue
+                    # Non-text blocks are discovery's ground-truth actions.
+                    ev = block_to_event(block, "discovery")
+                    if ev is not None:
+                        emit(ev)
             elif isinstance(message, ResultMessage):
                 on_text(f"\n[discovery done: {message.subtype}]")
                 disc_meta = {
@@ -530,6 +688,17 @@ async def run_rf_search_pipelined(
                 so = getattr(message, "structured_output", None)
                 if isinstance(so, dict):
                     disc_candidates = so.get("candidates") or []
+                emit({
+                    "kind": run_log.COVERAGE, "agent_id": "discovery",
+                    "text": getattr(message, "result", None) or "",
+                })
+                emit({
+                    "kind": run_log.AGENT_FINISHED, "agent_id": "discovery",
+                    "subtype": disc_meta.get("subtype"),
+                    "is_error": disc_meta.get("is_error"),
+                    "num_turns": disc_meta.get("num_turns"),
+                    "tokens": disc_meta.get("tokens"),
+                })
 
     # Safety net: verify any final-list candidate discovery didn't stream (unless
     # the user stopped — then don't start new work).
@@ -553,6 +722,15 @@ async def run_rf_search_pipelined(
     }
     if on_result is not None:
         on_result(meta)
+
+    # Close out the log: a final banner + the derived summary.md.
+    summary_path = os.path.join(logger.run_dir, "summary.md") if logger.run_dir else ""
+    emit({
+        "kind": run_log.RUN_FINISHED, "agent_id": "run",
+        "found": len(seen), "rejected": rejected_count,
+        "kept": len(components), "summary": summary_path,
+    })
+    logger.finish()
 
     # A genuine discovery failure (rate limit / session boundary) surfaces; a user
     # stop does not. Verify-call failures were swallowed per-candidate above.

@@ -138,6 +138,24 @@ One compact JSON object per line, prefixed by the exact marker `@@CANDIDATE@@`. 
 
 The conductor parses each line and fires an rf-verify run for that candidate right away — so emit as you go, never in one batch at the end. Emit each unique candidate **once** (dedupe on the fly).
 
+<!-- ============================================================================
+     RUN-LOGGING BLOCK (optional; safe to delete this whole comment-to-comment
+     section to opt out). Lets run logging record parts you drop at the Step 2.7
+     site screen — which today appear only as prose in the coverage statement.
+     Nothing else depends on it; deleting it only makes those rejects less
+     structured in the log.
+     ============================================================================ -->
+
+**Emit each Step 2.7 site-screen reject on its own line**, symmetric to `@@CANDIDATE@@`, the moment you drop it:
+
+```
+@@REJECT@@ {"model": "XYZ123", "manufacturer": "SomeVendor", "param": "NF", "site_value": "4.2 dB", "reason": "NF 4.2 dB exceeds the requested max 1.5 dB beyond the guard band"}
+```
+
+One compact JSON object per line, prefixed by the exact marker `@@REJECT@@`. Emit it **only** for a part rejected at the site screen (a clear miss on a site-exposed parameter, or a catalog fact) — never for a part you promote (those become `@@CANDIDATE@@`). `param`/`site_value` name the deciding parameter and its value as shown on the site; `reason` is one short sentence. This is a report of a screen decision you already made; it is emitted whether or not run logging is on (the Python side decides whether to keep it). It does not replace the coverage statement's `rejected at site screen` lines — it is the machine-readable twin.
+
+<!-- ==================== END RUN-LOGGING BLOCK ==================== -->
+
 **Also return a final structured list** `{ "candidates": [ {model, manufacturer, url, screened}, ... ] }` — the complete, deduplicated set you emitted, each carrying the same `screened` array, as a safety net for the conductor.
 
 **End with an honest coverage statement**: which of the three paths ran and their outcomes; which sources were fully swept vs only sampled; whether "no candidates" means "none exist" or "none found in sources covered". Include the manufacturers/sources coverage — one line per vendor touched through any path, **exhaustive** (a vendor that returned nothing is `checked/no candidates`, never omitted) and with Path-A aggregators **expanded** into per-vendor lines, each with the real query sent. If the Path B loop hit the 3-wave ceiling, say so. Coverage is bounded by what these sources contain — state plainly that a vendor absent from **every** path may still be missed.

@@ -191,3 +191,29 @@ Return a single JSON object `{ "components": [ ... ] }`:
 - If the candidate **does not qualify** (❌ rejected, or `insufficient verification`) → the list is **empty** `[]`.
 
 In your text (chat) output, **always state the verdict and the reason** — for a match: the per-parameter margins; for a reject: the failing parameter and its actual value, or the unverified parameters for an `insufficient verification` / access-blocked-unverifiable case. The conductor logs this text into the run's rejected list / coverage record, so it must be present even when the component list is empty.
+
+<!-- ============================================================================
+     RUN-LOGGING BLOCK (optional; safe to delete this whole comment-to-comment
+     section to opt out). Lets run logging record WHY a part was rejected as a
+     structured record instead of scraping your prose. Nothing else depends on
+     it; deleting it only makes rejects less structured in the log.
+     ============================================================================ -->
+
+### When you reject a part, also report it structurally (for run logging)
+
+When the candidate **does not qualify**, in addition to returning an empty
+`components` list, add a one-entry `rejected` array to the SAME JSON object,
+naming the single decisive failing parameter:
+
+```json
+{ "components": [], "rejected": [ { "model": "BLB28", "param": "freq_range", "found": "2.5-7 GHz", "required": "2-6 GHz", "reason": "specified band does not contain the requested 2-6 GHz" } ] }
+```
+
+- `param` — the one parameter that decided the rejection (the first hard miss).
+- `found` — the datasheet value you read (with unit); `null` if the reason is that it was never stated.
+- `required` — the spec value/direction it had to satisfy.
+- `reason` — one short human sentence.
+
+This is a report of a decision you already made — it never changes the verdict, and it is emitted whether or not run logging is switched on (the Python side decides whether to keep it). Emit `rejected` **only** for a reject; for a match, omit it (or send `[]`).
+
+<!-- ==================== END RUN-LOGGING BLOCK ==================== -->

@@ -85,10 +85,11 @@ class _FakeClient:
 
 @pytest.fixture(autouse=True)
 def _hermetic_skill_mode(monkeypatch):
-    """Keep tests independent of the repo ``.env``: default to real mode unless a
-    test sets ``RF_SKILL_MODE`` itself. (The app's .env sets it to ``test``, which
-    would otherwise leak into every test here.)"""
+    """Keep tests independent of the repo ``.env``: default to real mode and
+    logging off unless a test sets the env itself. (The app's .env sets these,
+    which would otherwise leak into every test here.)"""
     monkeypatch.delenv("RF_SKILL_MODE", raising=False)
+    monkeypatch.delenv("RF_LOG", raising=False)
 
 
 @pytest.fixture
@@ -229,6 +230,49 @@ def test_extract_candidates_buffers_partial_lines():
     assert rem == ""
 
 
+def test_extract_rejects_pulls_reject_lines():
+    from rf_finder.agent.skill_runner import _extract_rejects
+
+    rem, got = _extract_rejects('@@REJECT@@ {"model": "M9", "param": "NF"}\nleftover')
+    assert [r["model"] for r in got] == ["M9"]
+    assert rem == "leftover"
+
+
+def test_conductor_captures_site_screen_and_verify_rejects(fake_sdk):
+    """A `@@REJECT@@` site-screen drop and a verify `rejected[]` entry both become
+    rejection events with their reasons, and the run_finished count includes both."""
+    from rf_finder.agent import run_log
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    disc_text = (
+        '@@CANDIDATE@@ {"model": "M1", "manufacturer": "X", "url": "u"}\n'
+        '@@REJECT@@ {"model": "M9", "manufacturer": "Y", "param": "NF", '
+        '"site_value": "4.2 dB", "reason": "NF too high"}\n'
+    )
+    _FakeClient.messages = [
+        _FakeAssistantMessage([_Block(disc_text)]),
+        _FakeResultMessage(structured_output={"candidates": [{"model": "M1", "manufacturer": "X", "url": "u"}]}),
+    ]
+    fake_sdk.query = _make_query(
+        [_FakeResultMessage(structured_output={"components": [], "rejected": [
+            {"model": "M1", "param": "freq_range", "found": "2.5-7 GHz",
+             "required": "2-6 GHz", "reason": "band does not contain 2-6 GHz"}
+        ]})],
+        {},
+    )
+
+    events: list = []
+    out = asyncio.run(run_rf_search_pipelined("spec", on_text=lambda _t: None, on_event=events.append))
+
+    site = [e for e in events if e["kind"] == run_log.REJECT]
+    assert site and site[0]["model"] == "M9" and site[0]["param"] == "NF"
+    vr = [e for e in events if e["kind"] == run_log.VERIFY_RESULT and e.get("status") == "rejected"]
+    assert vr and "does not contain" in vr[0]["reason"]
+    assert out["components"] == []
+    finished = [e for e in events if e["kind"] == run_log.RUN_FINISHED][0]
+    assert finished["rejected"] == 2   # one site-screen + one verify
+
+
 def test_run_rf_search_pipelines_discovery_into_verify(fake_sdk):
     from rf_finder.agent.skill_runner import DISCOVERY_SCHEMA, run_rf_search
 
@@ -310,6 +354,96 @@ def test_pipelined_stop_interrupts_and_does_not_raise(fake_sdk):
     assert out == {"components": []}
 
 
+def test_conductor_emits_events_for_actions_candidates_and_verify(fake_sdk):
+    """The event tap surfaces the run's ground truth: discovery's WebFetch, the
+    candidate, the Gemini datasheet read (tagged to its verify), verify's kept
+    result, the verbatim coverage, and run boundaries with derived counts."""
+    from types import SimpleNamespace
+
+    from rf_finder.agent import run_log
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    cand_line = '@@CANDIDATE@@ {"model": "BLB28", "manufacturer": "BeRex", "url": "u"}\n'
+    web_block = SimpleNamespace(id="t1", name="WebFetch", input={"url": "https://everything.rf/x"})
+    _FakeClient.messages = [
+        _FakeAssistantMessage([_Block(cand_line), web_block]),
+        _FakeResultMessage(
+            subtype="success", result="Coverage: path A ran; 2 vendors.",
+            structured_output={"candidates": [{"model": "BLB28", "manufacturer": "BeRex", "url": "u"}]},
+        ),
+    ]
+    # Verify issues a Gemini datasheet read (Bash run_extract) then returns a match.
+    ds_block = SimpleNamespace(
+        id="t2", name="Bash",
+        input={"command": 'python run_extract.py --url "https://d/BLB28.pdf" --params "NF"'},
+    )
+    fake_sdk.query = _make_query(
+        [
+            _FakeAssistantMessage([ds_block]),
+            _FakeResultMessage(structured_output={"components": [
+                {"model": "BLB28", "manufacturer": "BeRex", "url": "u", "verdict": "partial 4/5"}
+            ]}),
+        ],
+        {},
+    )
+
+    events: list = []
+    asyncio.run(run_rf_search_pipelined("spec", on_text=lambda _t: None, on_event=events.append))
+
+    kinds = [e["kind"] for e in events]
+    assert run_log.RUN_STARTED in kinds and run_log.RUN_FINISHED in kinds
+    # Discovery's WebFetch captured from the real tool call, not prose.
+    assert any(
+        e["kind"] == run_log.TOOL_CALL and e["tool"] == "WebFetch"
+        and "everything.rf" in e["target"] for e in events
+    )
+    assert any(e["kind"] == run_log.CANDIDATE_FOUND and e["model"] == "BLB28" for e in events)
+    # The Gemini datasheet read, recognized and tagged to its verify agent.
+    ds = [e for e in events if e["kind"] == run_log.DATASHEET_READ]
+    assert ds and ds[0]["agent_id"] == "verify[BLB28]" and ds[0]["params"] == "NF"
+    assert any(e["kind"] == run_log.VERIFY_RESULT and e.get("status") == "kept" for e in events)
+    assert any(e["kind"] == run_log.COVERAGE and "path A" in e["text"] for e in events)
+    finished = [e for e in events if e["kind"] == run_log.RUN_FINISHED][0]
+    assert finished["found"] == 1 and finished["kept"] == 1
+
+
+def test_conductor_logs_to_disk_only_when_rf_log_on(fake_sdk, monkeypatch, tmp_path):
+    """RF_LOG on writes runs/<ts>/events.jsonl + summary.md; off writes nothing.
+    Returned components are identical either way."""
+    import rf_finder.agent.skill_runner as sr
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    monkeypatch.setattr(sr, "PROJECT_ROOT", str(tmp_path))
+
+    def _fresh_messages():
+        _FakeClient.messages = [
+            _FakeAssistantMessage([_Block('@@CANDIDATE@@ {"model": "M1", "manufacturer": "X", "url": "u"}\n')]),
+            _FakeResultMessage(structured_output={"candidates": [{"model": "M1", "manufacturer": "X", "url": "u"}]}),
+        ]
+        fake_sdk.query = _make_query(
+            [_FakeResultMessage(structured_output={"components": [{"model": "M1", "manufacturer": "X", "url": "u", "verdict": "match"}]})],
+            {},
+        )
+
+    # OFF (unset): no runs/ directory at all.
+    monkeypatch.delenv("RF_LOG", raising=False)
+    _fresh_messages()
+    out_off = asyncio.run(run_rf_search_pipelined("spec", on_text=lambda _t: None))
+    assert not (tmp_path / "runs").exists()
+
+    # ON: a run dir with the events file and the summary.
+    monkeypatch.setenv("RF_LOG", "on")
+    _fresh_messages()
+    out_on = asyncio.run(run_rf_search_pipelined("spec", on_text=lambda _t: None))
+    run_dirs = list((tmp_path / "runs").iterdir())
+    assert len(run_dirs) == 1
+    assert (run_dirs[0] / "events.jsonl").exists()
+    assert (run_dirs[0] / "summary.md").exists()
+
+    # Results are unaffected by logging.
+    assert out_off == out_on == {"components": [{"model": "M1", "manufacturer": "X", "url": "u", "verdict": "match"}]}
+
+
 def test_pipelined_reports_running_tokens_with_breakdown(fake_sdk):
     """on_tokens ticks as each agent finishes; totals accumulate and split into
     kinds (cache_read counted separately from fresh input/output)."""
@@ -370,6 +504,31 @@ def test_skill_mode_tolerates_case_and_whitespace(monkeypatch):
     assert _test_mode() is True
     monkeypatch.setenv("RF_SKILL_MODE", "real")
     assert _test_mode() is False
+
+
+# --- RF_LOG switch (run logging on/off) ------------------------------------
+
+
+def test_logging_enabled_only_for_on_token(monkeypatch):
+    from rf_finder.agent.skill_runner import _logging_enabled
+
+    monkeypatch.setenv("RF_LOG", "on")
+    assert _logging_enabled() is True
+    monkeypatch.setenv("RF_LOG", "  ON ")   # case/whitespace tolerant
+    assert _logging_enabled() is True
+
+
+def test_logging_disabled_when_unset_empty_or_unknown(monkeypatch):
+    from rf_finder.agent.skill_runner import _logging_enabled
+
+    monkeypatch.delenv("RF_LOG", raising=False)
+    assert _logging_enabled() is False        # unset -> off
+    monkeypatch.setenv("RF_LOG", "")
+    assert _logging_enabled() is False        # empty -> off
+    monkeypatch.setenv("RF_LOG", "off")
+    assert _logging_enabled() is False
+    monkeypatch.setenv("RF_LOG", "true")
+    assert _logging_enabled() is False        # unknown token -> off (never by accident)
 
 
 def test_pipelined_uses_test_skills_when_mode_test(fake_sdk, monkeypatch):
