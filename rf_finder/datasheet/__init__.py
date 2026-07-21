@@ -7,6 +7,11 @@ by extracting them from the part's datasheet, with ``source="datasheet"``.
 Requires the ``llm`` optional dependency: ``pip install rf-finder[llm]``.
 """
 
+from rf_finder.datasheet.code_extractors import (
+    msl_level,
+    size_dims,
+    temp_range,
+)
 from rf_finder.datasheet.extractor import (
     EXTRACT_RF_PARAMETERS_INSTRUCTION,
     extract_rf_parameters,
@@ -19,4 +24,7 @@ __all__ = [
     "extract_rf_parameters",
     "to_raw_params",
     "datasheet_text_from_pdf",
+    "temp_range",
+    "size_dims",
+    "msl_level",
 ]
