@@ -330,12 +330,17 @@ class App:
         self._show_tree()
         for v in shown:
             c = v.candidate
-            verdicts = "  ".join(
-                f"{vd.canonical_name}:{_STATUS.get(vd.status, '?')}" for vd in v.verdicts
-            )
+            # The Outcome column reads "match", or "not-verified {passed}/{total}"
+            # so a partial confirmation shows how many of the user's parameters
+            # passed. (A match is all-pass by definition.)
+            if v.overall == "match":
+                outcome = "match"
+            else:
+                passed = sum(1 for vd in v.verdicts if vd.status == "PASS")
+                outcome = f"not-verified {passed}/{len(v.verdicts)}"
             item = self.tree.insert(
                 "", "end",
-                values=(c.model, c.manufacturer, verdicts, c.url),
+                values=(c.model, c.manufacturer, outcome, c.url),
                 tags=(v.overall,),
             )
             self._row_urls[item] = c.url

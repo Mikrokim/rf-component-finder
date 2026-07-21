@@ -38,6 +38,7 @@
 - [x] 5.2 Point `rf_finder/ui/gui.py` at `run_pipeline` and surface the `match`/`not-verified` outcome. The results view is otherwise UNCHANGED: no new column, and its link column keeps showing `c.url` and keeps the double-click deep-link exactly as today
 - [x] 5.3 Re-head the existing link column: `gui.py:350` heads the `url` column **"Datasheet URL"**, but it is filled with `c.url` — the product page (`gui.py:331`), which is also what double-click opens (`gui.py:334`). The column always was the product page and stays the product page; only the heading is wrong. Re-head it to **"Product URL"**. No behavior change — same value, same double-click
 - [x] 5.4 Keep `search_and_verify` available for the table-only tests
+- [x] 5.5 GUI only: the results table's third column shows the outcome as text — `"match"` for a match, `"not-verified {passed}/{total}"` for a not-verified row (how many of the user's parameters passed). Replaces the per-parameter verdict glyph string in that cell; no new column, and the CLI output is unchanged
 
 ## 6. Per-source verification pass (prerequisite for §7)
 
