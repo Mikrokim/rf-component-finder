@@ -134,5 +134,5 @@ The remaining sources per §6's findings — one task per adapter (3rWave needs 
 
 ## 9. Validate
 
-- [ ] 9.1 Run the full test suite
-- [ ] 9.2 `openspec validate add-datasheet-orchestration-pipeline --strict`
+- [x] 9.1 Run the full test suite
+- [x] 9.2 `openspec validate add-datasheet-orchestration-pipeline --strict`
