@@ -281,10 +281,19 @@ class UmsAdapter(Adapter):
             if value is not None:
                 raw_params[canonical] = RawValue(value=value, unit=unit)
 
+        # Datasheet (case 1): the row carries an ``a.doc-link`` whose href is an
+        # absolute PDF on this same host, in the very response search() already
+        # fetched — no extra request, no absolutizing.
+        doc_link = row.css_first("a.doc-link")
+        datasheet_url = (
+            (doc_link.attributes.get("href") or "").strip() if doc_link is not None else ""
+        ) or None
+
         return Candidate(
             model=model,
             manufacturer=self.manufacturer,
             url=url,
             raw_params=raw_params,
             source="table",
+            datasheet_url=datasheet_url,
         )

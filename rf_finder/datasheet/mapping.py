@@ -10,16 +10,18 @@ accordance with:
     ``RawValue`` shape, and ``canonical_unit`` decides the fallback unit.
   - ``models.RawValue`` — ``value`` is a scalar, a ``(low, high)`` range, or a
     list of discrete options; ``unit`` is a source-unit string.
-  - ``ontology.units`` — ``to_canonical`` only converts frequency/power/ratio
-    or passes a matching unit through unchanged, so unit spellings the model
-    emits (e.g. ``"C"``) are reconciled here to the canonical one (``"degC"``).
+  - ``ontology.units`` — ``to_canonical`` converts frequency/power/ratio/length/
+    temperature (e.g. ``degF`` -> ``degC``) or passes a matching unit through
+    unchanged, so unit SPELLINGS the model emits (e.g. ``"Celsius"``/``"C"`` ->
+    ``"degC"``, ``"Fahrenheit"`` -> ``"degF"``) are reconciled to the canonical
+    spelling here, and the numeric CONVERSION then happens in ``to_canonical``.
 
 The shape is chosen from each parameter's ``comparison``:
   - ``contains`` (freq_range, Temperature, VDD): a continuous ``(low, high)``
     range, or a list of discrete options — the band-valued candidate shapes the
     ``contains`` rule compares in ``verifier._compare``. VDD additionally stores
     a lone stated value as the degenerate ``(v, v)`` interval (single_value_ok).
-  - ``min`` / ``max`` / ``eq`` (Gain, NF, P1dB, Size, MSL, ...): a single scalar,
+  - ``min`` / ``max`` / ``eq`` (Gain, NF, P1dB, length, width, MSL, ...): a single scalar,
     picked as the candidate's GUARANTEED value by comparison direction — the
     stated ``min`` (falling back to ``typ``) for a ``min`` rule ("at least"), the
     stated ``max`` (falling back to ``typ``) for a ``max`` rule ("at most"), the
@@ -43,15 +45,53 @@ from rf_finder.models import RawValue
 from rf_finder.ontology.parameters import PARAMETERS
 
 # Unit spellings a datasheet / LLM may emit that differ from the ontology's
-# canonical spelling.  Anything not listed passes through unchanged.
+# canonical spelling. One flat lookup, grouped by comments per unit; matched
+# case-insensitively (see ``_normalize_unit``). Anything not listed passes
+# through unchanged, with its case preserved.
 _UNIT_ALIASES = {
-    "C": "degC",
-    "°C": "degC",
-    "degrees C": "degC",
+    # NB temperature (Celsius/Fahrenheit) is NOT handled here — the LLM emits too
+    # many free-form spellings ("Celsius", "degree Celsius", "deg C", "°C", ...)
+    # for an exact table. ``_normalize_temperature`` handles it tolerantly for
+    # any degC-canonical parameter; see ``_normalize_unit``.
+    # impedance -> Ohm
     "Ohms": "Ohm",
+    # length -> mm, width -> mm  (size units: mm / cm / inch / mil)
+    "mm": "mm", "millimeter": "mm", "millimeters": "mm",
+    "millimetre": "mm", "millimetres": "mm",
+    "cm": "cm", "centimeter": "cm", "centimeters": "cm",
+    "centimetre": "cm", "centimetres": "cm",
+    "inch": "inch", "inches": "inch", "in": "inch", '"': "inch",
+    "mil": "mil", "mils": "mil", "thou": "mil",
 }
 
+# Case-insensitive index (lower-cased keys) for the lookup above. Units NOT
+# listed in ``_UNIT_ALIASES`` stay case-sensitive on purpose — e.g. "mW" and
+# "MW" are different power units and must never be case-folded together.
+_UNIT_ALIASES_LC = {alias.lower(): canonical for alias, canonical in _UNIT_ALIASES.items()}
+
 _NUMBER = re.compile(r"[-+]?\d*\.?\d+")
+
+# A leading degree marker the LLM may prepend to a temperature unit: a ``°``
+# symbol, or ``deg`` / ``degree`` / ``degrees`` (optionally ``.``/spaced).
+_DEGREE_PREFIX = re.compile(r"^\s*(?:°|degrees?|deg)\.?\s*", re.IGNORECASE)
+
+
+def _normalize_temperature(unit: str) -> str | None:
+    """Map any Celsius/Fahrenheit spelling an LLM emits to ``degC`` / ``degF``.
+
+    Tolerant to the ``°`` / ``deg`` / ``degree`` / ``degrees`` prefix, spacing and
+    case — so ``"Celsius"``, ``"degree Celsius"``, ``"deg C"``, ``"°C"`` and ``"C"``
+    all resolve to ``degC`` (and the Fahrenheit forms to ``degF``, which
+    ``units.to_canonical`` then converts). Returns ``None`` when the string is not
+    a recognizable temperature unit, so the caller can fall back to generic
+    handling rather than mis-label it.
+    """
+    core = _DEGREE_PREFIX.sub("", unit.strip()).strip().lower()
+    if core in ("c", "celsius", "centigrade"):
+        return "degC"
+    if core in ("f", "fahrenheit"):
+        return "degF"
+    return None
 
 
 def _numbers(value) -> list[float]:
@@ -71,8 +111,9 @@ def _numbers(value) -> list[float]:
 def _normalize_unit(unit, pdef) -> str | None:
     """Reconcile the emitted unit with the ontology's canonical spelling.
 
-    A STATED unit is alias-reconciled (e.g. ``"C"`` -> ``"degC"``) or passed
-    through unchanged.  A MISSING/empty unit is filled from the ontology ONLY
+    A STATED unit is trimmed and alias-reconciled case-insensitively (e.g.
+    ``"C"``/``"MM"`` -> ``"degC"``/``"mm"``) or passed through unchanged, with its
+    original case preserved.  A MISSING/empty unit is filled from the ontology ONLY
     when the parameter is unambiguous — it has a single accepted unit
     (``len(pdef.units) == 1``), which covers dimensionless params (MSL, canonical
     ``""``) and single-unit ones (Gain -> ``"dB"``).  For a MULTI-unit parameter
@@ -83,7 +124,14 @@ def _normalize_unit(unit, pdef) -> str | None:
     min/max scalar picks use above.
     """
     if unit is not None and unit != "":
-        return _UNIT_ALIASES.get(unit, unit)
+        stated = unit.strip()
+        # Temperature params (canonical degC) get tolerant normalization first —
+        # the LLM's spellings are too varied for the exact alias table.
+        if pdef.canonical_unit == "degC":
+            temp = _normalize_temperature(stated)
+            if temp is not None:
+                return temp
+        return _UNIT_ALIASES_LC.get(stated.lower(), stated)
     if len(pdef.units) == 1:
         return pdef.canonical_unit
     return None

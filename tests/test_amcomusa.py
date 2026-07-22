@@ -78,3 +78,43 @@ class TestVddMapping:
             "<td>+8 / -0.75</td>",
         )
         assert "VDD" not in cand.raw_params
+
+
+_PDF_HREF = (
+    "http://d2f6h2rm95zg9t.cloudfront.net/86467119/"
+    "AM001019SF_1H_Sept_2025_78916787.pdf"
+)
+
+
+class TestDatasheetLink:
+    """The datasheet PDF link (case 1) lives in the row's trailing empty-header cell."""
+
+    def test_reads_the_absolute_pdf_from_the_trailing_cell(self):
+        cand = _parse_one(
+            "<th>Product</th><th>Fmin (GHz)</th><th>Fmax (GHz)</th><th></th>",
+            '<td name="product"><a href="/product-details/x">X</a></td>'
+            "<td>2</td><td>6</td>"
+            f"<td class='pn-pdf'><center><a data-name='datasheet' "
+            f"href='{_PDF_HREF}' target='_blank'><i class='fa'></i></a></center></td>",
+        )
+        assert cand.datasheet_url == _PDF_HREF
+        # It must not leak into the product URL, which stays the product page.
+        assert cand.url.endswith("/product-details/x")
+
+    def test_row_without_a_pdf_anchor_has_no_datasheet_url(self):
+        cand = _parse_one(
+            "<th>Product</th><th>Fmin (GHz)</th><th>Fmax (GHz)</th><th></th>",
+            '<td name="product"><a href="/product-details/y">Y</a></td>'
+            "<td>2</td><td>6</td><td class='pn-pdf'></td>",
+        )
+        assert cand.datasheet_url is None
+
+    def test_ignores_a_non_pdf_anchor(self):
+        """Only a .pdf href counts — a product/detail link in the row is not a datasheet."""
+        cand = _parse_one(
+            "<th>Product</th><th>Fmin (GHz)</th><th>Fmax (GHz)</th><th></th>",
+            '<td name="product"><a href="/product-details/z">Z</a></td>'
+            "<td>2</td><td>6</td>"
+            "<td><a href='/rfq/z'>Request quote</a></td>",
+        )
+        assert cand.datasheet_url is None

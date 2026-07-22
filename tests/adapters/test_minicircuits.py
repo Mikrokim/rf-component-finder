@@ -173,3 +173,73 @@ def test_search_live():
     results = adapter.search(spec)
     assert len(results) > 0
     assert all(c.manufacturer == "Mini-Circuits" for c in results)
+
+
+# ---------------------------------------------------------------------------
+# Datasheet link (case 2: resolved on demand from the product page)
+# ---------------------------------------------------------------------------
+
+_PRODUCT_PAGE_HTML = """
+<html><body>
+  <a href="/WebStore/spec.html">Specs</a>
+  <a href="https://www.minicircuits.com/pdfs/ZHL-2-S+.pdf">DATASHEET</a>
+</body></html>
+"""
+
+
+def test_search_leaves_datasheet_url_none_and_makes_no_extra_request(monkeypatch):
+    """Case 2: the amplifiers table carries no datasheet link."""
+    def _boom(self, url):  # any resolve-time fetch would use _get
+        raise AssertionError(f"search() must not fetch a product page: {url}")
+    monkeypatch.setattr(MiniCircuitsAdapter, "_get", _boom, raising=True)
+    # search() itself still needs the table; feed it the fixture directly instead.
+    cands = MiniCircuitsAdapter()._parse_html(FIXTURE.read_text(encoding="utf-8"))
+    assert cands and all(c.datasheet_url is None for c in cands)
+
+
+def test_resolve_returns_the_datasheet_anchor_from_the_product_page(monkeypatch):
+    adapter = MiniCircuitsAdapter()
+    monkeypatch.setattr(adapter, "_get", lambda url: _PRODUCT_PAGE_HTML)
+    cand = Candidate(model="ZHL-2-S+", manufacturer="Mini-Circuits",
+                     url="https://www.minicircuits.com/WebStore/dashboard.html?model=ZHL-2-S%2B",
+                     raw_params={}, source="table")
+    assert adapter.resolve_datasheet_url(cand) == (
+        "https://www.minicircuits.com/pdfs/ZHL-2-S+.pdf"
+    )
+
+
+def test_resolve_returns_none_on_fetch_failure(monkeypatch):
+    from rf_finder.adapters.base import AdapterError
+    adapter = MiniCircuitsAdapter()
+    def _fail(url):
+        raise AdapterError(manufacturer="Mini-Circuits", context="boom")
+    monkeypatch.setattr(adapter, "_get", _fail)
+    cand = Candidate(model="ZHL-2-S+", manufacturer="Mini-Circuits", url="x",
+                     raw_params={}, source="table")
+    assert adapter.resolve_datasheet_url(cand) is None
+
+
+def test_resolve_returns_none_when_page_has_no_datasheet_link(monkeypatch):
+    adapter = MiniCircuitsAdapter()
+    monkeypatch.setattr(adapter, "_get", lambda url: "<html><body>no link</body></html>")
+    cand = Candidate(model="ZHL-2-S+", manufacturer="Mini-Circuits", url="x",
+                     raw_params={}, source="table")
+    assert adapter.resolve_datasheet_url(cand) is None
+
+
+def test_product_url_percent_encodes_the_plus(monkeypatch):
+    """7.9 regression: an un-encoded '+' yields a 200 page with no datasheet link.
+
+    The product page URL must carry '%2B', so resolve() fetches the encoded URL.
+    """
+    seen = {}
+    def _capture(url):
+        seen["url"] = url
+        return _PRODUCT_PAGE_HTML
+    adapter = MiniCircuitsAdapter()
+    # url unset -> resolve builds it from the model, which is where encoding happens
+    monkeypatch.setattr(adapter, "_get", _capture)
+    cand = Candidate(model="ZHL-2-S+", manufacturer="Mini-Circuits", url="",
+                     raw_params={}, source="table")
+    adapter.resolve_datasheet_url(cand)
+    assert "%2B" in seen["url"] and "S+" not in seen["url"]

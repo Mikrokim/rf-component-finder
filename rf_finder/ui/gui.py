@@ -2,8 +2,8 @@
 
 An alternative to the interactive terminal (`python -m rf_finder`): the same
 search presented as a graphical form and a results table. It reuses the existing
-pipeline unchanged — `build_form`/`collect` for input and the shared
-`rf_finder.search.search_and_verify` core for the work — so results are identical
+flow unchanged — `build_form`/`collect` for input and the shared
+`rf_finder.pipeline.run_pipeline` core for the work — so results are identical
 to the CLI; only input and presentation differ.
 
 Run with:  python -m rf_finder.ui.gui
@@ -25,13 +25,15 @@ from rf_finder.form import build_form, collect
 from rf_finder.form.input import RANGE_COMPARISONS
 from rf_finder.ontology.components import component_labels
 from rf_finder.config import DEFAULT_MAX_RESULTS
-from rf_finder.search import search_and_verify
+from rf_finder.pipeline import run_pipeline
 
 #: Per-parameter verdict symbols (matches the CLI's ``_STATUS`` glyphs).
 _STATUS = {"PASS": "✓", "FAIL": "✗", "UNKNOWN": "?"}
 
-#: Subtle row tint for a matching component (complements the light theme).
+#: Subtle row tints — green for a full match, amber for a not-verified result
+#: (site parameters pass, but the datasheet could not confirm the rest).
 _MATCH_ROW = "#e8f8ef"
+_NOT_VERIFIED_ROW = "#fdf3e0"
 
 #: Source-column markers so a row's origin is clear (both engines share the table).
 _SRC_SEARCH = "🔎 Search"
@@ -369,7 +371,7 @@ class App:
         UI thread.
         """
         try:
-            verified = search_and_verify(spec)
+            verified = run_pipeline(spec)
         except Exception as e:   # never let a worker exception vanish silently
             self._result_queue.put(("error", e))
             return
@@ -423,36 +425,46 @@ class App:
         messagebox.showerror("Search failed", str(exc))
 
     def _deliver_results(self, verified: list) -> None:
-        """Populate the table with the matching components only (partial/fail hidden)."""
+        """Populate the table with accepted components (match + not-verified).
+
+        The pipeline returns only accepted candidates, already ordered match
+        first; each is tagged ``match`` or ``not-verified`` (its row tint).
+        """
         self._set_searching(False)
         self.last_results = verified
         self._clear_results()
 
-        matches = [v for v in verified if v.overall == "match"]
-        screened = len(verified)
-
-        if not matches:
-            self.status_var.set(f"No matching components ({screened} screened)")
+        if not verified:
+            self.status_var.set("No matching components")
             self._show_empty("No matching components found — try relaxing the filters.")
             return
 
-        shown = matches[:self.max_results]
-        if len(matches) > self.max_results:
+        n_match = sum(1 for v in verified if v.overall == "match")
+        n_nv = sum(1 for v in verified if v.overall == "not-verified")
+
+        shown = verified[:self.max_results]
+        if len(verified) > self.max_results:
             self.status_var.set(
-                f"Showing top {self.max_results} of {len(matches)} matches — refine the filters to narrow down"
+                f"Showing top {self.max_results} of {len(verified)} results "
+                f"({n_match} match, {n_nv} not-verified) — refine the filters to narrow down"
             )
         else:
-            self.status_var.set(f"{len(matches)} match(es)")
+            self.status_var.set(f"{n_match} match(es), {n_nv} not-verified")
 
         self._show_tree()
         for v in shown:
             c = v.candidate
-            verdicts = "  ".join(
-                f"{vd.canonical_name}:{_STATUS.get(vd.status, '?')}" for vd in v.verdicts
-            )
+            # The Outcome column reads "match", or "not-verified {passed}/{total}"
+            # so a partial confirmation shows how many of the user's parameters
+            # passed. (A match is all-pass by definition.)
+            if v.overall == "match":
+                outcome = "match"
+            else:
+                passed = sum(1 for vd in v.verdicts if vd.status == "PASS")
+                outcome = f"not-verified {passed}/{len(v.verdicts)}"
             item = self.tree.insert(
                 "", "end",
-                values=(_SRC_SEARCH, c.model, c.manufacturer, verdicts, c.url),
+                values=(_SRC_SEARCH, c.model, c.manufacturer, outcome, c.url),
                 tags=(v.overall,),
             )
             self._row_urls[item] = c.url
@@ -618,13 +630,15 @@ class App:
             ("model", "Model", 170, "w"),
             ("manufacturer", "Manufacturer", 130, "w"),
             ("verdicts", "Verdicts", 240, "w"),
-            ("url", "Datasheet URL", 300, "w"),
+            ("url", "Product URL", 300, "w"),
         ):
             self.tree.heading(key, text=text)
             self.tree.column(key, width=width, anchor=anchor)
 
-        # Only matching rows are shown; give them a subtle tint over the theme.
+        # Accepted rows get a subtle tint over the theme: green for a full
+        # match, amber for a not-verified result.
         self.tree.tag_configure("match", background=_MATCH_ROW)
+        self.tree.tag_configure("not-verified", background=_NOT_VERIFIED_ROW)
 
         self._vsb = ttk.Scrollbar(self.results_area, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=self._vsb.set)

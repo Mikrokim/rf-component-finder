@@ -191,10 +191,17 @@ class MacomAdapter(Adapter):
         part_url = part.get("partUrl") or f"/products/product-detail/{model}"
         url = _BASE_URL + part_url if part_url.startswith("/") else part_url
 
+        # Datasheet (case 1): the same ``data-part`` blob carries an absolute
+        # cdn.macom.com PDF link, so it costs no extra request and needs no
+        # absolutizing.  ~2% of parts omit it and legitimately stay None — those
+        # parts publish no datasheet at all (their product pages have none either).
+        datasheet_url = str(part.get("datasheetHref") or "").strip() or None
+
         return Candidate(
             model=model,
             manufacturer=self.manufacturer,
             url=url,
             raw_params=raw_params,
             source="table",
+            datasheet_url=datasheet_url,
         )

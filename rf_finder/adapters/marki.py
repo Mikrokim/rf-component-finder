@@ -24,37 +24,29 @@ Live HTML structure (verified 2026-06-30, not just from research):
     (square brackets), so headers are normalised (brackets stripped) and matched
     by name, never hard-coded by position.
 
-Two-pass plan
--------------
-Pass 1 (always) — the search table: model, freq_range, Gain, NF, Psat, IP3
-(Marki publishes OIP3), P1dB, and the product URL.
+Single-pass plan
+----------------
+This adapter extracts ONLY the parameters that appear on the all-products search
+table: model, freq_range, Gain, NF, Psat, IP3 (Marki publishes OIP3), P1dB, and
+the product URL.  It never fetches individual product pages.
 
-Pass 2 (only when the query constrains Size / VDD / Temperature) — one extra GET
-per candidate product page (``/products/{pkg}/amplifiers/{slug}/``) for:
-  * Size        — a column on the product-page table ("{W} x {H} mm").  Stored as
-                  the larger dimension in mm (the ontology models Size as a scalar
-                  "max" in mm); the EVB variant row (Size "-") is ignored by
-                  matching the row whose part number equals the model.
-  * VDD         — from the SvelteKit JS payload ``power_supply_voltage:[{value:"5"}]``
-                  (volts); the first value the shared VDD parser accepts, as an
-                  interval/list.  Bare-die parts without SnP files have no such
-                  field -> VDD stays UNKNOWN.
-  * Temperature — from ``temperature:"25"`` in the same payload.  This is the single
-                  characterisation temperature, so it is stored as a degenerate
-                  range ``(t, t)`` °C: the ontology compares Temperature with
-                  "contains", and a single point honestly does not contain a wider
-                  operating band (-> FAIL / UNKNOWN, never a false PASS).
+Params NOT on the search table — Size, VDD, Temperature — are therefore left
+UNKNOWN by this adapter and verify as UNKNOWN (REQ-4.1).  They are the job of the
+datasheet-extraction pipeline, not this scrape.  (Historically a gated second pass
+fetched each product page for these three params; that pass was removed in favour
+of table-only extraction.)
 
-Pass 2 is gated on the query to avoid ~123 product-page fetches for the common
-freq/gain search; absent params simply verify as UNKNOWN (REQ-4.1).
+MSL is likewise always UNKNOWN — it is not present anywhere in the site HTML as of
+June 2026, only in datasheet PDFs.
 
-MSL is not present anywhere in the site HTML (search table, product page, or JS
-payload) as of June 2026 — only in datasheet PDFs / compliance docs, which are NOT
-fetched programmatically.  MSL is therefore always left UNKNOWN; flag parts for
-manual datasheet review if the Verifier requires MSL.
+Datasheet link (case 2): the search table's Datasheet column links to a landing
+PAGE, not a PDF, so ``search()`` carries that page URL in ``datasheet_url`` and
+``resolve_datasheet_url`` follows it — on demand, per candidate — to the real
+``/assets/{uuid}/….pdf``.  This adapter therefore now DOES fetch beyond /search/
+(one page per candidate about to be enriched); robots.txt allows both hops.
 
-robots.txt: /search/ and the product pages are allowed; datasheet PDFs are not
-fetched.  Compliance: browser User-Agent + a minimum delay between live fetches.
+robots.txt: /search/, the per-part /…/datasheet/ pages and /assets/*.pdf are all
+allowed (the file is a deny-list of named bad bots; ``*`` is unrestricted).  Compliance: browser User-Agent + a minimum delay between live fetches.
 Cloudflare: a browser-style User-Agent avoids the challenge for these URLs; if a
 large ``item_per_page`` is challenged, the fetch falls back to 50-per-page paging.
 """
@@ -62,13 +54,13 @@ large ``item_per_page`` is challenged, the fetch falls back to 50-per-page pagin
 from __future__ import annotations
 
 import re
+from urllib.parse import urljoin
 
 from selectolax.parser import HTMLParser
 
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
-from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -84,9 +76,6 @@ _ITEM_PER_PAGE = 200
 _FALLBACK_ITEM_PER_PAGE = 50
 _MAX_PAGES = 50  # safety bound for the paging loop
 
-# Params that require a per-product page fetch (Pass 2).
-_PRODUCT_PAGE_PARAMS = frozenset({"Size", "VDD", "Temperature"})
-
 # ---------------------------------------------------------------------------
 # Column mapping: normalised header text -> (canonical_name, source unit)
 #
@@ -95,6 +84,15 @@ _PRODUCT_PAGE_PARAMS = frozenset({"Size", "VDD", "Temperature"})
 # Subfamily, Datasheet, SnP, Package Type, Status — are ignored.
 # ---------------------------------------------------------------------------
 
+# The normalised header of the column carrying the per-part datasheet LANDING
+# PAGE (not the PDF), and the exact link text of the PDF on that page.  The page
+# also carries two site-wide "Online Catalog" PDFs — real, parseable PDFs — so
+# matching anything looser than this text would hand the extractor a catalogue
+# and, because that counts as "datasheet read", DROP the part instead of
+# reporting it not-verified.
+_DATASHEET_COLUMN = "datasheet"
+_DATASHEET_LINK_TEXT = "download pdf"
+
 SCALAR_COLUMN_MAP: dict[str, tuple[str, str]] = {
     "gain db":  ("Gain", "dB"),
     "nf db":    ("NF",   "dB"),
@@ -102,11 +100,6 @@ SCALAR_COLUMN_MAP: dict[str, tuple[str, str]] = {
     "oip3 dbm": ("IP3",  "dBm"),
     "p1db dbm": ("P1dB", "dBm"),
 }
-
-# SvelteKit JS-payload field extractors (Pass 2).
-_VDD_RE = re.compile(r'power_supply_voltage:\[\{value:"([^"]*)"')
-_TEMP_RE = re.compile(r'temperature:"([^"]*)"')
-_NUMBER_RE = re.compile(r"[-+]?\d*\.?\d+")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -154,6 +147,25 @@ def _header_names(table) -> list[str]:
     return [_normalize_header(th.text(strip=True)) for th in header_rows[-1].css("th")]
 
 
+def _row_datasheet_page(cells, data_headers: list[str]) -> str | None:
+    """The href of the row's ``Datasheet`` column, absolutized — or ``None``.
+
+    This is a landing PAGE (``/products/{package}/amplifiers/{model}/datasheet/``),
+    NOT the PDF; ``resolve_datasheet_url`` follows it.  It is READ from the column
+    rather than derived from the product URL: the two coincide on every live row
+    today, but a constructed URL is exactly how the Mini-Circuits datasheet lookup
+    failed silently.
+    """
+    for i, cell in enumerate(cells):
+        if i >= len(data_headers) or data_headers[i] != _DATASHEET_COLUMN:
+            continue
+        a_tag = cell.css_first("a")
+        href = (a_tag.attributes.get("href") or "") if a_tag is not None else ""
+        if href:
+            return urljoin(_BASE_URL, href)
+    return None
+
+
 def _row_model_and_url(row) -> tuple[str, str] | None:
     """Extract (model, product_url) from a row's leading ``<th><a>``; None if absent."""
     a_tag = row.css_first("th a")
@@ -170,40 +182,6 @@ def _row_model_and_url(row) -> tuple[str, str] | None:
     else:
         url = f"{_BASE_URL}{_SEARCH_PATH}?keyword={model}"
     return model, url
-
-
-def _parse_size_mm(cell_text: str) -> float | None:
-    """Parse a "{W} x {H} mm" size cell into the larger dimension (mm).
-
-    The ontology models Size as a scalar "max" in mm, so the worst-case
-    (largest) dimension is the meaningful value for a footprint constraint.
-    Returns None for missing/sentinel cells.
-    """
-    t = cell_text.strip()
-    if t in _MISSING_SENTINELS or not t:
-        return None
-    nums = [float(m) for m in _NUMBER_RE.findall(t)]
-    if not nums:
-        return None
-    return max(nums)
-
-
-def _first_parseable(values: list[str]) -> float | None:
-    """Return the first value that parses as a float, else None."""
-    for v in values:
-        f = _parse_float(v)
-        if f is not None:
-            return f
-    return None
-
-
-def _first_vdd(values: list[str]) -> tuple[float, float] | list[float] | None:
-    """First value the shared VDD parser accepts (interval/list), else None."""
-    for v in values:
-        vdd = parse_vdd(v)
-        if vdd is not None:
-            return vdd
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -224,24 +202,43 @@ class MarkiMicrowaveAdapter(Adapter):
     def search(self, spec: QuerySpec) -> list[Candidate]:
         """Fetch the amplifier catalogue and return every row as a Candidate.
 
-        Pass 1 fetches the search table (all pages).  Pass 2 — a per-product
-        page fetch for Size / VDD / Temperature — runs only when the query
-        constrains one of those params, avoiding ~123 needless requests.  No
-        server-side filtering is applied; the Verifier applies all constraints.
+        Only the all-products search table is fetched; each row's on-table
+        params are returned as-is.  Params absent from the table (Size, VDD,
+        Temperature, MSL) are left UNKNOWN.  No server-side filtering is
+        applied; the Verifier applies all constraints.
         """
-        candidates = self._fetch_search_candidates()
+        return self._fetch_search_candidates()
 
-        if self._needs_product_pages(spec):
-            candidates = [self._enrich_candidate(c) for c in candidates]
+    def resolve_datasheet_url(self, cand: Candidate) -> str | None:
+        """Follow the row's datasheet landing page and return the real PDF link.
 
-        return candidates
+        Case 2: the table's Datasheet column links to an HTML page, and the PDF
+        lives on it under an ``/assets/{uuid}/`` path that cannot be constructed
+        from the model — so one request per candidate is unavoidable.  The
+        pipeline only calls this for candidates it is about to enrich.
 
-    @staticmethod
-    def _needs_product_pages(spec: QuerySpec) -> bool:
-        return any(c.canonical_name in _PRODUCT_PAGE_PARAMS for c in spec.constraints)
+        Returns ``None`` on any failure, and NEVER falls back to
+        ``cand.datasheet_url`` (the base-class default does): that value is an
+        HTML page, which the caller would then try to parse as a PDF.
+        """
+        page_url = cand.datasheet_url
+        if not page_url:
+            return None
+        try:
+            html = self._request(page_url).text
+        except AdapterError:
+            return None
+
+        for a_tag in HTMLParser(html).css("a"):
+            if a_tag.text(strip=True).lower() != _DATASHEET_LINK_TEXT:
+                continue
+            href = a_tag.attributes.get("href") or ""
+            if href:
+                return urljoin(page_url, href)
+        return None
 
     # ------------------------------------------------------------------
-    # Pass 1 — search table
+    # Fetch + parse the search table
     # ------------------------------------------------------------------
 
     def _fetch_search_candidates(self) -> list[Candidate]:
@@ -316,7 +313,8 @@ class MarkiMicrowaveAdapter(Adapter):
                 continue
             model, url = model_url
 
-            raw_params = self._row_params(row.css("td"), data_headers)
+            cells = row.css("td")
+            raw_params = self._row_params(cells, data_headers)
             candidates.append(
                 Candidate(
                     model=model,
@@ -324,6 +322,9 @@ class MarkiMicrowaveAdapter(Adapter):
                     url=url,
                     raw_params=raw_params,
                     source="table",
+                    # NOT the PDF: the Datasheet column links to a landing PAGE.
+                    # resolve_datasheet_url turns it into the real PDF on demand.
+                    datasheet_url=_row_datasheet_page(cells, data_headers),
                 )
             )
 
@@ -365,111 +366,17 @@ class MarkiMicrowaveAdapter(Adapter):
         return raw_params
 
     # ------------------------------------------------------------------
-    # Pass 2 — per-product page enrichment
-    # ------------------------------------------------------------------
-
-    def _enrich_candidate(self, candidate: Candidate) -> Candidate:
-        """Return *candidate* with Size / VDD / Temperature merged from its page.
-
-        Resilient (NFR-4): a product-page fetch or parse failure leaves those
-        params UNKNOWN and returns the original candidate unchanged.
-        """
-        try:
-            html = self._fetch(self._product_path(candidate.url))
-        except AdapterError:
-            return candidate
-
-        extra = self._extract_product_details(html, candidate.model)
-        if not extra:
-            return candidate
-
-        merged = dict(candidate.raw_params)
-        merged.update(extra)
-        return Candidate(
-            model=candidate.model,
-            manufacturer=candidate.manufacturer,
-            url=candidate.url,
-            raw_params=merged,
-            source=candidate.source,
-        )
-
-    @staticmethod
-    def _product_path(url: str) -> str:
-        """Return the path portion of a product URL for fetching."""
-        if url.startswith(_BASE_URL):
-            return url[len(_BASE_URL):]
-        return url
-
-    def _extract_product_details(self, html: str, model: str) -> dict[str, RawValue]:
-        """Extract Size (table) and VDD / Temperature (JS payload) for *model*."""
-        extra: dict[str, RawValue] = {}
-
-        size = self._extract_size(html, model)
-        if size is not None:
-            extra["Size"] = RawValue(value=size, unit="mm")
-
-        vdd = _first_vdd(_VDD_RE.findall(html))
-        if vdd is not None:
-            extra["VDD"] = RawValue(value=vdd, unit="V")
-
-        temp = _first_parseable(_TEMP_RE.findall(html))
-        if temp is not None:
-            # Single characterisation point -> degenerate (t, t) range for the
-            # ontology's "contains" comparison; never a false PASS for a band.
-            extra["Temperature"] = RawValue(value=(temp, temp), unit="degC")
-
-        return extra
-
-    @staticmethod
-    def _extract_size(html: str, model: str) -> float | None:
-        """Return the Size (largest dim, mm) from the product table row for *model*.
-
-        The product table carries a "Size" column and one row per variant; the
-        EVB row lists Size "-", so the row whose part number equals *model* is
-        selected.
-        """
-        tree = HTMLParser(html)
-        table = tree.css_first("table")
-        if table is None:
-            return None
-
-        col_names = _header_names(table)
-        size_idx = next(
-            (i for i, h in enumerate(col_names) if h.startswith("size")), None
-        )
-        if size_idx is None or size_idx == 0:
-            return None
-        # td cells align to col_names[1:], so the Size td is at size_idx - 1.
-        td_size_idx = size_idx - 1
-
-        tbody = table.css_first("tbody")
-        if tbody is None:
-            return None
-
-        target = model.strip().lower()
-        for row in tbody.css("tr"):
-            a_tag = row.css_first("th a")
-            if a_tag is None or a_tag.text(strip=True).strip().lower() != target:
-                continue
-            cells = row.css("td")
-            if td_size_idx < len(cells):
-                return _parse_size_mm(cells[td_size_idx].text(strip=True))
-            return None
-        return None
-
-    # ------------------------------------------------------------------
     # HTTP
     # ------------------------------------------------------------------
 
-    def _fetch(self, path: str) -> str:
-        """GET ``_BASE_URL + path`` (cache-first) and return the response text.
+    def _request(self, url: str) -> http.FetchResult:
+        """GET *url* (absolute) cache-first; raise ``AdapterError`` on failure.
 
-        Serves both the Pass-1 search pages and the Pass-2 per-product pages —
-        no special handling; both ride the same cache path. The shared provider
-        owns the User-Agent, the 1.5 s delay, the timeout and retries. Raises
-        ``AdapterError`` when a page is unreachable with no cached copy.
+        The shared provider owns the User-Agent, the 1.5 s delay, the timeout
+        and retries. A ``None`` body (unreachable, no cached copy) is raised as
+        ``AdapterError`` so callers can treat "no page" uniformly — search skips
+        the source, ``resolve_datasheet_url`` returns ``None``.
         """
-        url = _BASE_URL + path
         result = http.fetch(
             self.manufacturer,
             url,
@@ -486,4 +393,12 @@ class MarkiMicrowaveAdapter(Adapter):
                 manufacturer=self.manufacturer,
                 context=f"HTTP error fetching {url}",
             )
-        return result.text
+        return result
+
+    def _fetch(self, path: str) -> str:
+        """GET ``_BASE_URL + path`` (cache-first) and return the response text.
+
+        A thin relative-path convenience over ``_request``; the search pages and
+        the per-product datasheet landing pages both ride the same cache path.
+        """
+        return self._request(_BASE_URL + path).text

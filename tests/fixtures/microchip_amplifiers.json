@@ -3,7 +3,8 @@
     "note": "LNA, Bias string, OIP3 + P1dB, no NF; real capture",
     "product": {
       "partNumber": "MMA044AA",
-      "productUrl": "https://www.microchipdirect.com/product/MMA044AA"
+      "productUrl": "https://www.microchipdirect.com/product/MMA044AA",
+      "datasheetUrl": "https://ww1.microchip.com/downloads/aemDocuments/documents/RFDS/ProductDocuments/DataSheets/MMA044AA-5-GHz-20-GHz+GaAs-pHEMT-MMIC-Wideband-LNA-DS00004231B.pdf"
     },
     "physical": {
       "packageWidthOrSize": "1.351 x 1.121 x 0.1 mm",

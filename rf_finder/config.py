@@ -13,8 +13,19 @@ value, raises ``ConfigError`` rather than silently falling back to a default.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+#: Load the repo-root ``.env`` (git-ignored) so secrets like ``GEMINI_API_KEY``
+#: and the ``RF_LLM_*`` overrides below are available as environment variables.
+#: The path is anchored to this file rather than the working directory, so it
+#: works whichever directory the CLI/GUI is launched from. A real environment
+#: variable always wins: ``load_dotenv`` does not override what is already set.
+#: A missing ``.env`` is fine — nothing is loaded and the defaults apply.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # ---------------------------------------------------------------------------
 # Defaults (see design.md D7)
@@ -110,7 +121,17 @@ def load_max_results(path: str | Path | None = None) -> int:
         raise ConfigError(f"max_results must be a positive integer, got {value!r}")
     return value
 
+DATASHEET_PROVIDER = os.environ.get("RF_LLM_PROVIDER", "gemini")
+#e.g. gemini-2.5-flash (cheap/fast) | gemini-2.5-pro (higher accuracy) | gemini-3.5-flash
+DATASHEET_MODEL = os.environ.get("RF_LLM_MODEL", "gemini-2.5-flash")
+
+#: Sampling temperature for the datasheet extractor. Datasheet extraction is a
+#: deterministic transcription task ("COPY EXACTLY / never guess"), so the
+#: default is 0.0 for reproducible output; override with RF_LLM_TEMPERATURE.
+#: (Passing None would fall back to the provider's own default, e.g. Gemini's.)
+DATASHEET_TEMPERATURE = float(os.environ.get("RF_LLM_TEMPERATURE", "0.0"))
+ 
 # LLM used to extract parameters from datasheet PDFs.
 # Edit these to change the model/provider — no config file, no arguments.
-DATASHEET_PROVIDER = "local"   # "local" (Ollama) | "openai" | "mock"
-DATASHEET_MODEL = "qwen3:8b"   # model name for the chosen provider
+#DATASHEET_PROVIDER = "local"   # "local" (Ollama) | "openai" | "mock"
+#DATASHEET_MODEL = "llama3.1:8b"#"qwen3:8b"   # model name for the chosen provider

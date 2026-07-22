@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER, DATASHEET_TEMPERATURE
 from rf_finder.datasheet import (
     EXTRACT_RF_PARAMETERS_INSTRUCTION,
     extract_rf_parameters,
@@ -54,7 +55,8 @@ class MockRuntime:
     calls: list[dict] = field(default_factory=list)
 
     def run(
-        self, *, instruction: str, provider: str, input: dict, model=None
+        self, *, instruction: str, provider: str, input: dict, model=None,
+        temperature=None,
     ) -> _Result:
         self.calls.append(
             {
@@ -62,6 +64,7 @@ class MockRuntime:
                 "provider": provider,
                 "input": input,
                 "model": model,
+                "temperature": temperature,
             }
         )
         return self.provider_map[provider].respond()
@@ -69,11 +72,10 @@ class MockRuntime:
 
 def _runtime(canned_output: str = "", fail_with: str | None = None) -> MockRuntime:
     provider = MockProvider(canned_output, fail_with)
-    # Register under every provider name the tests exercise; the mock answers
-    # the same regardless of which one the extractor routes to.
-    return MockRuntime(
-        provider_map={"openai": provider, "local": provider, "mock": provider}
-    )
+    # Key the map by the configured provider, so these tests keep working
+    # whichever provider DATASHEET_PROVIDER names — the mock answers the same
+    # regardless of which one the extractor routes to.
+    return MockRuntime(provider_map={DATASHEET_PROVIDER: provider})
 
 
 _FOUND_GAIN = {
@@ -101,7 +103,7 @@ def test_run_receives_instruction_and_both_context_keys():
 
     (call,) = rt.calls
     assert call["instruction"] == EXTRACT_RF_PARAMETERS_INSTRUCTION
-    assert call["provider"] == "local"          # from DATASHEET_PROVIDER
+    assert call["provider"] == DATASHEET_PROVIDER   # routed from config, not passed in
     assert call["input"] == {
         "datasheet": "DATASHEET TEXT",
         "requested_parameters": ["gain"],
@@ -154,14 +156,26 @@ def test_discrete_supply_list_value_passes_through():
 
 
 def test_model_comes_from_config_variable_not_a_parameter():
-    # The model is read from DATASHEET_MODEL in rf_finder.config (qwen3:8b),
-    # not passed as an argument.
+    # The model is read from DATASHEET_MODEL in rf_finder.config, not passed as
+    # an argument — so it tracks config rather than a value pinned here.
     rt = _runtime(json.dumps({"gain": None}))
 
     extract_rf_parameters("...", ["gain"], runtime=rt)
 
     (call,) = rt.calls
-    assert call["model"] == "qwen3:8b"
+    assert call["model"] == DATASHEET_MODEL
+
+
+def test_temperature_comes_from_config_variable():
+    # The sampling temperature is read from DATASHEET_TEMPERATURE in
+    # rf_finder.config and forwarded to the runtime, so extraction stays
+    # deterministic ("COPY EXACTLY") rather than at the provider's default.
+    rt = _runtime(json.dumps({"gain": None}))
+
+    extract_rf_parameters("...", ["gain"], runtime=rt)
+
+    (call,) = rt.calls
+    assert call["temperature"] == DATASHEET_TEMPERATURE
 
 
 # ---------------------------------------------------------------------------

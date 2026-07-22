@@ -11,6 +11,12 @@ Power canonical unit: dBm
 
 Ratio canonical unit: dB
     dB → dB            (identity; dB is a dimensionless ratio, e.g. gain, NF)
+
+Length canonical unit: mm
+    mm, cm, inch, mil → mm   (linear factors; package length/width)
+
+Temperature canonical unit: degC
+    degC, degF → degC        (degC = (degF - 32) * 5/9; operating temperature)
 """
 
 import math
@@ -46,6 +52,32 @@ def _power_to_dbm(value: float, from_unit: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Temperature: all → degC
+# ---------------------------------------------------------------------------
+
+def _temp_to_degc(value: float, from_unit: str) -> float:
+    if from_unit == "degC":
+        return value
+    if from_unit == "degF":
+        return (value - 32.0) * 5.0 / 9.0
+    raise ValueError(
+        f"Unknown temperature unit '{from_unit}'; expected one of: degC, degF"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Length: all → mm
+# ---------------------------------------------------------------------------
+
+_LEN_TO_MM: dict[str, float] = {
+    "mm":   1.0,
+    "cm":   10.0,
+    "inch": 25.4,     # 1 inch = 25.4 mm (exact, by definition)
+    "mil":  0.0254,   # 1 mil = 1/1000 inch = 0.0254 mm
+}
+
+
+# ---------------------------------------------------------------------------
 # Which units may be entered for each canonical unit (drives the form selectors)
 # ---------------------------------------------------------------------------
 
@@ -60,15 +92,19 @@ _CANONICAL_UNITS: dict[str, list[str]] = {
     "dBm": ["dBm", "W", "mW"],
     # Ratio: dimensionless — only dB.
     "dB": ["dB"],
+    # Length: mm canonical first (unlike frequency, mm is not the largest
+    # factor, so canonical is prepended rather than sorted to the top), then the
+    # other units the conversion table accepts, by ascending size.
+    "mm": ["mm", *sorted((u for u in _LEN_TO_MM if u != "mm"), key=lambda u: _LEN_TO_MM[u])],
 }
 
 
 def units_for(canonical: str) -> list[str]:
     """Return all units convertible to *canonical*, canonical first.
 
-    A canonical unit with no alternative-unit converter (e.g. ``V``, ``mm``,
-    ``degC``, ``""``) returns ``[canonical]`` — its only accepted unit. A fresh
-    list is returned each call so callers can't mutate the registry.
+    A canonical unit with no alternative-unit converter (e.g. ``V``, ``degC``,
+    ``""``) returns ``[canonical]`` — its only accepted unit. A fresh list is
+    returned each call so callers can't mutate the registry.
     """
     return list(_CANONICAL_UNITS.get(canonical, [canonical]))
 
@@ -84,7 +120,7 @@ def to_canonical(value: float, from_unit: str, canonical: str) -> float:
     ----------
     value:     numeric value in *from_unit*.
     from_unit: source unit string (case-sensitive).
-    canonical: target canonical unit — must be ``"GHz"`` or ``"dBm"``.
+    canonical: target canonical unit — ``"GHz"``, ``"dBm"``, ``"dB"``, ``"mm"``, or ``"degC"``.
 
     Returns
     -------
@@ -112,6 +148,15 @@ def to_canonical(value: float, from_unit: str, canonical: str) -> float:
     if canonical == "dBm":
         return _power_to_dbm(value, from_unit)
 
+    if canonical == "mm":
+        factor = _LEN_TO_MM.get(from_unit)
+        if factor is None:
+            raise ValueError(
+                f"Unknown length unit '{from_unit}'; "
+                f"expected one of: {', '.join(_LEN_TO_MM)}"
+            )
+        return value * factor
+
     if canonical == "dB":
         # dB is a dimensionless ratio (gain, noise figure, …); its only valid
         # source unit is dB itself, so the conversion is the identity.
@@ -121,6 +166,9 @@ def to_canonical(value: float, from_unit: str, canonical: str) -> float:
             )
         return value
 
+    if canonical == "degC":
+        return _temp_to_degc(value, from_unit)
+
     raise ValueError(
-        f"Unsupported canonical unit '{canonical}'; expected 'GHz', 'dBm', or 'dB'"
+        f"Unsupported canonical unit '{canonical}'; expected 'GHz', 'dBm', 'dB', 'mm', or 'degC'"
     )

@@ -54,6 +54,28 @@ but multi-hop and enumeration-driven rather than one-shot.
 
 ---
 
+## 1b. Datasheet link — where it lives (verified live 2026-07-20)
+
+**Case 1 — the link comes back from the MCP `search()` already calls.**
+
+`datasheetUrl` is returned directly by the MCP — both in `search_products`' `product` dict
+and in `search_product_physical_specs`' `physical` — absolute, e.g.
+`https://ww1.microchip.com/downloads/…/MMA044AA-…-DS00004231B.pdf`. No extra request, no
+HTML scrape. Coverage ~87%. The microchipdirect feed (hop 3) has NO datasheet field.
+**Implemented:** `_build_candidate` reads
+`product.get("datasheetUrl") or physical.get("datasheetUrl")`.
+
+- **Compliance nuance:** the LINK comes from `api.microchip.com`, which serves no robots.txt
+  (public, no-auth, agent-built) — pulling it is unambiguously allowed. The FILE lives on
+  `ww1.microchip.com`, whose robots is `User-agent: * / Disallow: /`. Carrying a URL and
+  fetching it are different acts; the adapter supplies it (decided with the user), and the
+  pipeline's later *fetch* of ww1 is a separate decision.
+- **Clean alternative if that fetch is ever disallowed:** the MCP tool
+  `search_microchip_product_documents` returns datasheet *content* (markdown, per page)
+  straight from `api.microchip.com`, sidestepping ww1 entirely.
+
+---
+
 ## 2. How Microchip serves product data (investigation findings, REQ-3.3)
 
 Decision rule (*official API → parametric URL → scrape*), all live-verified:

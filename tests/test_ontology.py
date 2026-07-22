@@ -8,7 +8,7 @@ from rf_finder.ontology.components import COMPONENTS, component_labels
 
 _AMPLIFIER_PARAMS = {
     "freq_range", "P1dB", "Gain", "NF", "IP3", "Psat",
-    "VDD", "Size", "MSL", "Temperature",
+    "VDD", "length", "width", "MSL", "Temperature",
 }
 
 
@@ -102,9 +102,15 @@ class TestFreqRangeUnits:
             assert PARAMETERS[name].units == ["dBm", "W", "mW"]
 
     def test_params_without_a_converter_offer_only_their_canonical(self):
-        for name in ("Gain", "NF", "VDD", "Size", "Temperature", "MSL"):
+        for name in ("Gain", "NF", "VDD", "Temperature", "MSL"):
             p = PARAMETERS[name]
             assert p.units == [p.canonical_unit]
+
+    def test_length_params_offer_every_convertible_unit(self):
+        # length/width canonical mm, plus the linear length units the converter
+        # accepts (mm listed first per REQ-1.4).
+        for name in ("length", "width"):
+            assert PARAMETERS[name].units == ["mm", "mil", "cm", "inch"]
 
     def test_every_offered_unit_is_convertible(self):
         # The invariant that makes deriving units safe: every unit the form

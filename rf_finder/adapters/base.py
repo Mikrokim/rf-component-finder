@@ -9,7 +9,11 @@ from rf_finder.models import Candidate, QuerySpec, RawValue
 # but do not describe its RF performance. A candidate carrying ONLY these (e.g. a
 # non-RF part that a vendor lists with a supply voltage but no freq/gain/etc.)
 # cannot be evaluated as an amplifier, so it counts as having no usable data.
-_SECONDARY_PARAMS = frozenset({"VDD", "Size", "MSL", "Temperature"})
+# ``Size`` is retained transitionally: the ontology now models physical size as
+# two params (``length``/``width``), but the Marki/Microchip adapters still emit
+# a single ``Size`` RawValue pending their rework, so it must stay classified as
+# secondary here to keep ``drop_paramless`` from treating a size-only part as RF.
+_SECONDARY_PARAMS = frozenset({"VDD", "length", "width", "Size", "MSL", "Temperature"})
 
 
 def drop_paramless(candidates: list[Candidate]) -> list[Candidate]:
@@ -17,7 +21,7 @@ def drop_paramless(candidates: list[Candidate]) -> list[Candidate]:
 
     A candidate keeps only if it has at least one *primary* (RF) parameter —
     ``freq_range``, ``Gain``, ``NF``, ``P1dB``, ``Psat``, ``IP3``. One that has
-    nothing, or only *secondary* params (``VDD``/``Size``/``MSL``/``Temperature``;
+    nothing, or only *secondary* params (``VDD``/``length``/``width``/``MSL``/``Temperature``;
     see ``_SECONDARY_PARAMS``), gives the Verifier no RF spec to check and can only
     surface as an all-UNKNOWN ``partial`` — pure noise rather than a usable result
     (typically non-RF parts mis-listed in a manufacturer's amplifier feed, e.g.
@@ -65,6 +69,33 @@ class Adapter(ABC):
     def search(self, spec: QuerySpec) -> list[Candidate]:
         """Search for components matching spec. Raise AdapterError on failure."""
         ...
+
+    def resolve_datasheet_url(self, cand: Candidate) -> str | None:
+        """Return an absolute datasheet-PDF URL for ``cand``, or ``None``.
+
+        The datasheet-orchestration pipeline calls this only for candidates that
+        still have an UNKNOWN requested parameter, to obtain the link enrichment
+        will fetch. This default serves every **case-1** source — an adapter whose
+        ``search()`` already put the link on the candidate (read inline from the
+        same page/response as the other parameters) — by simply returning
+        ``cand.datasheet_url``.
+
+        Override this only for a **case-2** source, where the link lives on a
+        separate per-part page that ``search()`` does not fetch (e.g.
+        Mini-Circuits, Guerrilla RF): fetch that page here, on demand, and return
+        the absolute PDF href.
+
+        Contract:
+        - Return ``None`` (never raise) when the link cannot be resolved — a
+          failed per-part fetch, a page with no datasheet link, or a robots-
+          disallowed URL. The pipeline treats ``None`` as "no accessible
+          datasheet" and contains any accidental exception per candidate.
+        - Never fetch per-part pages from ``search()`` — that belongs here, so the
+          cost is paid only for candidates that actually need enrichment.
+        - Never return (nor fetch) a URL that the source's ``robots.txt``
+          disallows.
+        """
+        return cand.datasheet_url
 
 
 # Self-registration registry

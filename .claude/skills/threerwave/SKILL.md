@@ -38,6 +38,22 @@ constraints. **Frequency is already in GHz** — no MHz conversion.
 
 ---
 
+## 1b. Datasheet link — where it lives (verified live 2026-07-20)
+
+**Case 3 — there is no datasheet, and no per-part page.**
+
+`/amplifier/` renders 2 `table.tablepress` with **51 rows, 0 of which carry ANY `<a href>`**.
+The page contains **0 `.pdf` hrefs** and **0 occurrences of the word "datasheet"**.
+`sitemap_index.xml` lists only post/page/kboard/category sitemaps; the 18 pages are
+top-level sections (`/amplifier/`, `/filter/`, `/passive/`, `/product/`, …) — no product URLs.
+
+- `datasheet_url` stays `None` — this is correct, not a gap (OQ-3W-6 confirmed).
+- Consequence: a 3rWave candidate with a site-missing requested param can never be
+  enriched, so it is returned `not-verified` when it clears 80% pass-coverage, else dropped.
+  Since `P1dB`, `IP3`, `MSL`, `Temperature` and Size have no column here, that path is common.
+
+---
+
 ## 2. How 3rwave.com serves product data (investigation findings)
 
 REQ-3.3 decision rule (*official API → parametric URL → scrape*):

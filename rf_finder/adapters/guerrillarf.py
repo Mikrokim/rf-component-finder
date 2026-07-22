@@ -38,6 +38,10 @@ _DETAIL_URL = "https://www.guerrilla-rf.com/products/detail/sku/{model}"
 
 _TABLE_IDS = ("genericAmpFunctionTbl", "satPATbl")
 
+# The datasheet PDF is served directly from this path; the same page also links
+# it through /products/DataSheet?… , which returns HTML (see _datasheet_href).
+_DIRECT_PDF_DIR = "/includes/prodFiles/"
+
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA"})
 
 # Normalised header text -> (canonical_name, unit | None). "model", "freq_low",
@@ -61,6 +65,36 @@ _SPECIAL = frozenset({"model", "freq_low", "freq_high", "VDD"})
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _datasheet_href(html: str, model: str) -> str | None:
+    """The detail page's MAIN datasheet PDF for *model* — or ``None``.
+
+    The page offers several PDFs and three of the four decoys are traps:
+
+    * ``/products/DataSheet?sku=…&file_name={MODEL}DS.pdf`` — a viewer page that
+      returns **text/html** while its URL still ends in ``DS.pdf``.  Matching on
+      the filename alone would take it, and ``datasheet_text_from_url`` would then
+      fail the ``%PDF`` guard — a silent loss.
+    * per-frequency "CustomTunes" variants (``GRF2003 1000-5000 MHz.pdf``) live in
+      the **same** ``/includes/prodFiles/{sku}/`` directory as the datasheet, so
+      the directory does not identify it either.
+    * application notes under ``/includes/prodFiles/AppNotes/`` — real PDFs, so
+      picking one would count as "datasheet read" and DROP the candidate.
+
+    The anchor text does not separate them either: both the direct link and the
+    HTML wrapper are labelled "Data Sheet".  What does separate them is the
+    filename being exactly ``{MODEL}DS.pdf`` under the direct ``/includes/``
+    path — anchored on the model we already hold.
+    """
+    wanted = f"{model.lower()}ds.pdf"
+    for a_tag in HTMLParser(html).css("a"):
+        href = (a_tag.attributes.get("href") or "").strip()
+        if _DIRECT_PDF_DIR not in href:
+            continue
+        if href.rsplit("/", 1)[-1].lower() == wanted:
+            return href
+    return None
 
 
 def _normalize_header(raw: str) -> str:
@@ -113,6 +147,30 @@ class GuerrillaRFAdapter(Adapter):
             return []
 
         return drop_paramless(self._parse_html(result.text))
+
+    def resolve_datasheet_url(self, cand: Candidate) -> str | None:
+        """Fetch the part's detail page (cache-first) and return its main
+        datasheet PDF link.
+
+        Case 2: the amplifiers table carries no datasheet link, so this costs one
+        request — paid only for a candidate the pipeline is about to enrich.
+        Picking the right PDF is the whole difficulty (see ``_datasheet_href``);
+        returns ``None`` on any failure, per the ``Adapter`` contract.
+        """
+        result = http.fetch(
+            self.manufacturer,
+            _DETAIL_URL.format(model=cand.model),
+            headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        if result.text is None:
+            return None
+        return _datasheet_href(result.text, cand.model)
 
     def _parse_html(self, html: str) -> list[Candidate]:
         """Parse both amplifier tables; return a combined list of Candidates.

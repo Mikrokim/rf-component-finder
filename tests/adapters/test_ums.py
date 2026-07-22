@@ -143,3 +143,27 @@ def test_search_live():
     results = UmsAdapter().search(spec)
     assert len(results) > 140  # ~156 amplifiers across 5 sub-types
     assert all(c.manufacturer == "UMS" for c in results)
+
+
+# ---------------------------------------------------------------------------
+# Datasheet link (case 1: the row's a.doc-link, already in the fetched page)
+# ---------------------------------------------------------------------------
+
+def test_datasheet_url_from_the_row_doc_link() -> None:
+    """Absolute PDF on the same host — no extra request, no absolutize."""
+    cands = UmsAdapter()._parse_html(
+        (_FIXTURES / "ums_amplifier_hpa.html").read_text(encoding="utf-8")
+    )
+    cand = next(c for c in cands if c.model == "CHA5659-98F")
+    assert cand.datasheet_url == (
+        "https://www.ums-rf.com/wp-content/uploads/2017/01/CHA5659-98F-Full-0301.pdf"
+    )
+    assert cand.url != cand.datasheet_url  # the product page is a separate link
+
+
+def test_row_without_a_doc_link_stays_none() -> None:
+    cands = UmsAdapter()._parse_html(
+        (_FIXTURES / "ums_amplifier_hpa.html").read_text(encoding="utf-8")
+    )
+    cand = next(c for c in cands if c.model == "CHA8200-99F")
+    assert cand.datasheet_url is None

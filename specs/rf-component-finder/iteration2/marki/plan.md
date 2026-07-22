@@ -5,7 +5,13 @@
 > **Date:** 2026-07-02
 > **Investigator:** Phase A planning agent
 > **SDD trace:** REQ-3.1, REQ-3.4, REQ-3.5, REQ-3.6, REQ-4.1, NFR-4, NFR-6 · design.md §6.1–6.2
-> **Pattern:** Server-side-rendered HTML table scrape (SvelteKit) + gated per-product enrichment.
+> **Pattern:** Server-side-rendered HTML table scrape (SvelteKit), table-only.
+
+> **Revision (2026-07-16):** The adapter is now **single-pass, table-only**. The
+> gated per-product-page enrichment (Pass 2 — Size / VDD / Temperature) was
+> **removed**: those params, plus MSL, are left UNKNOWN and are owned by the
+> datasheet-extraction pipeline. Sections below that describe "Pass 2" are retained
+> for history but no longer reflect the code.
 
 ---
 
@@ -30,22 +36,24 @@ tables parsed, and the SvelteKit data payload inspected.
 | Server-side spec filter? | **No** — the F-Low/F-High/Gain/NF inputs are client-side JS only; server returns all rows for a page |
 | Cloudflare? | Present, but a **browser-style UA returns the table** (no challenge observed); large `item_per_page` works |
 | JS rendering required? | **No** for the search table |
-| Params NOT in the search table | **Size**, **VDD**, **Temperature** — require a per-product page fetch |
+| Params NOT in the search table | **Size**, **VDD**, **Temperature** (and **MSL**) — left UNKNOWN; owned by the datasheet pipeline, not fetched here |
 
-### Conclusion: httpx (not playwright), two-pass
+### Conclusion: httpx (not playwright), single-pass table-only
 
-`httpx` + `selectolax` suffice for the search table. A **gated second pass**
-fetches individual product pages only when the query constrains Size/VDD/Temperature.
+`httpx` + `selectolax` suffice for the search table, which is the whole adapter.
 
 The adapter will:
-1. **Pass 1 (always):** GET the search table (paginated); map model, freq_range,
-   Gain, NF, Psat, IP3 (Marki's OIP3), P1dB, product URL.
-2. **Pass 2 (only if the query constrains Size/VDD/Temperature):** one GET per
-   candidate product page for those three params. Absent params verify as UNKNOWN.
-3. Return **all** rows; the Verifier applies constraints (REQ-4.1).
+1. GET the search table (paginated); map model, freq_range, Gain, NF, Psat, IP3
+   (Marki's OIP3), P1dB, product URL.
+2. Return **all** rows; the Verifier applies constraints (REQ-4.1).
 
-> **Design note:** Pass 2 is gated to avoid ~123 product-page fetches for the
-> common freq/gain search. A per-page failure leaves those params UNKNOWN (NFR-4).
+Params absent from the search table — Size, VDD, Temperature, MSL — verify as
+UNKNOWN and are handled by the datasheet-extraction pipeline. Individual product
+pages are **not** fetched.
+
+> **Historical design note:** an earlier version added a gated second pass (one GET
+> per product page for Size/VDD/Temperature) to avoid ~123 fetches on the common
+> freq/gain search. That pass was removed in the 2026-07-16 revision.
 
 ---
 
@@ -216,10 +224,11 @@ product page (`marki_product_adm11425psm.html`, incl. the JS payload line).
 
 ## Summary
 
-- **Fetch:** Pass 1 = paginated GET of the SvelteKit search table (no JS/AJAX);
-  Pass 2 = gated per-product GET for Size/VDD/Temperature.
+- **Fetch:** single-pass paginated GET of the SvelteKit search table (no JS/AJAX).
+  Size/VDD/Temperature/MSL are off-table → UNKNOWN (datasheet pipeline); product
+  pages are not fetched.
 - **Parse:** part number is a row `<th>` (href); `<td>`s align to `headers[1:]`;
   headers normalized (brackets stripped); map by name.
-- **robots.txt:** `/search/` and product pages allowed; datasheet PDFs not fetched.
-- **Files:** `rf_finder/adapters/marki.py`, `tests/adapters/test_marki.py`, two
-  fixtures, plus the `__main__.py` registration import.
+- **robots.txt:** `/search/` allowed; product pages and datasheet PDFs not fetched.
+- **Files:** `rf_finder/adapters/marki.py`, `tests/adapters/test_marki.py`, the
+  `marki_amplifiers.html` fixture, plus the `__main__.py` registration import.

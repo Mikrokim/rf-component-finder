@@ -39,6 +39,23 @@ failing page is skipped, not fatal. The Verifier applies all constraints.
 
 ---
 
+## 1b. Datasheet link — where it lives (verified live 2026-07-20)
+
+**Case 1 — the link is in the row `search()` already parses.**
+
+The `allPnTable` row's LAST cell (empty header) holds an `<a>` pointing straight to an
+ABSOLUTE CloudFront PDF, e.g.
+`http://d2f6h2rm95zg9t.cloudfront.net/…/AM001019SF_1H_….pdf` — same HTML response as the
+row's other params, no extra request. It is currently discarded (the empty-header column is
+skipped).
+
+- Identify it as "the last cell holding an `<a>` to a `.pdf`", **not** by a hardcoded index —
+  the column set differs per category.
+- robots.txt is `Allow: /` (only `/admin`, `/privacy` disallowed); the PDF is on a separate
+  CloudFront CDN.
+
+---
+
 ## 2. How amcomusa.com serves product data (investigation findings)
 
 REQ-3.3 decision rule (*official API → parametric URL → scrape*):

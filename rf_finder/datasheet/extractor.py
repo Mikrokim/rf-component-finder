@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 
-from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER
+from rf_finder.config import DATASHEET_MODEL, DATASHEET_PROVIDER, DATASHEET_TEMPERATURE
 
 EXTRACT_RF_PARAMETERS_INSTRUCTION = """\
 You are an RF component datasheet parameter extraction engine.
@@ -40,49 +40,104 @@ Rules:
       "typ":       <number or null>,
       "max":       <number or null>,
       "value":     <string, number, array of numbers, or null>,
-      "condition": <string or null>    // e.g. "@ 2.4 GHz, Vcc=5V, 25°C"
+      "condition": <string or null>    // the operating point the value is stated
+                                       // at (frequency / supply / temperature);
+                                       // build it ONLY from the datasheet, null if
+                                       // none — never echo this hint text verbatim.
     }
+  ALWAYS output all six keys for a found parameter, in the order above; use the JSON
+  literal null for any that do not apply — do NOT omit keys. "condition" is NEVER the
+  value or its range restated — leave it null unless the datasheet gives a SEPARATE
+  qualifying operating point (bias, frequency, temperature). Emit strictly valid
+  JSON: keep every string value plain and avoid characters that need escaping (for
+  units, spell the word — see PHYSICAL DIMENSIONS).
+
+- FIELD DISCIPLINE — choose the numeric fields OR "value", NEVER both:
+    - A numeric quantity — a range OR a single figure, INCLUDING temperatures and
+      physical dimensions — goes in "min"/"typ"/"max" ONLY, and its "value" stays
+      null. Do NOT also copy the number, the unit, or the raw range text into
+      "value".
+    - "value" is used ONLY for a categorical string (package, MSL, ...) or an
+      explicit list of discrete selectable options; then the numeric fields stay
+      null.
 
 - NUMERIC parameters (gain, noise figure, P1dB, frequency, impedance,
   temperature ranges, ...):
     - If the datasheet gives a min/typ/max range, fill "min"/"typ"/"max" and
       leave "value" null.
     - A two-ended range written as "A to B" (e.g. an operating or storage
-      temperature "-30C to +110C", or "45 MHz to 1218 MHz") is NUMERIC: put A in
+      temperature "-A°C to +B°C", or "A MHz to B MHz") is NUMERIC: put A in
       "min" and B in "max" (keep the sign), and leave "typ"/"value" null. Do NOT
       return it as a string.
+    - RANGE INTEGRITY: both endpoints of a range MUST come from the SAME row / the
+      SAME parameter. NEVER pair a "min" taken from one parameter with a "max"
+      taken from a different, adjacent parameter, even when the two sit on
+      neighbouring lines (a common trap with stacked "operating" vs "storage"
+      temperature rows, or one row's label/subscript spilling onto the next line).
+      If the requested parameter states only one endpoint, fill that one and leave
+      the other null.
+    - COPY EXACTLY: transcribe every number, unit, and condition exactly as printed —
+      same digits, decimal point, and sign. Do NOT shift the decimal, round, rescale,
+      or convert units.
     - If it gives only a SINGLE figure (no range), put it in "typ"; leave
       "min"/"max"/"value" null.
     - Each requested parameter is stated at a SINGLE operating point — return one
       object, not a list.
 
 - SUPPLY parameters (VDD, VCC, ...):
-    - Three values presented as Min/Typ/Max columns (e.g. "18 24 26 V") are a
+    - Three values presented as Min/Typ/Max columns (e.g. "A B C V") are a
       RANGE, not a list — fill "min"/"typ"/"max" and leave "value" null. This is
       the default; when in doubt, treat supply numbers as a min/typ/max range.
     - Use the "value" array ONLY when the datasheet EXPLICITLY enumerates several
       separate, selectable supply voltages as distinct options — e.g. a
-      comma-separated list "3, 5, 8 V" or wording like "supports 3 V, 5 V and
-      8 V". Then put them in "value" as [3, 5, 8] with the "unit" and leave
+      comma-separated list "A, B, C V" or wording like "supports A V, B V and
+      C V". Then put them in "value" as [A, B, C] with the "unit" and leave
       "min"/"typ"/"max" null.
 
-- NON-NUMERIC / categorical parameters (moisture sensitivity level, package type,
-  physical size / dimensions): put the value in "value" as a string, exactly as
-  written — e.g. "3" for MSL, "LGA_CAV" for package, "9.00 x 8.00 mm" for size;
-  leave the numeric fields null.
+- NON-NUMERIC / categorical parameters (moisture sensitivity level, package type):
+  put the value in "value" as a string, exactly as written — e.g. the level number
+  for MSL, "LGA_CAV" for package; leave the numeric fields null.
+
+- PHYSICAL DIMENSIONS ("length" and "width") are each a SINGLE numeric measurement —
+  put the number in "typ" (NOT in "value", and never a combined string) and put the
+  unit STATED in the source in "unit", written as a short ASCII word — "mm", "inch",
+  or "mil". Do NOT emit the symbols " (double-prime) or ' for inches — spell the word
+  "inch" instead, so the JSON stays valid — and do NOT convert between units. Read
+  the two package-body footprint numbers, written "A x B <unit>" (or "A x B x C
+  <unit>", where C is height/thickness — ignore C). They may appear in a dedicated
+  Outline / Package Dimensions table, in the package name/descriptor (e.g. "A x B mm
+  DFN-N"), a Features bullet, the DESCRIPTION prose (e.g. "... at A (L) x B (W) x
+  C (H)"), or the document title — read whichever states them. Use the PACKAGE BODY
+  size, NOT the PCB / suggested footprint, carrier-tape, or reel dimensions.
+    - If the source LABELS the numbers — "(L)"/"(W)"/"(H)" or "Length"/"Width"/
+      "Height" — assign by the LABEL: "length" <- the L number, "width" <- the W
+      number (ignore the H/height number). The label WINS over position.
+    - Only when there are NO such labels, use SOURCE ORDER: the first number goes to
+      "length", the second to "width".
+  Leave the other numeric fields null.
 
 - DISAMBIGUATION: when a requested name specifies a variant, extract THAT variant
   only — e.g. "operating_temperature" -> the operating temperature range,
   "storage_temperature" -> the storage temperature range. Never substitute a
-  different one.
+  different one. When such variants sit on ADJACENT rows, read ONLY the row whose
+  label matches, and take BOTH endpoints from that one row (see RANGE INTEGRITY) —
+  do not let the neighbouring row's numbers leak in.
 
-- WHERE TO LOOK: parameters such as size, MSL, and temperature ranges usually live
-  OUTSIDE the main specifications table — check Absolute Maximum Ratings and
-  Outline Dimensions.
+- GENERIC NAMES: an UNQUALIFIED requested name maps to the device's PRIMARY
+  parameter of that kind. "Voltage" / "Supply" / "Supply Voltage" -> the main device
+  supply (VDD / VCC), never an enable, leakage, or ESD voltage. An unqualified
+  "Temperature" -> the OPERATING temperature, never storage or channel/junction.
+
+- WHERE TO LOOK: parameters such as length, width, MSL, and temperature ranges
+  usually live OUTSIDE the main specifications table — check the Recommended
+  Operating Conditions and Absolute Maximum Ratings tables, the Outline / Package
+  Dimensions, and the package descriptor. When the SAME parameter appears in more
+  than one table, prefer the "Recommended Operating Conditions" / "Nominal Operating"
+  value; an "Absolute Maximum Ratings" value is a damage limit, NOT the operating
+  spec — use it only when the parameter appears nowhere else.
 
 - If a parameter is NOT present in the datasheet, set its value to null (the JSON
   literal null), NOT an object. NEVER guess or infer a value that is not stated.
-- Preserve units and conditions exactly as written in the datasheet.
 - The parameter names used in these rules are ILLUSTRATIVE examples of each
   category (numeric / range / discrete-supply / categorical), NOT an exhaustive
   list. Apply the same rules to ANY requested parameter, named or not.
@@ -115,6 +170,15 @@ def _get_runtime():
     except Exception:
         # openai package missing or OPENAI_API_KEY unset — skip it; the other
         # providers are still usable.
+        pass
+
+    try:
+        from genaifabric.providers.gemini import GeminiProvider
+
+        providers["gemini"] = GeminiProvider(model=DATASHEET_MODEL)
+    except Exception:
+        # GeminiProvider raises at CONSTRUCTION when GEMINI_API_KEY is unset, so
+        # this guard is what keeps the mock/local paths working without a key.
         pass
 
     return GenAIFabric(provider_map=providers)
@@ -151,8 +215,10 @@ def extract_rf_parameters(
     all six fields (missing ones as ``None``), normalised so the shape is
     uniform regardless of how much of the schema the model spelled out.
 
-    The model and provider are taken from the ``DATASHEET_MODEL`` and
-    ``DATASHEET_PROVIDER`` variables in ``rf_finder.config``, not passed in.
+    The model, provider, and sampling temperature are taken from the
+    ``DATASHEET_MODEL``, ``DATASHEET_PROVIDER`` and ``DATASHEET_TEMPERATURE``
+    variables in ``rf_finder.config``, not passed in. The temperature defaults
+    to ``0.0`` so extraction is deterministic ("COPY EXACTLY / never guess").
     ``runtime`` lets callers/tests supply their own GenAIFabric instance (e.g.
     one whose provider_map holds a MockProvider); default is the shared runtime.
 
@@ -169,6 +235,7 @@ def extract_rf_parameters(
             "datasheet": datasheet_text,
             "requested_parameters": requested_parameters,
         },
+        temperature=DATASHEET_TEMPERATURE,
     )
 
     if not result.success:

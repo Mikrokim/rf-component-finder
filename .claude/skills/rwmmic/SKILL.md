@@ -41,6 +41,26 @@ operating point**. The Verifier applies all constraints.
 
 ---
 
+## 1b. Datasheet link — where it lives (verified live 2026-07-20)
+
+**Case 1 — the link is already in the JSON `search()` fetches.**
+
+Every amplifier product's `field_values` carries a `Datasheet` field: **377/377**, all
+ABSOLUTE, all on the same host —
+`https://www.rwmmic.com/index.php?r=pdf%2Fdownload&filename={MODEL}.pdf`. No extra
+request, no absolutize.
+
+- Live: `200 application/pdf`, `%PDF-1.7`, 393 KB; the project's `datasheet_text_from_url`
+  parsed RWLA1001 (1666 chars) **with normal TLS verification** — the adapter's
+  `_VERIFY_TLS = False` is needed for the API handshake only, NOT for the PDF fetch.
+- robots.txt is `User-agent: * / Disallow:` — everything allowed, PDF path included.
+- **`Candidate.url` currently holds this PDF** (`_product_to_candidates`). It belongs in
+  `datasheet_url`; `url` should become the catalogue page. There is **no per-part page** —
+  `product.html` is an SPA whose only deep links are per-CATEGORY
+  (`product.html?category={category.id}`), and `sitemap.xml` returns HTML.
+
+---
+
 ## 2. How rwmmic.com serves product data (investigation findings)
 
 REQ-3.3 decision rule (*official API → parametric URL → scrape*):

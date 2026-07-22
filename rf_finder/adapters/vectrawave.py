@@ -204,22 +204,36 @@ class VectraWaveAdapter(Adapter):
 
         n_cols = len(products)
         raw_params: dict[int, dict[str, RawValue]] = {i: {} for i in range(1, n_cols)}
+        datasheets: dict[int, str] = {i: "" for i in range(1, n_cols)}
         freq_low: dict[int, float] = {}
         freq_high: dict[int, float] = {}
 
         # Result link = the part's own product page (…/product/<pn>), read from
         # the <a href> on its header cell.  Fall back to the catalogue page for a
-        # part that carries no link.  The Datasheet-row PDF link is NOT used.
+        # part that carries no link.  The Datasheet-row PDF link is separate — it
+        # populates ``datasheet_url`` (below), not this display URL.
         urls: dict[int, str] = {i: "" for i in range(1, n_cols)}
         for i in range(1, min(n_cols, len(product_cells))):
             a = product_cells[i].css_first("a")
             if a is not None:
                 urls[i] = self._abs_url(a.attributes.get("href", ""))
 
-        for texts in row_texts:
+        for cells, texts in zip(rows, row_texts):
             if not texts or not texts[0]:
                 continue  # repeated product-header / spacer row
             key = _normalize(texts[0])
+
+            # Datasheet row: each product cell holds an <a href> to its PDF —
+            # relative, so it must be absolutized.  Beware: a third of the parts
+            # render <a href="">Download</a>, an anchor with an EMPTY href (and
+            # selectolax returns None for it, not ""), so the presence of an <a>
+            # says nothing.  _abs_url maps those to "", which becomes None below.
+            if key == "datasheet":
+                for i in range(1, min(n_cols, len(cells))):
+                    a = cells[i].css_first("a")
+                    if a is not None:
+                        datasheets[i] = self._abs_url(a.attributes.get("href", ""))
+                continue
 
             mapped = ROW_MAP.get(key)
             if mapped is None:
@@ -257,6 +271,10 @@ class VectraWaveAdapter(Adapter):
                     url=urls[i] or _PAGE_URL,
                     raw_params=rp,
                     source="table",
+                    # "" (no href / empty href) MUST become None: the field means
+                    # "a datasheet PDF to download", and an empty string would be
+                    # a link-shaped value that is not one.
+                    datasheet_url=datasheets[i] or None,
                 )
             )
         return out

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the pure, side-effect-free unit conversions used to normalize parameter values to their canonical units before comparison. This spec documents the behavior **as currently implemented** in `rf_finder/ontology/units.py` via the single public function `to_canonical(value, from_unit, canonical)`. The supported canonical units are `GHz` (frequency), `dBm` (power), and `dB` (dimensionless ratio).
+Define the pure, side-effect-free unit conversions used to normalize parameter values to their canonical units before comparison. This spec documents the behavior **as currently implemented** in `rf_finder/ontology/units.py` via the single public function `to_canonical(value, from_unit, canonical)`. The supported canonical units are `GHz` (frequency), `dBm` (power), `dB` (dimensionless ratio), and `mm` (length).
 
 ## Requirements
 
@@ -77,9 +77,25 @@ WHEN `canonical` is `dB`, the system SHALL treat the conversion as the identity 
 - **WHEN** `to_canonical(10.0, "dBm", "dB")` is called
 - **THEN** a `ValueError` containing "Unknown ratio unit" is raised
 
+### Requirement: Length conversion to mm
+
+WHEN `canonical` is `mm`, the system SHALL convert a length by multiplying by a fixed linear factor: `mm` → `×1`, `cm` → `×10`, `inch` → `×25.4`, `mil` → `×0.0254`. IF `from_unit` is not one of these, the system SHALL raise `ValueError` whose message contains "Unknown length unit".
+
+#### Scenario: Length units convert to mm
+
+- **WHEN** `to_canonical(1.0, "cm", "mm")` is called
+- **THEN** it returns `10.0`
+- **AND WHEN** `to_canonical(1.0, "inch", "mm")` is called, it returns `25.4`
+- **AND WHEN** `to_canonical(40.0, "mil", "mm")` is called, it returns `1.016`
+
+#### Scenario: Unknown length unit is rejected
+
+- **WHEN** `to_canonical(1.0, "ft", "mm")` is called
+- **THEN** a `ValueError` containing "Unknown length unit" is raised
+
 ### Requirement: Unsupported canonical unit
 
-IF `canonical` is not one of `GHz`, `dBm`, or `dB` (and differs from `from_unit`), the system SHALL raise `ValueError` whose message contains "Unsupported canonical unit".
+IF `canonical` is not one of `GHz`, `dBm`, `dB`, or `mm` (and differs from `from_unit`), the system SHALL raise `ValueError` whose message contains "Unsupported canonical unit".
 
 #### Scenario: Unsupported canonical unit is rejected
 

@@ -27,6 +27,7 @@ SSE-framed JSON-RPC whose payload is a JSON *string* under
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -208,6 +209,50 @@ def _is_amplifier(feed: dict) -> bool:
     return any(marker in low for marker in _AMPLIFIER_TYPE_MARKERS)
 
 
+# Packaging-variant suffixes: the same die on a different reel/pack shares ONE
+# datasheet, but the MCP often returns ``datasheetUrl`` only on the base part.
+# Longest first so "/TR" is stripped before the bare "TR".
+_VARIANT_SUFFIXES = ("/TR", "TR", "E")
+
+
+def _base_part(model: str) -> str:
+    """Strip a trailing packaging-variant suffix (``/TR`` / ``TR`` / ``E``).
+
+    ``MMA047PP4TR`` -> ``MMA047PP4``; ``MMA085PP4E`` -> ``MMA085PP4``;
+    ``MMA043PP4/TR`` -> ``MMA043PP4``.  A part with no such suffix is returned
+    unchanged, so a base part maps to itself.
+    """
+    for suffix in _VARIANT_SUFFIXES:
+        if model.endswith(suffix) and len(model) > len(suffix):
+            return model[: -len(suffix)]
+    return model
+
+
+def _fill_variant_datasheets(candidates: list[Candidate]) -> list[Candidate]:
+    """Give a link-less candidate its packaging base part's datasheet, if any.
+
+    A candidate whose ``datasheet_url`` is None inherits the link of a sibling
+    that shares its base part number (same die, one datasheet) — taken ONLY from
+    THIS already-fetched result set, so no extra request is made.  When no linked
+    sibling exists the candidate stays None (unchanged behaviour: D7 condition 1).
+    This can only add coverage, never remove or change an existing link.
+    """
+    by_base: dict[str, str] = {}
+    for cand in candidates:
+        if cand.datasheet_url:
+            by_base.setdefault(_base_part(cand.model), cand.datasheet_url)
+    if not by_base:
+        return candidates
+    return [
+        cand
+        if cand.datasheet_url
+        else dataclasses.replace(
+            cand, datasheet_url=by_base.get(_base_part(cand.model))
+        )
+        for cand in candidates
+    ]
+
+
 def _sse_json(text: str) -> dict:
     """Parse an SSE-framed JSON-RPC response: return the object on the ``data:`` line."""
     for line in text.splitlines():
@@ -289,7 +334,7 @@ class MicrochipAdapter(Adapter):
                 lambda item: self._process_part(item[0], item[1]),
                 products.items(),
             )
-        return [c for c in built if c is not None]
+        return _fill_variant_datasheets([c for c in built if c is not None])
 
     def _process_part(
         self, model: str, product: dict
@@ -491,10 +536,21 @@ class MicrochipAdapter(Adapter):
             or f"https://www.microchipdirect.com/product/{model}"
         )
 
+        # Datasheet link: the MCP hands it back directly (``datasheetUrl``) in the
+        # already-fetched product / physical-specs payloads — no extra request, no
+        # HTML scrape.  This is a "case 1" source: the link rides along with the
+        # other parameters through the same allowed MCP channel (api.microchip.com,
+        # which serves no robots.txt).  Not every part has one (some are null) →
+        # ``datasheet_url`` stays None, which the enrichment stage treats as
+        # no-accessible-datasheet.  The PDF itself lives on ww1.microchip.com;
+        # carrying the URL is not fetching it (that is the pipeline's concern).
+        datasheet_url = product.get("datasheetUrl") or physical.get("datasheetUrl")
+
         return Candidate(
             model=model,
             manufacturer=self.manufacturer,
             url=url,
             raw_params=raw_params,
             source="table",
+            datasheet_url=datasheet_url,
         )

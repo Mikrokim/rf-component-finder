@@ -146,6 +146,23 @@ class TestCandidate:
         assert c.source == "table"
         assert "freq_range" in c.raw_params
 
+    def test_datasheet_url_defaults_to_none(self):
+        # Built without datasheet_url — the field defaults to None so existing
+        # adapter constructions are unchanged.
+        c = self._make()
+        assert c.datasheet_url is None
+
+    def test_datasheet_url_exposes_link(self):
+        c = Candidate(
+            model="ZX60-83LN-S+",
+            manufacturer="Mini-Circuits",
+            url="https://example.com/ZX60-83LN-S+",
+            raw_params={},
+            source="table",
+            datasheet_url="https://example.com/pdfs/ZX60-83LN-S+.pdf",
+        )
+        assert c.datasheet_url == "https://example.com/pdfs/ZX60-83LN-S+.pdf"
+
     def test_frozen(self):
         c = self._make()
         with pytest.raises((AttributeError, TypeError)):

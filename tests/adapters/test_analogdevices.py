@@ -187,3 +187,30 @@ def test_cell_value_absent_empty_and_present() -> None:
     assert _cell_value({"0": {"value": []}}, "0") is None
     assert _cell_value({"0": {"value": [""]}}, "0") is None
     assert _cell_value({"0": {"value": ["AD8131"]}}, "0") == "AD8131"
+
+
+# ---------------------------------------------------------------------------
+# Datasheet link (derived from the part number; the feed carries none)
+# ---------------------------------------------------------------------------
+
+def test_datasheet_url_is_derived_from_the_model() -> None:
+    """The feed has no document link at all, so the URL is built from the model.
+
+    Case-1-equivalent: no extra request, since the part number is already in the
+    parametric payload. Verified in a browser that this path serves the PDF
+    (ADL6346B and HMC1131).
+    """
+    cand = next(c for c in _load_candidates() if c.model == "ADL5243")
+    assert cand.datasheet_url == "https://www.analog.com/en/ADL5243/datasheet"
+
+
+def test_datasheet_url_keeps_the_model_case_but_product_url_lowercases_it() -> None:
+    """The two URLs differ deliberately — the datasheet path is case-sensitive."""
+    cand = next(c for c in _load_candidates() if c.model == "ADL5243")
+    assert cand.url == "https://www.analog.com/en/products/adl5243.html"
+    assert "/ADL5243/" in cand.datasheet_url
+
+
+def test_every_candidate_carries_a_datasheet_url() -> None:
+    for cand in _load_candidates():
+        assert cand.datasheet_url and cand.datasheet_url.startswith("https://")

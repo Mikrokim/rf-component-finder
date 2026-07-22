@@ -47,6 +47,15 @@
 **Current behavior:** the adapter **skips Core Chips entirely** — it parses only the four amplifier sections (High Power, Medium Power, Low Noise, Wideband) and does not emit Core Chip candidates (see `manufacturer-adapters` → "VectraWave adapter retrieval and parsing").
 **Status:** 🟡 Open (may be deferred).
 
+### OQ-6 — Datasheet TEXT straight from an API, instead of a PDF URL
+**Question:** Should the adapter contract gain a second seam — "give me this candidate's datasheet **text**" — alongside `resolve_datasheet_url` ("give me its PDF **URL**")?
+**Why it matters:** Two live findings from the `add-datasheet-orchestration-pipeline` §6 verification pass push in this direction, and the current contract cannot express either:
+- **Compliance.** Microchip's `datasheetUrl` points at `ww1.microchip.com`, whose robots.txt is `User-agent: * / Disallow: /`. Carrying the link is fine; the pipeline **fetching** it is a separate, unresolved question. The MCP tool `search_microchip_product_documents` (argument `query`, not `partNumber`) returns the document **content** as markdown straight from `api.microchip.com` — the allowed host — sidestepping `ww1` entirely.
+- **Coverage.** That same tool returns a real datasheet for parts that carry no `datasheetUrl` at all (verified live for `MMA047CP4` and `SST12LP17E-XX8E`).
+**Blocker:** `pipeline._enrich` assumes the chain URL → PDF bytes → text (`datasheet_text_from_url`). Supporting "the adapter already has the text" means changing design decisions D3/D5 and touching every adapter's contract — out of scope for `add-datasheet-orchestration-pipeline`, which is why it is recorded here rather than as a task.
+**Options:** (a) leave as-is — Microchip parts whose datasheet cannot be fetched fall to `not-verified`, which is valid behaviour; (b) add an optional `datasheet_text(cand) -> str | None` seam the pipeline tries before the URL path; (c) keep it inside the Microchip adapter by having `resolve_datasheet_url` return an `api.microchip.com` URL that serves the content — needs verification that such a URL exists.
+**Status:** 🟡 Open.
+
 ## Resolved during migration
 
 ### `openspec/` was git-ignored — RESOLVED

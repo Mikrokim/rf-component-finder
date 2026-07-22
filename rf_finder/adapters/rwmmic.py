@@ -41,12 +41,17 @@ verification fails (verified live — a control fetch of another vendor succeeds
 with verification on).  ``_VERIFY_TLS`` is therefore False for this host; flip it
 to True on a network that trusts the site's certificate.
 
-robots.txt note: ``Disallow:`` is empty (everything allowed).
+robots.txt note: ``Disallow:`` is empty (everything allowed), including the
+datasheet PDF path.
+
+Datasheet link (case 1): every product's ``Datasheet`` field carries an absolute
+PDF URL in the same JSON response, so ``search()`` fills ``datasheet_url``
+directly — no extra request.
 
 Product URL note: rwmmic has NO per-part product page — the site only exposes a
 datasheet PDF per part and a single shared ``/product.html`` catalogue table
-(rendered client-side from the same API).  So instead of the datasheet link,
-``Candidate.url`` is a Scroll-to-Text-Fragment deep link into that shared page
+(rendered client-side from the same API).  So ``Candidate.url`` is a
+Scroll-to-Text-Fragment deep link into that shared page
 (``…/product.html#:~:text=<PN>``): Chrome/Edge scroll to and highlight the found
 part on the catalogue page, and browsers without the feature just load the page.
 The URL is for human-reporter display only — it is never fetched programmatically.
@@ -279,6 +284,10 @@ class RwmmicAdapter(Adapter):
         if not model_name:
             return []
 
+        # Datasheet: the API publishes an absolute PDF link per product (case 1),
+        # so it needs no extra request and no absolutizing.
+        datasheet_url = values.get("datasheet", "").strip() or None
+
         # Product URL — a Scroll-to-Text-Fragment deep link into the shared
         # catalogue page that highlights this exact part (rwmmic has no per-part
         # page).  Display only, never fetched.  See _highlight_url.
@@ -365,6 +374,7 @@ class RwmmicAdapter(Adapter):
                     url=url,
                     raw_params=raw_params,
                     source="table",
+                    datasheet_url=datasheet_url,
                 )
             )
 

@@ -8,6 +8,7 @@ import pytest
 
 from rf_finder.adapters.base import AdapterError
 from rf_finder.adapters.guerrillarf import (
+    _datasheet_href,
     GuerrillaRFAdapter,
     _normalize_header,
     _num,
@@ -117,3 +118,46 @@ def test_num_parses_values() -> None:
     assert _num("10.2") == 10.2
     assert _num("0") == 0.0
     assert _num("abc") is None
+
+
+# ---------------------------------------------------------------------------
+# Datasheet link (case 2: the detail page, resolved on demand)
+# ---------------------------------------------------------------------------
+
+_DETAIL_HTML = """
+<html><body>
+  <a href="https://www.guerrilla-rf.com/includes/prodFiles/2003/GRF2003DS.pdf"></a>
+  <a href="https://www.guerrilla-rf.com/products/DataSheet?sku=2003&file_name=GRF2003DS.pdf">Data Sheet</a>
+  <a href="https://www.guerrilla-rf.com/includes/prodFiles/2003/GRF2003 1000-5000 MHz.pdf">GRF2003 1000-5000 MHz.pdf</a>
+  <a href="https://www.guerrilla-rf.com/products/CustomTunes?sku=2003&file_name=GRF2003 400-6000 MHz.pdf">tune</a>
+  <a href="https://www.guerrilla-rf.com/includes/prodFiles/AppNotes/GRF-AN001.pdf">GRF-AN001</a>
+</body></html>
+"""
+
+
+def test_datasheet_href_picks_the_direct_pdf() -> None:
+    assert _datasheet_href(_DETAIL_HTML, "GRF2003") == (
+        "https://www.guerrilla-rf.com/includes/prodFiles/2003/GRF2003DS.pdf"
+    )
+
+
+def test_datasheet_href_rejects_the_html_wrapper() -> None:
+    """/products/DataSheet?… ends in DS.pdf but serves text/html — a silent trap."""
+    got = _datasheet_href(_DETAIL_HTML, "GRF2003")
+    assert got is not None and "/products/DataSheet" not in got
+
+
+def test_datasheet_href_rejects_customtunes_and_appnotes() -> None:
+    """Both are valid PDFs, so picking one would DROP the part, not defer it."""
+    got = _datasheet_href(_DETAIL_HTML, "GRF2003")
+    assert got is not None
+    assert "MHz.pdf" not in got and "AppNotes" not in got
+
+
+def test_datasheet_href_returns_none_when_absent() -> None:
+    assert _datasheet_href("<html><body>no links</body></html>", "GRF2003") is None
+
+
+def test_search_leaves_datasheet_url_unset() -> None:
+    """Case 2: search() must make no per-part request and carry no link."""
+    assert all(c.datasheet_url is None for c in _load_candidates())
