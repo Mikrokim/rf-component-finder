@@ -21,13 +21,13 @@ fallback. (Package (mm) is an approximate package label, not a clean dimension.)
 from __future__ import annotations
 
 import re
-import time
 
-import httpx
 from selectolax.parser import HTMLParser
 
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -42,15 +42,7 @@ _TABLE_IDS = ("genericAmpFunctionTbl", "satPATbl")
 # it through /products/DataSheet?… , which returns HTML (see _datasheet_href).
 _DIRECT_PDF_DIR = "/includes/prodFiles/"
 
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA"})
-
-_MIN_DELAY_SECONDS = 2.0
 
 # Normalised header text -> (canonical_name, unit | None). "model", "freq_low",
 # "freq_high", and "VDD" are handled specially; the rest are scalar raw_params.
@@ -122,17 +114,6 @@ def _num(cell_text: str) -> float | None:
         return None
 
 
-def _range(cell_text: str) -> tuple[float, float] | None:
-    """Parse a ``"low-high"`` string into a (low, high) tuple, else None."""
-    parts = (cell_text or "").split("-")
-    if len(parts) != 2:
-        return None
-    low, high = _num(parts[0]), _num(parts[1])
-    if low is None or high is None:
-        return None
-    return (low, high)
-
-
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
@@ -145,58 +126,51 @@ class GuerrillaRFAdapter(Adapter):
     manufacturer = "Guerrilla RF"
     supported_components = {"amplifier"}
 
-    def __init__(self) -> None:
-        self._last_fetch_time: float = 0.0
-
     def search(self, spec: QuerySpec) -> list[Candidate]:
-        """Fetch the amplifiers page and return all rows as Candidates."""
-        return drop_paramless(self._parse_html(self._get(_PAGE_URL)))
+        """Fetch the amplifiers page (cache-first) and return all rows.
+
+        The shared provider owns the User-Agent, delay, timeout and retries; a
+        ``None`` body means unreachable with no cached copy → skip this source.
+        """
+        result = http.fetch(
+            self.manufacturer,
+            _PAGE_URL,
+            headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        if result.text is None:
+            return []
+
+        return drop_paramless(self._parse_html(result.text))
 
     def resolve_datasheet_url(self, cand: Candidate) -> str | None:
-        """Fetch the part's detail page and return its main datasheet PDF link.
+        """Fetch the part's detail page (cache-first) and return its main
+        datasheet PDF link.
 
         Case 2: the amplifiers table carries no datasheet link, so this costs one
         request — paid only for a candidate the pipeline is about to enrich.
-
         Picking the right PDF is the whole difficulty (see ``_datasheet_href``);
         returns ``None`` on any failure, per the ``Adapter`` contract.
         """
-        try:
-            html = self._get(_DETAIL_URL.format(model=cand.model))
-        except AdapterError:
+        result = http.fetch(
+            self.manufacturer,
+            _DETAIL_URL.format(model=cand.model),
+            headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        if result.text is None:
             return None
-        return _datasheet_href(html, cand.model)
-
-    def _get(self, url: str) -> str:
-        """GET *url* behind the politeness guard; raise AdapterError on failure."""
-        elapsed = time.time() - self._last_fetch_time
-        if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
-            time.sleep(_MIN_DELAY_SECONDS - elapsed)
-
-        try:
-            response = httpx.get(
-                url,
-                headers={
-                    "User-Agent": _USER_AGENT,
-                    "Accept": (
-                        "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                        "*/*;q=0.8"
-                    ),
-                    "Accept-Language": "en-US,en;q=0.5",
-                },
-                follow_redirects=True,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            self._last_fetch_time = time.time()
-        except httpx.HTTPError as exc:
-            raise AdapterError(
-                manufacturer=self.manufacturer,
-                context=f"HTTP error fetching {url}",
-                cause=exc,
-            ) from exc
-
-        return response.text
+        return _datasheet_href(result.text, cand.model)
 
     def _parse_html(self, html: str) -> list[Candidate]:
         """Parse both amplifier tables; return a combined list of Candidates.
@@ -267,8 +241,9 @@ class GuerrillaRFAdapter(Adapter):
             if f_low is not None and f_high is not None:
                 raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="GHz")
 
-            # VDD: "low-high" range string
-            vdd = _range(_cell("vdd range v"))
+            # VDD: parsed by the shared parser (single value, "low-high" range,
+            # or discrete options -> normalized interval/list; else UNKNOWN).
+            vdd = parse_vdd(_cell("vdd range v"))
             if vdd is not None:
                 raw_params["VDD"] = RawValue(value=vdd, unit="V")
 

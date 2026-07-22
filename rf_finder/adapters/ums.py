@@ -29,13 +29,13 @@ GETs and serve repeats from cache (ums-plan §2, §8).
 from __future__ import annotations
 
 import re
-import time
 
-import httpx
 from selectolax.parser import HTMLParser
 
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -65,17 +65,7 @@ _RANGE_PARAMS = {
     "power-unit": "watt",
 }
 
-# Browser-style User-Agent (honest product-search retriever; clean 200s).
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "—"})
-
-# robots has no Crawl-delay; self-imposed polite delay between the 5 live GETs.
-_MIN_DELAY_SECONDS = 3.0
 
 # ---------------------------------------------------------------------------
 # Column mapping: normalised <thead> label -> (canonical_name, unit).
@@ -138,9 +128,6 @@ class UmsAdapter(Adapter):
     manufacturer = "UMS"
     supported_components = {"amplifier"}
 
-    def __init__(self) -> None:
-        self._last_fetch_time: float = 0.0
-
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -158,36 +145,31 @@ class UmsAdapter(Adapter):
         return candidates
 
     def _fetch_category(self, slug: str) -> str:
-        """GET one ``?function=<slug>`` parametric page; raise AdapterError on HTTP error."""
-        elapsed = time.time() - self._last_fetch_time
-        if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
-            time.sleep(_MIN_DELAY_SECONDS - elapsed)
+        """GET one ``?function=<slug>`` parametric page (cache-first).
 
-        params = {"function": slug, **_RANGE_PARAMS}
-        try:
-            response = httpx.get(
-                _PRODUCTS_URL,
-                params=params,
-                headers={
-                    "User-Agent": _USER_AGENT,
-                    "Accept": (
-                        "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                        "image/webp,*/*;q=0.8"
-                    ),
-                    "Accept-Language": "en-US,en;q=0.9",
-                },
-                follow_redirects=True,
-                timeout=60.0,
-            )
-            response.raise_for_status()
-            self._last_fetch_time = time.time()
-        except httpx.HTTPError as exc:
+        The query params feed the cache key, so each slug is a distinct file. The
+        shared provider owns the User-Agent, the 3 s delay, the timeout and
+        retries. Raises ``AdapterError`` when a page is unreachable with no
+        cached copy.
+        """
+        result = http.fetch(
+            self.manufacturer,
+            _PRODUCTS_URL,
+            params={"function": slug, **_RANGE_PARAMS},
+            headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/webp,*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+        if result.text is None:
             raise AdapterError(
                 manufacturer=self.manufacturer,
                 context=f"HTTP error fetching products for function={slug}",
-                cause=exc,
-            ) from exc
-        return response.text
+            )
+        return result.text
 
     # ------------------------------------------------------------------
     # Internal parse method (exposed for tests to call directly)
@@ -287,8 +269,14 @@ class UmsAdapter(Adapter):
         if f_low is not None and f_high is not None:
             raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="GHz")
 
-        # Scalar params from COLUMN_MAP.
+        # Scalar params from COLUMN_MAP; VDD goes through the shared parser so a
+        # single value / range / discrete list is normalised (never a bare float).
         for norm_key, (canonical, unit) in COLUMN_MAP.items():
+            if canonical == "VDD":
+                vdd = parse_vdd(_val(norm_key))
+                if vdd is not None:
+                    raw_params["VDD"] = RawValue(value=vdd, unit="V")
+                continue
             value = _parse_float(_val(norm_key))
             if value is not None:
                 raw_params[canonical] = RawValue(value=value, unit=unit)

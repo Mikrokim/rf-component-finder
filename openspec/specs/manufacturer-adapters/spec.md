@@ -213,7 +213,7 @@ Only when the query constrains `Size`, `VDD`, or `Temperature` SHALL the adapter
 
 The RWM adapter SHALL declare `manufacturer = "RWM"` and support the `amplifier` component. On `search`, it SHALL issue a single HTTP GET to the site's JSON product API `index.php?r=api/all-products` using a browser-style User-Agent and a minimum inter-request delay of at least 1 second; because the host serves a self-signed certificate in its chain, TLS verification SHALL be disabled for this request. IF the response body is not valid JSON, or IF it has no `data` array of category groups, it SHALL raise `AdapterError`. It SHALL apply no server-side filtering and return all amplifier rows.
 
-The adapter SHALL select category groups whose category name contains "Amplifier" and map each product's `field_values` by field name: `Freq Low`/`Freq High (GHz)` combine into `freq_range` (GHz, `"DC"`→`0.0`); `NF`→`NF` (dB); `P1dB`→`P1dB` (dBm); `Psat`→`Psat` (dBm); `Voltage` or `Vd (V)`→`VDD` (V). Canonical `Gain` SHALL be taken **only** from a field whose exact label is `"Gain (dB)"` — `"Small Signal Gain (dB)"` and `"Power Gain (dB)"` SHALL NOT be treated as `Gain`. IP3/OIP3 is not published and SHALL be absent. Each `Candidate.url` SHALL be the per-part datasheet link (populated for display only) and `source` SHALL be `table`.
+The adapter SHALL select category groups whose category name contains "Amplifier" and map each product's `field_values` by field name: `Freq Low`/`Freq High (GHz)` combine into `freq_range` (GHz, `"DC"`→`0.0`); `NF`→`NF` (dB); `P1dB`→`P1dB` (dBm); `Psat`→`Psat` (dBm); `Voltage` or `Vd (V)`→`VDD` (V). Canonical `Gain` SHALL be taken **only** from a field whose exact label is `"Gain (dB)"` — `"Small Signal Gain (dB)"` and `"Power Gain (dB)"` SHALL NOT be treated as `Gain`. IP3/OIP3 is not published and SHALL be absent. RWM exposes no per-part product page (only a per-part datasheet PDF and a single shared `/product.html` catalogue table); accordingly, each `Candidate.url` SHALL be a Scroll-to-Text-Fragment deep link into that catalogue page (`https://www.rwmmic.com/product.html#:~:text=<part number>`, the part number percent-encoded with `-` force-encoded to `%2D`) that highlights the exact part in browsers supporting text fragments and otherwise simply loads the catalogue page. It SHALL NOT be the datasheet PDF link. The URL is populated for display/report only and SHALL never be fetched programmatically. `source` SHALL be `table`.
 
 A product characterised at several coupled operating points publishes `/`-separated per-point values aligned by position across fields; the adapter SHALL emit one `Candidate` per operating point (model labelled `"PN (op i/N)"`), assigning each field its i-th value while sharing single-valued fields across all points. IF the multi-valued fields disagree on their count, the adapter SHALL emit a single candidate with those multi-valued fields left absent.
 
@@ -239,10 +239,11 @@ A product characterised at several coupled operating points publishes `/`-separa
 - **WHEN** a product's multi-valued fields disagree on their count
 - **THEN** a single candidate is produced with those multi-valued fields absent
 
-#### Scenario: Candidate URL is the datasheet link
+#### Scenario: Candidate URL is a highlight deep link into the shared catalogue page
 
 - **WHEN** a candidate is produced
-- **THEN** its `url` is the product's datasheet link on the `rwmmic.com` host
+- **THEN** its `url` is a text-fragment deep link into the shared `/product.html` catalogue page on the `rwmmic.com` host (`…/product.html#:~:text=<part number>`), not the datasheet PDF
+- **AND** the `url` is populated for display only and is never fetched
 
 #### Scenario: Bad payloads surface as AdapterError
 
@@ -299,7 +300,7 @@ The UMS adapter SHALL declare `manufacturer = "UMS"` and support the `amplifier`
 
 ### Requirement: 3rWave adapter retrieval
 
-The 3rWave adapter SHALL declare `manufacturer = "3rWave"` and support the `amplifier` component (covering both the PA and LNA sub-types). On `search`, it SHALL issue a single HTTP GET to `https://3rwave.com/amplifier/` using a browser-style User-Agent, enforcing a minimum inter-request delay of at least 1 second between consecutive live fetches. It SHALL parse **all** `table.tablepress` tables on the page (never hard-coding a TablePress id), locate each table's header row by a cell that normalizes to `part number`, and build a normalized-header→column-index map with a positional fallback. Columns SHALL be mapped as: Start Freq. + Stop Freq. (GHz)→`freq_range` `RawValue((low, high), "GHz")`, `gain db`→`Gain` dB, `psat dbm`→`Psat` dBm, `nf db`→`NF` dB, `drain voltage v`→`VDD` V. `Size` and `P1dB`/`IP3`/`MSL`/`Temperature` SHALL NOT be populated by this adapter (deferred, or absent as a column). Rows without a Part Number, and empty or sentinel cells, SHALL be skipped or cause the parameter to be absent. IF the HTTP request fails, IF the response is intercepted by a content filter, or IF no `table.tablepress` is found, it SHALL raise `AdapterError`. The adapter SHALL apply no server-side filtering: each row becomes `Candidate(model, manufacturer="3rWave", url, raw_params, source="table")` where `url` is the per-part link or an amplifier-page fallback.
+The 3rWave adapter SHALL declare `manufacturer = "3rWave"` and support the `amplifier` component (covering both the PA and LNA sub-types). On `search`, it SHALL issue a single HTTP GET to `https://3rwave.com/amplifier/` using a browser-style User-Agent, enforcing a minimum inter-request delay of at least 1 second between consecutive live fetches. It SHALL parse **all** `table.tablepress` tables on the page (never hard-coding a TablePress id), locate each table's header row by a cell that normalizes to `part number`, and build a normalized-header→column-index map with a positional fallback. Columns SHALL be mapped as: Start Freq. + Stop Freq. (GHz)→`freq_range` `RawValue((low, high), "GHz")`, `gain db`→`Gain` dB, `psat dbm`→`Psat` dBm, `nf db`→`NF` dB, `drain voltage v`→`VDD` V. `Size` and `P1dB`/`IP3`/`MSL`/`Temperature` SHALL NOT be populated by this adapter (deferred, or absent as a column). Rows without a Part Number, and empty or sentinel cells, SHALL be skipped or cause the parameter to be absent. IF the HTTP request fails, IF the response is intercepted by a content filter, or IF no `table.tablepress` is found, it SHALL raise `AdapterError`. The adapter SHALL apply no server-side filtering: each row becomes `Candidate(model, manufacturer="3rWave", url, raw_params, source="table")` where `url` is the row's per-part product-page link when one exists, and otherwise a Scroll-to-Text-Fragment deep link into the shared `/amplifier/` page (`…/amplifier/#:~:text=<part number>`, `-`→`%2D`) that highlights the exact row. The URL is display-only, never fetched, and never the datasheet PDF.
 
 #### Scenario: PA and LNA rows parse into candidates
 
@@ -321,9 +322,14 @@ The 3rWave adapter SHALL declare `manufacturer = "3rWave"` and support the `ampl
 - **WHEN** the fetched HTML contains no `table.tablepress`
 - **THEN** an `AdapterError` is raised
 
+#### Scenario: Candidate URL highlights the exact row on the shared page
+
+- **WHEN** a row has no per-part product-page anchor
+- **THEN** its `url` is a text-fragment deep link into the shared `/amplifier/` page (`…/amplifier/#:~:text=<part number>`) that highlights the row, not the datasheet PDF
+
 ### Requirement: Microchip adapter retrieval (JSON API)
 
-The Microchip adapter SHALL declare `manufacturer = "Microchip"` and support the `amplifier` component. On `search`, it SHALL source data entirely from the Microchip MCP server (`https://api.microchip.com/mcp/resources`) and the `microchipdirect.com` per-part JSON feeds, and SHALL NOT access `www.microchip.com`. Retrieval SHALL be a three-step chain: (1) MCP `tools/call` `search_products` over a union of amplifier search terms, paginated on `hasMore` and de-duplicated by part number; (2) per part, run concurrently in a bounded `ThreadPoolExecutor` (max 8 workers), MCP `search_product_physical_specs` to obtain the `parametricData` feed URL plus package size and MSL; (3) an HTTP GET of that feed for the electrical specs. MCP responses are SSE-framed JSON-RPC whose payload is double-encoded (parse the `data:` line → `result.content[0].text` → `json.loads`). Only feeds whose `product_type` marks an amplifier SHALL be kept (text-search pollution is dropped). Feed fields SHALL be mapped as: `Gain (dB)`→`Gain`, `NF (dB)`→`NF`, `OIP3 (dBm)`→`IP3`, `p1db(dBM)`→`P1dB`, `Pout (dBm)`→`Psat`; `Freq Min GHz`/`Freq Max GHz`→`freq_range` in GHz (`"DC"`→`0.0`); the `Bias` string→`VDD` (leading volts); `Size`→largest edge of `packageWidthOrSize`; `MSL`→the digit of `MSL-n`. Missing or non-numeric values SHALL cause the parameter to be absent. Per-part failures SHALL return `None` and be skipped; MCP transport or response-shape errors SHALL raise `AdapterError`; IF enumeration yields zero parts across all terms it SHALL raise `AdapterError`. The adapter SHALL apply no server-side filtering: each amplifier becomes `Candidate(model, manufacturer="Microchip", url, raw_params, source="table")` where `url` is the part's `productUrl`.
+The Microchip adapter SHALL declare `manufacturer = "Microchip"` and support the `amplifier` component. On `search`, it SHALL source data entirely from the Microchip MCP server (`https://api.microchip.com/mcp/resources`) and the `microchipdirect.com` per-part JSON feeds, and SHALL NOT access `www.microchip.com`. Retrieval SHALL be a three-step chain: (1) MCP `tools/call` `search_products` over a union of amplifier search terms, paginated on `hasMore` and de-duplicated by part number; (2) per part, run concurrently in a bounded `ThreadPoolExecutor` (max 8 workers), MCP `search_product_physical_specs` to obtain the `parametricData` feed URL plus package size and MSL — this tool returns **two response shapes**: a flat `data` object for a unique match, but a `data.products[]` list when the part number also matches variants (tape-and-reel `…/TR`, eval boards `…E`), in which case the adapter SHALL select the row whose `partNumber` equals the requested part (otherwise `parametricData` reads as absent and every part with sibling variants is silently dropped); (3) an HTTP GET of that feed for the electrical specs. MCP responses are SSE-framed JSON-RPC whose payload is double-encoded (parse the `data:` line → `result.content[0].text` → `json.loads`). Only feeds whose `product_type` marks an amplifier SHALL be kept (text-search pollution is dropped). Feed fields SHALL be mapped as: `Gain (dB)`→`Gain`, `NF (dB)`→`NF`, `OIP3 (dBm)`→`IP3`, `p1db(dBM)`→`P1dB`, `Pout (dBm)`→`Psat`; `Freq Min GHz`/`Freq Max GHz`→`freq_range` in GHz (`"DC"`→`0.0`); the `Bias` string→`VDD` (leading volts); `Size`→largest edge of `packageWidthOrSize`; `MSL`→the digit of `MSL-n`. Missing or non-numeric values SHALL cause the parameter to be absent; however, a feed scalar published with its unit embedded in the value (e.g. `"28 dBm"`, `"17 dB"` rather than a bare number) SHALL be parsed by taking its leading numeric token, so such a value is not lost as UNKNOWN (which would wrongly hide the part when that parameter is filtered). Per-part failures SHALL return `None` and be skipped; MCP transport or response-shape errors SHALL raise `AdapterError`; IF enumeration yields zero parts across all terms it SHALL raise `AdapterError`. The adapter SHALL apply no server-side filtering: each amplifier becomes `Candidate(model, manufacturer="Microchip", url, raw_params, source="table")` where `url` is the human-facing `www.microchip.com` catalog page built from the feed slug (`…/en-us/product/<slug>`, title-casing the type words while preserving the part-number prefix and its suffixes such as `ICP0444-FL`), falling back to the MCP `productUrl` and then `…direct.com/product/<model>`. The catalog URL is preferred over the `microchipdirect` **store** URL because the store renders a "This Product is Not Available Online" stub for RF-MMIC parts; `www.microchip.com` is Akamai-blocked to fetchers but this URL is display-only (opened by a human in a browser, never fetched by the adapter).
 
 #### Scenario: Feed fixtures parse into candidates
 
@@ -344,6 +350,22 @@ The Microchip adapter SHALL declare `manufacturer = "Microchip"` and support the
 
 - **WHEN** MCP `search_products` returns no parts for any amplifier term
 - **THEN** an `AdapterError` is raised
+
+#### Scenario: Candidate URL is the microchip.com catalog page
+
+- **WHEN** a candidate is produced from a feed whose slug is known
+- **THEN** its `url` is `https://www.microchip.com/en-us/product/<slug>` (display only, never fetched), not the `microchipdirect` store URL
+
+#### Scenario: Physical-specs list shape selects the exact part
+
+- **WHEN** `search_product_physical_specs` returns a `data.products[]` list (the part has tape-and-reel / eval variants)
+- **THEN** the row whose `partNumber` equals the requested part supplies `parametricData`
+- **AND** a part whose exact number is absent from the list produces no candidate
+
+#### Scenario: A unit-suffixed feed scalar is still parsed
+
+- **WHEN** a feed scalar is published as a string ending in its unit (e.g. `"28 dBm"`)
+- **THEN** its leading numeric token is stored, not dropped as UNKNOWN
 
 ### Requirement: Qorvo adapter retrieval and parsing
 
@@ -381,7 +403,7 @@ The Qorvo adapter SHALL declare `manufacturer = "Qorvo"` and support the `amplif
 
 ### Requirement: VectraWave adapter retrieval and parsing
 
-The VectraWave adapter SHALL declare `manufacturer = "VectraWave"` and support the `amplifier` component. On `search`, it SHALL issue a single HTTP GET to the server-rendered `/search-engine-mmic` page; IF the fetch fails or the expected modules are absent it SHALL raise `AdapterError`. The page tables are **transposed** (each product is a column, each parameter a row); the adapter SHALL parse only the four amplifier sections (High Power, Medium Power, Low Noise, Wideband) and SHALL skip attenuators, phase shifters, and Core Chips (the dual-path T/R modules are deferred — see open question OQ-5). It SHALL map `FrequencyMin`/`Max` (GHz) to `freq_range`, `Pout`→`Psat`, `OP1dB`→`P1dB`, `Gain`, `NF`, and both supply-voltage labels → `VDD` (dual-rail supported); a control-voltage label SHALL NOT map to `VDD`. `IP3`, `MSL`, `Size`, and `Temperature` SHALL NOT be emitted from the table (not published by VectraWave / datasheet-only). Each row SHALL produce `Candidate(model, manufacturer="VectraWave", url=<datasheet PDF or page>, raw_params, source="table")`.
+The VectraWave adapter SHALL declare `manufacturer = "VectraWave"` and support the `amplifier` component. On `search`, it SHALL issue a single HTTP GET to the server-rendered `/search-engine-mmic` page; IF the fetch fails or the expected modules are absent it SHALL raise `AdapterError`. The page tables are **transposed** (each product is a column, each parameter a row); the adapter SHALL parse only the four amplifier sections (High Power, Medium Power, Low Noise, Wideband) and SHALL skip attenuators, phase shifters, and Core Chips (the dual-path T/R modules are deferred — see open question OQ-5). It SHALL map `FrequencyMin`/`Max` (GHz) to `freq_range`, `Pout`→`Psat`, `OP1dB`→`P1dB`, `Gain`, `NF`, and both supply-voltage labels → `VDD` (dual-rail supported); a control-voltage label SHALL NOT map to `VDD`. `IP3`, `MSL`, `Size`, and `Temperature` SHALL NOT be emitted from the table (not published by VectraWave / datasheet-only). Each product's `url` SHALL be the part's own **product page** (`/product/<pn>`), read from the `<a href>` on its product-header cell, with the shared catalogue page as the fallback for a part that carries no link; the Datasheet-row PDF link SHALL NOT be used as the `url`. Each row SHALL produce `Candidate(model, manufacturer="VectraWave", url, raw_params, source="table")`.
 
 #### Scenario: Only amplifier sections are returned
 
@@ -408,6 +430,12 @@ The VectraWave adapter SHALL declare `manufacturer = "VectraWave"` and support t
 
 - **WHEN** any VectraWave row is parsed
 - **THEN** `IP3`, `MSL`, `Size`, and `Temperature` are absent from `raw_params`
+
+#### Scenario: Candidate URL is the product page, not the datasheet PDF
+
+- **WHEN** a product column is parsed
+- **THEN** its `url` is the part's `/product/<pn>` page read from the header-cell link
+- **AND** the Datasheet-row PDF link is not used as the `url`
 
 #### Scenario: Missing modules raise AdapterError
 

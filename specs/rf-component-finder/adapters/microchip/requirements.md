@@ -20,6 +20,14 @@
   (`Freq Min/Max GHz`, `Gain (dB)`, `NF (dB)`, `OIP3 (dBm)`, `p1db(dBM)`, `Bias`).
 - **MCHP-A-3** — `www.microchip.com` is Akamai-blocked to non-browser clients and
   is **not** used by the adapter for any data.
+- **MCHP-A-4** — `Candidate.url` is the human-facing `www.microchip.com` **catalog
+  page** built from the feed slug (`…/en-us/product/<slug>`, title-casing the type
+  words while preserving the part-number prefix and suffixes such as `ICP0444-FL`),
+  display-only and never fetched. It is preferred over the `microchipdirect`
+  **store** URL, which renders a "This Product is Not Available Online" stub for
+  RF-MMIC parts. Fallbacks: MCP `productUrl` → `…direct.com/product/<model>`.
+  (`www.microchip.com` is Akamai-blocked to fetchers per MCHP-A-3, but this URL is
+  only ever opened by a human in a browser.)
 
 ## Open Questions
 
@@ -41,6 +49,17 @@
   parsing, resolve to UNKNOWN for now.
 - **MCHP-OQ-7** — `Size` from the `"L x W x H mm"` string uses the **largest
   edge** as the scalar; confirm this matches intended `Size` semantics.
+- **MCHP-OQ-8** — *(resolved)* `search_product_physical_specs` returns **two
+  response shapes**: a flat `data` object for a unique match, but a
+  `data.products[]` **list** when the part number also matches variants
+  (tape-and-reel `…/TR`, eval boards `…E`, e.g. MMA044PP3). In the list shape
+  `parametricData` is nested, so the adapter picks the row whose `partNumber`
+  equals the requested part; handling only the flat shape silently dropped every
+  part with sibling variants.
+- **MCHP-OQ-9** — *(resolved)* A feed scalar may carry its unit inside the value
+  (`"28 dBm"`, `"17 dB"`) instead of a bare number; the float parser takes the
+  leading numeric token so the value isn't lost as UNKNOWN (which would wrongly
+  hide the part when that parameter is filtered).
 
 ## Definition of Done
 

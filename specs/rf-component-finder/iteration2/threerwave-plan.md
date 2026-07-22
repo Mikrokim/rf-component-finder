@@ -229,9 +229,12 @@ this choice and is therefore also pending.
 - **OQ-3W-5 — Both tables in one GET?** Confirm the PA **and** LNA TablePress
   tables both ship in the single `/amplifier/` HTML (vs. lazy-loaded per tab).
   Capture the LNA table's structure/id and row counts live.
-- **OQ-3W-6 — `Candidate.url` value.** Is there a per-part link or datasheet
-  anchor in the Part Number cell? If not, fall back to the `/amplifier/` page URL
-  (display only, never fetched).
+- **OQ-3W-6 — `Candidate.url` value.** *(resolved)* Use the row's per-part
+  product-page anchor when the Part Number cell has one; when it doesn't (the
+  common 3rWave case), fall back to a Scroll-to-Text-Fragment deep link into the
+  shared `/amplifier/` page (`…/amplifier/#:~:text=<PN>`, `-`→`%2D`) that
+  highlights the exact row — **never** the datasheet PDF. Display only, never
+  fetched.
 - **OQ-3W-7 — PA vs LNA sub-type.** Ignore the sub-type (Verifier doesn't need it)
   or capture it for reporting? *Leaning:* ignore for now.
 - **OQ-3W-8 — Row-count drift warning.** Log a warning if scraped row count

@@ -62,7 +62,10 @@ Disallow:
 - **Everything is allowed** (empty `Disallow:`). The `api/all-products` endpoint
   is fair game.
 - Datasheet PDFs are allowed but **not fetched** — all structured data is in the
-  JSON. `Candidate.url` = the per-part datasheet link (display only; never fetched).
+  JSON. RWM has **no per-part product page** (only the datasheet PDF and one shared
+  `/product.html` catalogue table), so `Candidate.url` is a Scroll-to-Text-Fragment
+  deep link into that catalogue page (`…/product.html#:~:text=<PN>`, `-`→`%2D`) that
+  highlights the exact part — **not** the datasheet PDF. Display only; never fetched.
 
 ---
 
@@ -171,7 +174,7 @@ for group in data:
         for i in range(N):
             raw = build_point(lists, i, N)          # single values shared; i-th of N otherwise
             model = pn if N == 1 else f"{pn} (op {i+1}/{N})"
-            yield Candidate(model, "RWM", datasheet_url, raw, "table")
+            yield Candidate(model, "RWM", highlight_url(pn), raw, "table")  # …/product.html#:~:text=<PN>
 ```
 
 ---
@@ -215,7 +218,7 @@ group (`Gain (dB)`, `Voltage (V)`), a GaN-PA group (`Small Signal Gain`, `Vd`,
 | R2 | `verify=False` weakens TLS trust | Medium | Isolated to this host + documented; flip to True where cert is trusted; consider pinning later |
 | R3 | New multi-value count patterns / mismatched counts | Low | Fall back to single row, drop multi fields to UNKNOWN (tested) |
 | R4 | A non-amplifier category name gains "Amplifier" | Low | Verify live; current catalogue is clean |
-| R5 | Datasheet URL is a PDF, not an HTML page | Resolved | It is the only per-part link; display-only, never fetched |
+| R5 | No per-part product page (only a datasheet PDF + shared `/product.html`) | Resolved | `Candidate.url` is a text-fragment highlight deep link into `/product.html` (not the datasheet PDF); display-only, never fetched |
 | R6 | IP3/OIP3 never available → parts can't fully match an IP3 query | Resolved | Honest UNKNOWN → `partial`; source limitation |
 
 ### Open questions

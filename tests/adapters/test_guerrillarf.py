@@ -12,7 +12,6 @@ from rf_finder.adapters.guerrillarf import (
     GuerrillaRFAdapter,
     _normalize_header,
     _num,
-    _range,
 )
 from rf_finder.models import Candidate, RawValue
 
@@ -119,17 +118,6 @@ def test_num_parses_values() -> None:
     assert _num("10.2") == 10.2
     assert _num("0") == 0.0
     assert _num("abc") is None
-
-
-def test_range_splits_two_numbers() -> None:
-    assert _range("2.7-5.0") == (2.7, 5.0)
-    assert _range("28-40") == (28.0, 40.0)
-
-
-def test_range_rejects_non_pairs() -> None:
-    assert _range("") is None
-    assert _range("5") is None
-    assert _range("a-b") is None
 
 
 # ---------------------------------------------------------------------------

@@ -85,8 +85,11 @@ REQ-3.3 decision rule (*official API → parametric URL → scrape*):
 - **User-Agent:** browser-style UA (plain bot UAs may be rejected), plus a
   `Referer: …/product.html` and a JSON `Accept`.
 - **Inter-request delay:** `_MIN_DELAY_SECONDS = 1.0` (one request per search).
-- The per-part **datasheet link** is populated in `Candidate.url` for display
-  only and is **never fetched**.
+- RWM has **no per-part product page** — only a datasheet PDF per part and the
+  single shared `/product.html` catalogue table. So `Candidate.url` is a
+  **Scroll-to-Text-Fragment deep link** into that catalogue page
+  (`…/product.html#:~:text=<PN>`) that highlights the exact part on the shared
+  page — **not** the datasheet PDF. Display only, and **never fetched**.
 
 ---
 
@@ -122,7 +125,10 @@ _GAIN_FIELD = "Gain (dB)"           # exact label for canonical Gain
 3. **Per product** (`_product_to_candidates`): collect `field_values` into two
    dicts — by **normalized** field name (`_normalize_field`) and by **exact**
    label (for the Gain rule). Model = product `name`, else the `pn` field; skip if
-   empty. URL = the `datasheet` field, else `…/product.html`.
+   empty. URL = a Scroll-to-Text-Fragment deep link into the shared
+   `/product.html` catalogue page (`#:~:text=<PN>`, `-`→`%2D`) that highlights this
+   exact part (`_highlight_url`) — RWM has no per-part page, so this is **not** the
+   `datasheet` field.
 4. **Operating-point expansion** (see §7 R1) — split `/`-separated values, compute
    N, and emit one `Candidate(source="table")` per point.
 

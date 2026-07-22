@@ -26,6 +26,10 @@ amplifiers.)
   Product-header rows (part numbers) repeat between parameter rows.
 - **VW-A-3** — The page mixes component types under section headings; only the
   five amplifier sections are in scope (see [t8-plan.md](t8-plan.md) §5).
+- **VW-A-4** — Each part-number header cell is an `<a href>` to that part's own
+  **product page** (`/product/<pn>`). `Candidate.url` is that product-page link
+  (display only, never fetched), **not** the Datasheet-row PDF link; a part that
+  carries no link falls back to the catalogue page.
 
 ## Open Questions
 

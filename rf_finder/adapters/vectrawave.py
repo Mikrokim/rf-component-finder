@@ -14,18 +14,23 @@ labels are mapped to the ontology by row label.
 Parameters not on the page (Temperature, Size) and ones VectraWave never
 publishes (IP3, MSL) are left to the datasheet fallback / stay UNKNOWN. See
 specs/.../adapters/vectrawave/t8-plan.md.
+
+Result URL: each part number on the page links to its own product page
+(``/product/<pn>``); that link is read from the header-cell ``<a href>`` and
+used as ``Candidate.url`` (for human-reporter display only). The Datasheet row's
+PDF link is deliberately NOT used as the URL.
 """
 
 from __future__ import annotations
 
 import re
-import time
 
-import httpx
 from selectolax.parser import HTMLParser
 
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, drop_paramless, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -34,15 +39,7 @@ from rf_finder.models import Candidate, QuerySpec, RawValue
 _BASE = "https://vectrawave.com"
 _PAGE_URL = _BASE + "/search-engine-mmic"
 
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA", "TBD", "tbd"})
-
-_MIN_DELAY_SECONDS = 2.0
 
 # A section heading is one of the catalogue's component categories.
 _SECTION_KEYWORDS = ("amplifier", "attenuator", "phase shifter", "core chip")
@@ -103,20 +100,16 @@ def _num(text: str) -> float | None:
     return float(m.group()) if m else None
 
 
-def _vdd(text: str) -> tuple[float, float] | None:
-    """Supply voltage -> a ``(low, high)`` band, else None.
+def _vdd(text: str) -> tuple[float, float] | list[float] | None:
+    """Parse a VectraWave supply-voltage cell via the shared VDD parser.
 
-    A single value -> ``(v, v)``; a dual/multi-rail supply such as ``"+3/-3"``
-    yields ``(min, max)`` of all listed values (``(-3.0, 3.0)``), which behaves
-    correctly under the ontology's ``contains`` rule.
+    Delegates to :func:`rf_finder.ontology.supply.parse_vdd`: a single value
+    ("+8") or range becomes a ``(low, high)`` interval, discrete options become
+    a ``list``, and a negative/dual-rail cell ("+3/-3", "-7.5") becomes ``None``
+    (VDD left UNKNOWN) — those rails belong to control parts, not the amplifier
+    drain supply this project matches.
     """
-    t = (text or "").strip()
-    if not t or t in _MISSING_SENTINELS:
-        return None
-    nums = [float(x) for x in _NUM_RE.findall(t)]
-    if not nums:
-        return None
-    return (min(nums), max(nums))
+    return parse_vdd(text)
 
 
 def _is_amplifier_section(heading: str) -> bool:
@@ -136,42 +129,28 @@ class VectraWaveAdapter(Adapter):
     manufacturer = "VectraWave"
     supported_components = {"amplifier"}
 
-    def __init__(self) -> None:
-        self._last_fetch_time: float = 0.0
-
     def search(self, spec: QuerySpec) -> list[Candidate]:
-        """Fetch the MMIC page and return amplifier candidates."""
-        elapsed = time.time() - self._last_fetch_time
-        if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
-            time.sleep(_MIN_DELAY_SECONDS - elapsed)
+        """Fetch the MMIC page (cache-first) and return amplifier candidates.
 
-        last_exc: Exception | None = None
-        for _attempt in range(2):  # one retry for the site's intermittent TLS/connect errors
-            try:
-                response = httpx.get(
-                    _PAGE_URL,
-                    headers={
-                        "User-Agent": _USER_AGENT,
-                        "Accept": (
-                            "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                            "*/*;q=0.8"
-                        ),
-                        "Accept-Language": "en-US,en;q=0.5",
-                    },
-                    follow_redirects=True,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                self._last_fetch_time = time.time()
-                return drop_paramless(self._parse_html(response.text))
-            except httpx.HTTPError as exc:
-                last_exc = exc
+        The shared provider owns the User-Agent, delay, timeout and retries (it
+        covers the site's intermittent TLS/connect errors); a ``None`` body means
+        unreachable with no cached copy → skip this source.
+        """
+        result = http.fetch(
+            self.manufacturer,
+            _PAGE_URL,
+            headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+        )
+        if result.text is None:
+            return []
 
-        raise AdapterError(
-            manufacturer=self.manufacturer,
-            context=f"HTTP error fetching {_PAGE_URL}",
-            cause=last_exc,
-        ) from last_exc
+        return drop_paramless(self._parse_html(result.text))
 
     def _parse_html(self, html: str) -> list[Candidate]:
         """Parse all amplifier-section tables; return combined Candidates.
@@ -211,10 +190,14 @@ class VectraWaveAdapter(Adapter):
         row_texts = [[c.text(strip=True) for c in cells] for cells in rows]
 
         # Product-header row: first cell empty, remaining cells are part numbers.
+        # Each part-number cell is an <a href="/product/<pn>"> to that part's own
+        # product page — capture the cells too so we can read those links.
         products: list[str] = []
-        for texts in row_texts:
+        product_cells: list = []
+        for cells, texts in zip(rows, row_texts):
             if texts and not texts[0] and any(texts[1:]):
                 products = texts
+                product_cells = cells
                 break
         if not products:
             return []
@@ -224,6 +207,16 @@ class VectraWaveAdapter(Adapter):
         datasheets: dict[int, str] = {i: "" for i in range(1, n_cols)}
         freq_low: dict[int, float] = {}
         freq_high: dict[int, float] = {}
+
+        # Result link = the part's own product page (…/product/<pn>), read from
+        # the <a href> on its header cell.  Fall back to the catalogue page for a
+        # part that carries no link.  The Datasheet-row PDF link is separate — it
+        # populates ``datasheet_url`` (below), not this display URL.
+        urls: dict[int, str] = {i: "" for i in range(1, n_cols)}
+        for i in range(1, min(n_cols, len(product_cells))):
+            a = product_cells[i].css_first("a")
+            if a is not None:
+                urls[i] = self._abs_url(a.attributes.get("href", ""))
 
         for cells, texts in zip(rows, row_texts):
             if not texts or not texts[0]:
@@ -244,7 +237,7 @@ class VectraWaveAdapter(Adapter):
 
             mapped = ROW_MAP.get(key)
             if mapped is None:
-                continue  # unmapped label (technology, pae, controlvoltage, ...)
+                continue  # unmapped label (technology, pae, datasheet, controlvoltage, ...)
             canonical, unit = mapped
 
             for i in range(1, min(n_cols, len(texts))):
@@ -275,7 +268,7 @@ class VectraWaveAdapter(Adapter):
                 Candidate(
                     model=model,
                     manufacturer=self.manufacturer,
-                    url=_PAGE_URL,
+                    url=urls[i] or _PAGE_URL,
                     raw_params=rp,
                     source="table",
                     # "" (no href / empty href) MUST become None: the field means

@@ -32,8 +32,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-import httpx
-
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
 
@@ -141,7 +140,13 @@ def _parse_float(value: object) -> float | None:
     try:
         return float(text)
     except ValueError:
-        return None
+        pass
+    # Some feed cells carry a trailing unit ("28 dBm", "17 dB") instead of a bare
+    # number — an inconsistency in how a part is published, not a real absence.
+    # Take the leading numeric token so the value isn't lost as UNKNOWN (which
+    # would wrongly hide the part). Applies to every scalar parsed here.
+    match = re.match(r"[-+]?\d*\.?\d+", text)
+    return float(match.group()) if match else None
 
 
 def _parse_freq(value: object) -> float | None:
@@ -257,6 +262,39 @@ def _sse_json(text: str) -> dict:
     return json.loads(text)
 
 
+def _catalog_url(model: str, feed_url: str | None) -> str | None:
+    """Build the human-facing ``microchip.com`` catalog URL from a part's feed URL.
+
+    The microchipdirect ``productUrl`` the MCP returns points at the *store*
+    (``microchipdirect.com/product/<part>``), which for RF-MMIC parts renders a
+    "This Product is Not Available Online" stub — useless to a user. The real
+    catalog page lives at ``www.microchip.com/en-us/product/<slug>`` where
+    ``<slug>`` is the very ``<PART>-<TYPE-WORDS>`` slug that names the
+    ``parametricData`` feed (e.g. feed ``…/MMA035AA-AMPLIFIER-DISTRIBUTED.json``
+    → page ``…/product/MMA035AA-Amplifier-Distributed``).
+
+    The feed slug is upper-cased but the catalog's canonical form title-cases the
+    *type words* while the part number keeps its own casing. A part number may
+    itself carry a suffix (``ICP0444-FL`` → page ``ICP0444-FL-Power-Amplifier``),
+    so we strip the known ``model`` prefix and title-case only the trailing type
+    words rather than title-casing blindly (which would break ``FL`` → ``Fl``).
+    If the slug doesn't start with ``model`` we leave it verbatim.
+
+    ``www.microchip.com`` is Akamai-blocked to fetchers, but this URL is
+    display-only (opened by a human in a browser; never fetched by us), so that
+    block is irrelevant. Returns None when there is no feed slug to build from.
+    """
+    if not feed_url:
+        return None
+    slug = feed_url.rsplit("/", 1)[-1].removesuffix(".json")
+    if not slug:
+        return None
+    if model and slug.upper().startswith(model.upper() + "-"):
+        type_words = slug[len(model) + 1:]
+        slug = model + "-" + "-".join(w.capitalize() for w in type_words.split("-"))
+    return f"https://www.microchip.com/en-us/product/{slug}"
+
+
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
@@ -277,29 +315,29 @@ class MicrochipAdapter(Adapter):
 
         The per-part fetches (physical-specs + feed) run concurrently in a
         bounded thread pool — the MCP tools are documented read-only / stateless
-        / PARALLEL-SAFE, and ``httpx.Client`` is safe to share across threads.
-        No query-side filtering is applied (Microchip exposes none via this
-        path); the Verifier applies all constraints (REQ-4.1).
+        / PARALLEL-SAFE, and the shared cache provider is thread-safe (distinct
+        URLs → distinct files; Microchip has no politeness delay so its fetches
+        aren't serialized). No query-side filtering is applied (Microchip exposes
+        none via this path); the Verifier applies all constraints (REQ-4.1).
         """
-        with httpx.Client(follow_redirects=True, timeout=60.0) as client:
-            products = self._enumerate(client)
-            if not products:
-                # Tripwire: the MCP enumeration returned nothing for every term
-                # → API change / outage.  Fail loudly, don't return empty.
-                raise AdapterError(
-                    manufacturer=self.manufacturer,
-                    context="MCP search_products returned no parts for any amplifier term",
-                )
+        products = self._enumerate()
+        if not products:
+            # Tripwire: the MCP enumeration returned nothing for every term
+            # → API change / outage.  Fail loudly, don't return empty.
+            raise AdapterError(
+                manufacturer=self.manufacturer,
+                context="MCP search_products returned no parts for any amplifier term",
+            )
 
-            with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
-                built = pool.map(
-                    lambda item: self._process_part(client, item[0], item[1]),
-                    products.items(),
-                )
-            return _fill_variant_datasheets([c for c in built if c is not None])
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+            built = pool.map(
+                lambda item: self._process_part(item[0], item[1]),
+                products.items(),
+            )
+        return _fill_variant_datasheets([c for c in built if c is not None])
 
     def _process_part(
-        self, client: httpx.Client, model: str, product: dict
+        self, model: str, product: dict
     ) -> Candidate | None:
         """One part's fetch chain: physical-specs -> feed -> gated Candidate.
 
@@ -308,11 +346,11 @@ class MicrochipAdapter(Adapter):
         part must never abort the whole manufacturer's result set.
         """
         try:
-            physical = self._fetch_physical(client, model)
+            physical = self._fetch_physical(model)
             feed_url = physical.get("parametricData")
             if not feed_url:
                 return None  # not a parametric RF part
-            feed = self._fetch_feed(client, feed_url)
+            feed = self._fetch_feed(feed_url)
             if feed is None or not _is_amplifier(feed):
                 return None  # fetch failed, or text-search pollution (non-amplifier)
             return self._build_candidate(model, product, physical, feed)
@@ -323,7 +361,7 @@ class MicrochipAdapter(Adapter):
     # Retrieval steps
     # ------------------------------------------------------------------
 
-    def _enumerate(self, client: httpx.Client) -> dict[str, dict]:
+    def _enumerate(self) -> dict[str, dict]:
         """Union of ``search_products`` over every amplifier term, de-duped by part.
 
         Per-term failures are tolerated (transient API errors observed); only if
@@ -335,7 +373,6 @@ class MicrochipAdapter(Adapter):
             while True:
                 try:
                     inner = self._mcp_call(
-                        client,
                         "search_products",
                         {"searchTerm": term, "limit": _SEARCH_LIMIT, "offset": offset},
                     )
@@ -355,32 +392,56 @@ class MicrochipAdapter(Adapter):
                     break
         return products
 
-    def _fetch_physical(self, client: httpx.Client, part_number: str) -> dict:
-        """Return the ``search_product_physical_specs`` data for a part ({} on failure)."""
+    def _fetch_physical(self, part_number: str) -> dict:
+        """Return the ``search_product_physical_specs`` data for a part ({} on failure).
+
+        The tool returns two shapes depending on how many products the part
+        number matches:
+
+        - a **flat** object (``partNumber``, ``parametricData``, …) for a unique
+          match (e.g. MMA035AA);
+        - a ``{"products": [...]}`` **list** when the part number also matches
+          variants — tape-and-reel ``…/TR``, eval boards ``…E`` (e.g. MMA044PP3).
+          Here ``parametricData`` is nested one level down, so we pick the row
+          whose ``partNumber`` is exactly the one we asked for.
+
+        Handling only the flat shape would silently drop every part that has
+        sibling variants (its ``parametricData`` reads as ``None`` → skipped).
+        """
         try:
             inner = self._mcp_call(
-                client, "search_product_physical_specs", {"partNumber": part_number}
+                "search_product_physical_specs", {"partNumber": part_number}
             )
         except AdapterError:
             return {}
         data = inner.get("data") if isinstance(inner, dict) else None
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        products = data.get("products")
+        if isinstance(products, list):
+            for prod in products:
+                if isinstance(prod, dict) and prod.get("partNumber") == part_number:
+                    return prod
+            return {}  # multi-match but our exact part isn't among them → skip
+        return data
 
-    def _fetch_feed(self, client: httpx.Client, url: str) -> dict | None:
-        """GET one microchipdirect parametric feed; None on any error (skip the part)."""
+    def _fetch_feed(self, url: str) -> dict | None:
+        """GET one microchipdirect parametric feed (cache-first); None on any error."""
+        result = http.fetch(self.manufacturer, url, headers=_FEED_HEADERS)
+        if result.text is None:
+            return None
         try:
-            response = client.get(url, headers=_FEED_HEADERS)
-            response.raise_for_status()
-            feed = response.json()
-        except (httpx.HTTPError, json.JSONDecodeError, ValueError):
+            feed = json.loads(result.text)
+        except (json.JSONDecodeError, ValueError):
             return None
         return feed if isinstance(feed, dict) else None
 
-    def _mcp_call(self, client: httpx.Client, tool: str, arguments: dict) -> dict:
-        """Call one MCP tool and return its unwrapped inner JSON payload.
+    def _mcp_call(self, tool: str, arguments: dict) -> dict:
+        """Call one MCP tool (cache-first POST) and return its unwrapped inner JSON.
 
-        Raises AdapterError on transport error, JSON-RPC error, or an
-        unexpected response shape (the site-change tripwire).
+        Raises AdapterError on transport failure, JSON-RPC error, or an
+        unexpected response shape (the site-change tripwire). The POST body feeds
+        the cache key, so each distinct call maps to its own file.
         """
         body = {
             "jsonrpc": "2.0",
@@ -388,16 +449,16 @@ class MicrochipAdapter(Adapter):
             "method": "tools/call",
             "params": {"name": tool, "arguments": arguments},
         }
-        try:
-            response = client.post(_MCP_URL, headers=_MCP_HEADERS, json=body)
-            response.raise_for_status()
-            rpc = _sse_json(response.text)
-        except httpx.HTTPError as exc:
+        result = http.fetch(
+            self.manufacturer, _MCP_URL, method="POST", json=body, headers=_MCP_HEADERS
+        )
+        if result.text is None:
             raise AdapterError(
                 manufacturer=self.manufacturer,
                 context=f"HTTP error calling MCP {tool}",
-                cause=exc,
-            ) from exc
+            )
+        try:
+            rpc = _sse_json(result.text)
         except (json.JSONDecodeError, ValueError) as exc:
             raise AdapterError(
                 manufacturer=self.manufacturer,
@@ -454,7 +515,9 @@ class MicrochipAdapter(Adapter):
         if vdd is None:
             vdd = _parse_float(by_key.get(_VOLTAGE_KEY))
         if vdd is not None:
-            raw_params["VDD"] = RawValue(value=vdd, unit="V")
+            # A bias/supply figure is a single value -> degenerate (v, v) interval,
+            # the shape the contains rule compares (never a bare float).
+            raw_params["VDD"] = RawValue(value=(vdd, vdd), unit="V")
 
         # Size / MSL come from the MCP physical-specs (not the feed).
         size = _parse_size_mm(physical.get("packageWidthOrSize"))
@@ -464,7 +527,14 @@ class MicrochipAdapter(Adapter):
         if msl is not None:
             raw_params["MSL"] = RawValue(value=msl, unit="")
 
-        url = product.get("productUrl") or f"https://www.microchipdirect.com/product/{model}"
+        # Prefer the microchip.com catalog page (built from the feed slug) over the
+        # microchipdirect store URL, which is a "Not Available Online" stub for
+        # RF-MMIC parts; fall back to the store URL only if no feed slug is known.
+        url = (
+            _catalog_url(model, physical.get("parametricData"))
+            or product.get("productUrl")
+            or f"https://www.microchipdirect.com/product/{model}"
+        )
 
         # Datasheet link: the MCP hands it back directly (``datasheetUrl``) in the
         # already-fetched product / physical-specs payloads — no extra request, no

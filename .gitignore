@@ -12,6 +12,9 @@
 # Cache directory
 .cache/
 
+# AI Search run logs (RF_LOG=on) — one dir per run
+runs/
+
 # Python bytecode
 __pycache__/
 *.pyc

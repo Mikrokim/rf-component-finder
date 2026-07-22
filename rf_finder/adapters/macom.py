@@ -22,10 +22,8 @@ from __future__ import annotations
 import html as htmlmod
 import json
 import re
-import time
 
-import httpx
-
+from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, RawValue
 
@@ -38,17 +36,6 @@ _ALL_AMPLIFIERS_URL = (
     _BASE_URL + "/products/rf-microwave-mmwave/amplifiers/all-amplifiers"
 )
 
-# Browser-style User-Agent (Cloudflare returns clean 200s for it; bot UAs risk
-# a challenge).  Consistent with robots' ``Content-Signal: search=yes`` — this
-# is a product-search retriever, not an AI-training crawler.  (macom-plan.md OQ-M1)
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-
-# robots.txt Crawl-delay: 60 — minimum seconds between consecutive live fetches.
-_MIN_DELAY_SECONDS = 60.0
 
 # Each product row: <tr data-part="{…HTML-entity-encoded JSON…}">.  Internal
 # quotes are encoded as &#034;, so the attribute's real quote delimiters bound
@@ -106,47 +93,33 @@ class MacomAdapter(Adapter):
     manufacturer = "MACOM"
     supported_components = {"amplifier"}
 
-    def __init__(self) -> None:
-        self._last_fetch_time: float = 0.0
-
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
 
     def search(self, spec) -> list[Candidate]:  # noqa: ANN001 (QuerySpec; signature per ABC)
-        """Fetch the All-Amplifiers page and return all parts as Candidates.
+        """Fetch the All-Amplifiers page (cache-first) and return all parts.
 
         No server-side filtering is applied (MACOM has none); the Verifier
-        applies all constraints.
+        applies all constraints. The shared provider owns the User-Agent, delay,
+        timeout and retries; a ``None`` body means unreachable with no cached
+        copy → skip this source.
         """
-        elapsed = time.time() - self._last_fetch_time
-        if self._last_fetch_time and elapsed < _MIN_DELAY_SECONDS:
-            time.sleep(_MIN_DELAY_SECONDS - elapsed)
+        result = http.fetch(
+            self.manufacturer,
+            _ALL_AMPLIFIERS_URL,
+            headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/webp,*/*;q=0.8"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+        if result.text is None:
+            return []
 
-        try:
-            response = httpx.get(
-                _ALL_AMPLIFIERS_URL,
-                headers={
-                    "User-Agent": _USER_AGENT,
-                    "Accept": (
-                        "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                        "image/webp,*/*;q=0.8"
-                    ),
-                    "Accept-Language": "en-US,en;q=0.9",
-                },
-                follow_redirects=True,
-                timeout=60.0,
-            )
-            response.raise_for_status()
-            self._last_fetch_time = time.time()
-        except httpx.HTTPError as exc:
-            raise AdapterError(
-                manufacturer=self.manufacturer,
-                context=f"HTTP error fetching {_ALL_AMPLIFIERS_URL}",
-                cause=exc,
-            ) from exc
-
-        return self._parse_html(response.text)
+        return self._parse_html(result.text)
 
     # ------------------------------------------------------------------
     # Internal parse method (exposed for tests to call directly)

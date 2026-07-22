@@ -8,9 +8,9 @@ from rf_finder.form.schema import Field, FormSchema
 #: Comparison rules collected as a (possibly one-sided) range in the form.
 #: ``contains``/``between`` are inherently range-valued; ``min``/``max`` are
 #: single-bound rules that we also collect as a range so the user may cap the
-#: other side too (e.g. Psat between 20 and 30 dBm, or Gain ≤ 40 dB). All of
-#: them except ``contains`` are emitted as a ``between`` constraint — see
-#: :func:`_build_range_constraint`.
+#: other side too (e.g. Psat between 20 and 30 dBm, or Gain ≤ 40 dB). ``contains``
+#: keeps its own rule; everything else is emitted as a ``between`` constraint —
+#: see :func:`_build_range_constraint`.
 RANGE_COMPARISONS = ("contains", "between", "min", "max")
 
 
@@ -85,22 +85,21 @@ def _build_range_constraint(
     min_str: str,
     max_str: str,
     unit_str: str,
-    *,
-    require_both: bool,
 ) -> ParamConstraint | None:
     """Build a range ``ParamConstraint`` from raw min/max/unit strings.
 
     Shared by every range-collected comparison rule (see ``RANGE_COMPARISONS``):
 
-    - ``contains`` (``require_both=True``): a partial range is meaningless, so
-      both bounds must be present — otherwise the field is skipped.  Emitted
-      as a ``contains`` constraint (the candidate itself is a band).
-    - ``between`` / ``min`` / ``max`` (``require_both=False``): either side may
-      be omitted; an omitted ``min`` defaults to ``-inf`` and an omitted
-      ``max`` to ``+inf``, i.e. a one-sided range that imposes no restriction
-      on that side.  All three are emitted as a ``between`` constraint, since a
-      single-bound query (``min``/``max``) is just a one-sided ``between`` —
-      e.g. a ``min`` param with only a min entered means "≥ x" (max = +inf).
+    - ``contains`` band field (freq_range, Temperature): a partial range is
+      meaningless, so both bounds must be present — otherwise the field is
+      skipped.  Emitted as a ``contains`` constraint.
+    - ``contains`` with ``single_value_ok`` (VDD): the user enters ONE value or
+      a full range.  A lone entry is that single required voltage — the point
+      ``(v, v)`` — never an open-ended range.  Emitted as ``contains``.
+    - ``between`` / ``min`` / ``max``: either side may be omitted; an omitted
+      ``min`` defaults to ``-inf`` and an omitted ``max`` to ``+inf`` (a one-
+      sided range imposing no restriction on that side).  Emitted as
+      ``between`` — a single-bound query is just a one-sided ``between``.
 
     Returns ``None`` when the field has no usable input and should be skipped
     (REQ-1.6).  Raises ``ValueError`` on a non-numeric bound, ``min > max``, or
@@ -110,32 +109,33 @@ def _build_range_constraint(
 
     if not min_str and not max_str:
         return None  # nothing entered → no constraint
-    if require_both and (not min_str or not max_str):
-        return None  # partial range for a 'contains' field → skip
 
-    if min_str:
-        try:
-            min_val = float(min_str)
-        except ValueError:
-            raise ValueError(f"{name}.min: {min_str!r} is not a valid number")
-    else:
-        min_val = float("-inf")
+    is_band_only = field.comparison == "contains" and not field.single_value_ok
+    if is_band_only and (not min_str or not max_str):
+        return None  # partial band for a band-only 'contains' field → skip
 
-    if max_str:
+    def _num(text: str, side: str) -> float:
         try:
-            max_val = float(max_str)
+            return float(text)
         except ValueError:
-            raise ValueError(f"{name}.max: {max_str!r} is not a valid number")
+            raise ValueError(f"{name}.{side}: {text!r} is not a valid number")
+
+    if field.single_value_ok:
+        # VDD: one entry → the point (v, v); both entries → the range (min, max).
+        min_val = _num(min_str or max_str, "min")
+        max_val = _num(max_str or min_str, "max")
     else:
-        max_val = float("inf")
+        min_val = _num(min_str, "min") if min_str else float("-inf")
+        max_val = _num(max_str, "max") if max_str else float("inf")
 
     if min_val > max_val:
         raise ValueError(
             f"{name}: min ({min_val}) must not be greater than max ({max_val})"
         )
 
-    # A single-bound rule collected as a range is semantically a ``between``;
-    # only ``contains`` (a candidate that is itself a band) keeps its rule.
+    # A single-bound scalar (min/max) collected as a range is semantically a
+    # ``between``; a ``contains`` field (a candidate that is itself a band, incl.
+    # VDD) keeps its rule.
     emitted = "contains" if field.comparison == "contains" else "between"
     return ParamConstraint(
         canonical_name=name,
@@ -158,7 +158,6 @@ def _collect_from_answers(schema: FormSchema, answers: dict[str, str]) -> QueryS
                 _get_answer(answers, f"{name}.min"),
                 _get_answer(answers, f"{name}.max"),
                 _get_answer(answers, f"{name}.unit"),
-                require_both=field.comparison == "contains",
             )
             if constraint is not None:
                 constraints.append(constraint)
@@ -209,8 +208,10 @@ def _collect_interactive(schema: FormSchema) -> QuerySpec:
         name = field.canonical_name
 
         if field.comparison in RANGE_COMPARISONS:
-            require_both = field.comparison == "contains"
-            if require_both:
+            is_band_only = field.comparison == "contains" and not field.single_value_ok
+            if field.single_value_ok:
+                print(f"\n{field.label} (one value, or a range — enter min and max)")
+            elif is_band_only:
                 print(f"\n{field.label} (range)")
             else:
                 print(f"\n{field.label} (range — leave a side blank for open-ended)")
@@ -219,15 +220,20 @@ def _collect_interactive(schema: FormSchema) -> QuerySpec:
                 min_raw = input(f"  Min ({field.units}): ").strip()
                 max_raw = input(f"  Max ({field.units}): ").strip()
 
-                # Nothing entered (or a partial range on a 'contains' field) → skip.
+                # Nothing entered (or a partial band on a band-only field) → skip.
                 if not min_raw and not max_raw:
                     break
-                if require_both and (not min_raw or not max_raw):
+                if is_band_only and (not min_raw or not max_raw):
                     break
 
                 try:
-                    min_val = float(min_raw) if min_raw else float("-inf")
-                    max_val = float(max_raw) if max_raw else float("inf")
+                    if field.single_value_ok:
+                        # One entry → the point (v, v); both → the range.
+                        min_val = float(min_raw or max_raw)
+                        max_val = float(max_raw or min_raw)
+                    else:
+                        min_val = float(min_raw) if min_raw else float("-inf")
+                        max_val = float(max_raw) if max_raw else float("inf")
                 except ValueError:
                     print("  Please enter numeric values.")
                     continue
@@ -236,8 +242,9 @@ def _collect_interactive(schema: FormSchema) -> QuerySpec:
                     print("  Min must not be greater than max.")
                     continue
 
-                # min/max collected as a range are one-sided ``between`` queries.
-                emitted = "contains" if require_both else "between"
+                # A min/max scalar collected as a range is a one-sided
+                # ``between``; a ``contains`` field (incl. VDD) keeps its rule.
+                emitted = "contains" if field.comparison == "contains" else "between"
                 constraints.append(
                     ParamConstraint(
                         canonical_name=name,

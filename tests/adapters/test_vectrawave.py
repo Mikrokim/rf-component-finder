@@ -87,10 +87,11 @@ def test_datasheet_url_is_the_absolutized_pdf() -> None:
     )
 
 
-def test_url_is_the_catalogue_page_not_the_pdf() -> None:
-    c = _by("VM042D")
-    assert c.url == "https://vectrawave.com/search-engine-mmic"
-    assert ".pdf" not in c.url
+def test_url_is_product_page_not_datasheet() -> None:
+    # The result link points at the part's own product page (read from the
+    # header-cell <a href>), NOT the Datasheet-row PDF.
+    assert _by("VM042D").url == "https://vectrawave.com/product/vm042d"
+    assert _by("VM017D").url == "https://vectrawave.com/product/vm017d"
 
 
 def test_empty_href_datasheet_becomes_none() -> None:
@@ -142,8 +143,10 @@ def test_num_tolerates_malformed_trailing_dot() -> None:
 
 def test_vdd_single_and_dual_rail() -> None:
     assert _vdd("28") == (28.0, 28.0)
-    assert _vdd("+8") == (8.0, 8.0)
-    assert _vdd("+3/-3") == (-3.0, 3.0)   # dual-rail supply -> (min, max)
+    assert _vdd("+8") == (8.0, 8.0)         # leading plus is a sign, ignored
+    # A dual-rail supply belongs to control parts, not the amplifier drain
+    # supply this project matches -> left UNKNOWN (None) rather than mis-ranged.
+    assert _vdd("+3/-3") is None
 
 
 def test_vdd_sentinels_return_none() -> None:

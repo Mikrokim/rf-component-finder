@@ -11,6 +11,7 @@ Run with:  python -m rf_finder.ui.gui
 
 from __future__ import annotations
 
+import asyncio
 import queue
 import re
 import threading
@@ -34,11 +35,70 @@ _STATUS = {"PASS": "✓", "FAIL": "✗", "UNKNOWN": "?"}
 _MATCH_ROW = "#e8f8ef"
 _NOT_VERIFIED_ROW = "#fdf3e0"
 
+#: Source-column markers so a row's origin is clear (both engines share the table).
+_SRC_SEARCH = "🔎 Search"
+_SRC_AI = "🤖 AI"
+
 #: ttkbootstrap theme for the whole window.
 _THEME = "minty"
 
 #: A number-in-progress: allows "", "-", "1", "1.", "-.5" — rejects letters as typed.
 _NUM_RE = re.compile(r"^-?\d*\.?\d*$")
+
+
+class _Spinner(tk.Canvas):
+    """An asset-free rotating-arc loading spinner.
+
+    Draws a faint full-circle track with one bright arc segment that rotates on
+    a timer — the familiar circular "loading" indicator — themed to the active
+    ttkbootstrap palette. No image/GIF asset and no extra dependency. Purely
+    cosmetic and UI-thread-only: ``start()`` begins the rotation, ``stop()``
+    ends it.
+    """
+
+    def __init__(
+        self, master, *, size: int = 20, width: int = 3,
+        extent: int = 90, step: int = 15, interval: int = 40,
+    ) -> None:
+        colors = ttk.Style().colors
+        super().__init__(
+            master, width=size, height=size,
+            highlightthickness=0, borderwidth=0, background=colors.bg,
+        )
+        self._extent = extent      # length of the bright arc (degrees)
+        self._step = step          # degrees advanced per tick
+        self._interval = interval  # ms between ticks
+        self._angle = 90           # start at 12 o'clock
+        self._job = None
+
+        pad = width + 1            # keep the stroke fully inside the canvas
+        box = (pad, pad, size - pad, size - pad)
+        # Faint full-circle track (drawn once).
+        self.create_arc(
+            *box, start=0, extent=359.9, style="arc",
+            outline=colors.border, width=width,
+        )
+        # The rotating bright arc (its start angle is updated each tick).
+        self._arc = self.create_arc(
+            *box, start=self._angle, extent=self._extent, style="arc",
+            outline=colors.primary, width=width,
+        )
+
+    def start(self) -> None:
+        """Begin rotating (no-op if already running)."""
+        if self._job is None:
+            self._tick()
+
+    def stop(self) -> None:
+        """Stop rotating; safe to call when already stopped."""
+        if self._job is not None:
+            self.after_cancel(self._job)
+            self._job = None
+
+    def _tick(self) -> None:
+        self._angle = (self._angle - self._step) % 360   # negative = clockwise
+        self.itemconfigure(self._arc, start=self._angle)
+        self._job = self.after(self._interval, self._tick)
 
 
 class App:
@@ -86,6 +146,7 @@ class App:
 
         # Controls: the Search button and a status line (loading / result count).
         self._searching = False
+        self._skill_running = False
         self.last_results: list = []
         controls = ttk.Frame(self.form_area)
         controls.pack(fill="x", pady=(16, 0))
@@ -94,6 +155,21 @@ class App:
             bootstyle="success", width=16,
         )
         self.search_button.pack(side="left", ipady=4)
+        # AI Search: same form + same table, but a Claude Skill is the engine.
+        self.skill_button = ttk.Button(
+            controls, text="AI Search", command=self._on_run_skill,
+            bootstyle="info", width=16,
+        )
+        self.skill_button.pack(side="left", padx=(10, 0), ipady=4)
+        # Reset: clear every field in one click — never rebuilds, keeps the type.
+        self.reset_button = ttk.Button(
+            controls, text="Reset", command=self._on_reset,
+            bootstyle="secondary-outline", width=10,
+        )
+        self.reset_button.pack(side="left", padx=(10, 0), ipady=4)
+        # An asset-free rotating-arc spinner (no GIF/image). Shown only while a
+        # run is in flight — packed on start, hidden on stop.
+        self.spinner = _Spinner(controls, size=30, width=4)
         self.status_var = tk.StringVar(value="")
         ttk.Label(controls, textvariable=self.status_var, bootstyle="secondary").pack(
             side="left", padx=(14, 0)
@@ -139,6 +215,25 @@ class App:
 
     def _on_component_change(self, event=None) -> None:
         self.build_fields(self._selected_component_type())
+
+    def _on_reset(self) -> None:
+        """Clear every field of the current form in one click.
+
+        Empties each value entry and restores each unit to its canonical
+        default (``field.units[0]``), reusing the existing ``field_widgets``
+        records. Unlike a component-type change this does NOT rebuild the fields
+        or change the selected type. A no-op while a search or AI search runs.
+        """
+        if self._searching or self._skill_running:
+            return
+        for rec in self.field_widgets:
+            if rec["kind"] == "range":
+                rec["min"].delete(0, "end")
+                rec["max"].delete(0, "end")
+            else:
+                rec["value"].delete(0, "end")
+            rec["unit"].set(rec["field"].units[0])
+        self.status_var.set("")
 
     # -- Form fields ---------------------------------------------------------
 
@@ -231,7 +326,14 @@ class App:
         errors: list[str] = []
         for rec in self.field_widgets:
             field = rec["field"]
-            if rec["kind"] == "range" and field.comparison == "contains":
+            # A band-only 'contains' field (freq_range, Temperature) needs both
+            # bounds. VDD (single_value_ok) accepts one value OR a range, so a
+            # lone entry is fine there and must not be flagged.
+            if (
+                rec["kind"] == "range"
+                and field.comparison == "contains"
+                and not field.single_value_ok
+            ):
                 has_min = bool(rec["min"].get().strip())
                 has_max = bool(rec["max"].get().strip())
                 if has_min != has_max:
@@ -282,18 +384,40 @@ class App:
                 kind, payload = self._result_queue.get_nowait()
                 if kind == "ok":
                     self._deliver_results(payload)
-                else:
+                elif kind == "error":
                     self._on_error(payload)
+                elif kind == "skill_done":
+                    self._deliver_skill_results(payload)
+                elif kind == "skill_error":
+                    self._on_skill_error(payload)
+                elif kind == "skill_text":
+                    self._render_activity(payload)
         except queue.Empty:
             pass
         self.root.after(100, self._poll_queue)
 
+    def _start_progress(self) -> None:
+        """Show and spin the loading indicator (UI thread only)."""
+        self.spinner.pack(side="right", padx=(0, 4))
+        self.spinner.start()
+
+    def _stop_progress(self) -> None:
+        """Stop and hide the loading indicator (UI thread only)."""
+        self.spinner.stop()
+        self.spinner.pack_forget()
+
     def _set_searching(self, busy: bool) -> None:
         """Toggle the loading state so a second search can't start mid-run."""
         self._searching = busy
-        self.search_button.configure(state="disabled" if busy else "normal")
+        state = "disabled" if busy else "normal"
+        self.search_button.configure(state=state)
+        self.skill_button.configure(state=state)
+        self.reset_button.configure(state=state)
         if busy:
             self.status_var.set("Searching… (this may take a few seconds)")
+            self._start_progress()
+        else:
+            self._stop_progress()
 
     def _on_error(self, exc: Exception) -> None:
         self._set_searching(False)
@@ -340,10 +464,156 @@ class App:
                 outcome = f"not-verified {passed}/{len(v.verdicts)}"
             item = self.tree.insert(
                 "", "end",
-                values=(c.model, c.manufacturer, outcome, c.url),
+                values=(_SRC_SEARCH, c.model, c.manufacturer, outcome, c.url),
                 tags=(v.overall,),
             )
             self._row_urls[item] = c.url
+
+    # -- AI Search (Claude Skill) --------------------------------------------
+
+    def _on_run_skill(self) -> None:
+        """AI Search: hand the current form to a Claude Skill and render the
+        components it returns into the shared results table.
+
+        Shares Search's input seam (``build_answers`` + ``collect``) and its
+        results table; only the engine differs. The deterministic Search flow
+        and its ``_deliver_results`` rendering are untouched.
+        """
+        if self._skill_running or self._searching:
+            return
+
+        errors = self._validate_form()
+        if errors:
+            messagebox.showerror("Incomplete filters", "\n".join(errors))
+            return
+        try:
+            spec = collect(self.schema, answers=self.build_answers())
+        except ValueError as e:
+            messagebox.showerror("Invalid input", str(e))
+            return
+
+        spec_text = self._format_spec_for_skill(spec)
+        self._set_skill_running(True)
+        # AI Search does NOT clear the table — its rows combine with what's
+        # already shown. Only Search resets the table.
+        threading.Thread(
+            target=self._skill_worker, args=(spec_text,), daemon=True
+        ).start()
+
+    def _format_spec_for_skill(self, spec) -> str:
+        """Render a ``QuerySpec`` as a compact pipe-delimited line for the prompt."""
+        parts = [f"Component type: {spec.component_type}"]
+        for c in spec.constraints:
+            if c.range is not None:
+                lo, hi = c.range
+                if lo == float("-inf") and hi == float("inf"):
+                    rng = "any"
+                elif hi == float("inf"):
+                    rng = f">= {lo}"
+                elif lo == float("-inf"):
+                    rng = f"<= {hi}"
+                else:
+                    rng = f"{lo} to {hi}"
+                parts.append(f"{c.canonical_name}: {rng} {c.unit}".strip())
+            else:
+                parts.append(f"{c.canonical_name}: {c.value} {c.unit}".strip())
+        if not spec.constraints:
+            parts.append("(no filters)")
+        return " | ".join(parts)
+
+    def _skill_worker(self, spec_text: str) -> None:
+        """Runs off the UI thread; hands the outcome back through the queue.
+
+        Imports the SDK-facing entry lazily so a missing ``claude-agent-sdk``
+        (or an unauthenticated / failed run, or an unreadable result) becomes a
+        ``("skill_error", exc)`` message rather than a crash. Never touches Tk.
+        """
+        try:
+            from rf_finder.agent.skill_runner import run_demo_search
+
+            result = asyncio.run(
+                run_demo_search(
+                    spec_text,
+                    # Stream live progress to the UI thread through the same
+                    # queue results use — the worker never touches Tk.
+                    on_text=lambda t: self._result_queue.put(("skill_text", t)),
+                )
+            )
+            components = (result or {}).get("components", [])
+        except Exception as e:   # missing SDK/auth, run error, unreadable result
+            self._result_queue.put(("skill_error", e))
+            return
+        self._result_queue.put(("skill_done", components))
+
+    def _set_skill_running(self, busy: bool) -> None:
+        """Toggle the AI-Search loading state; block either engine mid-run."""
+        self._skill_running = busy
+        state = "disabled" if busy else "normal"
+        self.skill_button.configure(state=state)
+        self.search_button.configure(state=state)
+        self.reset_button.configure(state=state)
+        if busy:
+            self.status_var.set("AI Search… (this may take a few seconds)")
+            self._start_progress()
+        else:
+            self._stop_progress()
+
+    def _render_activity(self, text: str) -> None:
+        """Show the AI engine's latest streamed activity on the status line.
+
+        Renders only the most recent chunk (overwrite, not append), whitespace-
+        collapsed and length-capped so bursty streaming can't reflow the layout.
+        Ignored once the run has ended, so a late chunk can't linger after the
+        summary or error message has been shown. Only AI Search feeds this;
+        deterministic Search produces no such stream.
+        """
+        if not self._skill_running:
+            return
+        collapsed = " ".join(str(text).split())
+        if not collapsed:
+            return
+        if len(collapsed) > 90:
+            collapsed = collapsed[:89] + "…"
+        self.status_var.set(f"🤖 {collapsed}")
+
+    def _on_skill_error(self, exc: Exception) -> None:
+        self._set_skill_running(False)
+        self.status_var.set("")
+        messagebox.showerror("AI Search failed", str(exc))
+
+    def _deliver_skill_results(self, components: list) -> None:
+        """Append Skill-returned components to the shared results table.
+
+        Unlike Search, AI Search does NOT clear the table — its rows are added
+        alongside whatever is already shown (Search or earlier AI results), so
+        the two engines' results combine. Only Search resets the table. The
+        Source column (``_SRC_AI``) marks each appended row's origin. Maps plain
+        dicts straight to rows, so the two engines share the ``Treeview``
+        without sharing a data model.
+        """
+        self._set_skill_running(False)
+
+        if not components:
+            # Nothing to add — leave any existing rows untouched.
+            self.status_var.set("No components from AI Search")
+            return
+
+        self.status_var.set(f"Added {len(components)} component(s) from AI Search")
+        self._show_tree()
+        for c in components:
+            url = c.get("url", "")
+            item = self.tree.insert(
+                "", "end",
+                values=(
+                    _SRC_AI,
+                    c.get("model", ""),
+                    c.get("manufacturer", ""),
+                    c.get("verdict", ""),
+                    url,
+                ),
+                tags=("match",),
+            )
+            self._row_urls[item] = url
 
     # -- Results table -------------------------------------------------------
 
@@ -351,18 +621,19 @@ class App:
         """A Treeview of results plus an empty-state label, in ``results_area``."""
         ttk.Style().configure("Treeview", rowheight=28)   # roomier rows
 
-        cols = ("model", "manufacturer", "verdicts", "url")
+        cols = ("source", "model", "manufacturer", "verdicts", "url")
         self.tree = ttk.Treeview(
             self.results_area, columns=cols, show="headings", bootstyle="success"
         )
-        for key, text, width in (
-            ("model", "Model", 180),
-            ("manufacturer", "Manufacturer", 130),
-            ("verdicts", "Verdicts", 260),
-            ("url", "Product URL", 320),
+        for key, text, width, anchor in (
+            ("source", "Source", 96, "center"),
+            ("model", "Model", 170, "w"),
+            ("manufacturer", "Manufacturer", 130, "w"),
+            ("verdicts", "Verdicts", 240, "w"),
+            ("url", "Product URL", 300, "w"),
         ):
             self.tree.heading(key, text=text)
-            self.tree.column(key, width=width, anchor="w")
+            self.tree.column(key, width=width, anchor=anchor)
 
         # Accepted rows get a subtle tint over the theme: green for a full
         # match, amber for a not-verified result.
@@ -403,9 +674,11 @@ class App:
 
 
 def main() -> None:
-    """Build and run the window (adapters fetch live, like the CLI)."""
-    from rf_finder.config import load_max_results
+    """Build and run the window (adapters fetch cache-first, like the CLI)."""
+    from rf_finder.config import load_cache_config, load_max_results
+    from rf_finder import http
 
+    http.configure(load_cache_config())   # set up the shared HTTP service the adapters fetch through
     root = ttk.Window(themename=_THEME)
     App(root, max_results=load_max_results())
     root.mainloop()

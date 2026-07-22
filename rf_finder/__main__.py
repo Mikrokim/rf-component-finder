@@ -4,16 +4,28 @@ The form and the result rendering live here; the actual search flow (adapters +
 verify + datasheet enrichment + the two gates) is delegated to
 ``rf_finder.pipeline.run_pipeline`` so the CLI and the desktop GUI
 (``rf_finder.ui.gui``) share one implementation.
+
+The response-cache feature adds only: a provider configured up front (``main``),
+a per-source snapshot-age note and a bounded join of background revalidations
+(both via ``rf_finder.cli``), and a manual ``refresh`` subcommand
+(``rf_finder.cli.run_refresh``).
+
+  python -m rf_finder                     interactive cache-first search
+  python -m rf_finder refresh [--adapter NAME]
+                                          manual cache warm/refresh (never scheduled)
 """
 
 from __future__ import annotations
 
+import argparse
+import sys
 
-def main() -> None:
+def run_search(provider) -> None:
     from rf_finder.form import build_form, collect
     from rf_finder.search import _sources_for
     from rf_finder.pipeline import run_pipeline
     from rf_finder.config import load_max_results
+    from rf_finder import cli   # cache-feature helpers (snapshot note, join)
 
     max_results = load_max_results()
 
@@ -59,14 +71,15 @@ def main() -> None:
         if outcome == "error":
             print(f"  [!] {adapter.manufacturer}: {payload}")
         elif outcome == "empty":
-            print(f"  • {adapter.manufacturer}: 0 candidates")
+            print(f"  • {adapter.manufacturer}: 0 candidates{cli._snapshot_note(provider, adapter.manufacturer)}")
         else:  # "ok"
-            print(f"  • {adapter.manufacturer}: {len(payload)} candidates")
+            print(f"  • {adapter.manufacturer}: {len(payload)} candidates{cli._snapshot_note(provider, adapter.manufacturer)}")
 
     verified = run_pipeline(spec, on_source=_note)
 
     if not verified:
         print("No matching components.")
+        cli._join_cache(provider)
         return
 
     # ── 3. Output — the pipeline returns only accepted candidates, tagged
@@ -105,6 +118,32 @@ def main() -> None:
         )
         _show(not_verified)
         print()
+
+    cli._join_cache(provider)
+
+
+def main(argv: list[str] | None = None) -> None:
+    from rf_finder import http, cli
+    from rf_finder.config import load_cache_config
+
+    parser = argparse.ArgumentParser(
+        prog="rf_finder", description="RF component finder (cache-first)."
+    )
+    sub = parser.add_subparsers(dest="command")
+    refresh_p = sub.add_parser(
+        "refresh", help="Re-fetch and store every source's pages (manual)."
+    )
+    refresh_p.add_argument(
+        "--adapter", metavar="NAME", default=None,
+        help="Refresh only this manufacturer (default: all).",
+    )
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+
+    provider = http.configure(load_cache_config())
+    if args.command == "refresh":
+        cli.run_refresh(provider, args.adapter)
+    else:
+        run_search(provider)
 
 
 if __name__ == "__main__":
