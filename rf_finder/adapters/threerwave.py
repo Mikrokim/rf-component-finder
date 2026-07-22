@@ -40,6 +40,7 @@ from selectolax.parser import HTMLParser
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -50,10 +51,17 @@ _AMPLIFIER_URL = _BASE_URL + "/amplifier/"
 
 _MISSING_SENTINELS = frozenset({"", "-", "n/a", "N/A", "NA", "—"})
 
-# Markers of a content-filter block stub returned instead of the real page
+# Marker of a content-filter block *stub* returned instead of the real page
 # (e.g. the Etrog/safepage filter — see threerwave-plan.md OQ-3W-10).  Detected
 # so the failure is legible instead of a confusing "no table" error.
-_BLOCK_MARKERS = ("safepage.etrog", "block/block1", "cause=url_level")
+#
+# Only ``cause=url_level`` is used: it is the block *reason* Etrog stamps on a
+# genuine block-stub page.  The broader ``safepage.etrog`` / ``block/block1``
+# strings must NOT be markers — the Etrog filter injects a hidden
+# ``ntsp_block_page`` field carrying both into the FOOTER of every page it merely
+# passes through (with a benign ``cause=`` like ``Quiltingjs``), so matching them
+# flagged every fully-delivered page as blocked and returned zero results.
+_BLOCK_MARKERS = ("cause=url_level",)
 
 # ---------------------------------------------------------------------------
 # Column mapping: normalised header text -> (canonical_name, unit | None)
@@ -107,7 +115,8 @@ def _parse_float(cell_text: str) -> float | None:
     and rejects non-finite results — "nan"/"inf" -> None.
 
     Caveat: an in-cell range like "28-32" yields its first number (28.0).  The
-    3rwave columns we read are single-valued, so this is not expected to fire.
+    remaining columns this parses are single-valued; VDD (which can be a range
+    like "10-15") is handled separately by the shared parser, not here.
     """
     t = cell_text.strip()
     if not t or t in _MISSING_SENTINELS:
@@ -193,20 +202,26 @@ class ThreeRWaveAdapter(Adapter):
         if no ``table.tablepress`` is found in the HTML — the site-redesign
         tripwire (fail loudly, never return empty silently).
         """
-        # A network content filter may return a short block stub (HTTP 200)
-        # instead of the real page; distinguish it from a genuine redesign.
-        if any(marker in html for marker in _BLOCK_MARKERS):
-            raise AdapterError(
-                manufacturer=self.manufacturer,
-                context=(
-                    "request intercepted by a content filter (e.g. Etrog/"
-                    "safepage) — whitelist 3rwave.com to fetch live"
-                ),
-            )
-
         tree = HTMLParser(html)
         tables = tree.css("table.tablepress")
+
+        # When the real product tables are present, parse them — even if the HTML
+        # also carries an Etrog/safepage footer stamp.  Only an actual block
+        # *stub* (which has no product table) should be reported as a content-
+        # filter interception; a delivered page that merely passed through the
+        # filter still contains its tables and must not be treated as blocked.
         if not tables:
+            # No product tables: distinguish a content-filter block stub (a short
+            # HTTP-200 page from the filter) from a genuine site redesign, so the
+            # failure is legible either way.
+            if any(marker in html for marker in _BLOCK_MARKERS):
+                raise AdapterError(
+                    manufacturer=self.manufacturer,
+                    context=(
+                        "request intercepted by a content filter (e.g. Etrog/"
+                        "safepage) — whitelist 3rwave.com to fetch live"
+                    ),
+                )
             raise AdapterError(
                 manufacturer=self.manufacturer,
                 context="no table.tablepress found in HTML",
@@ -303,9 +318,16 @@ class ThreeRWaveAdapter(Adapter):
         if f_low is not None and f_high is not None:
             raw_params["freq_range"] = RawValue(value=(f_low, f_high), unit="GHz")
 
-        # Scalar params from COLUMN_MAP.
+        # Scalar params from COLUMN_MAP; VDD goes through the shared parser so an
+        # in-cell range ("10-15") is kept as an interval, not flattened to its
+        # first number (and a single value never leaks out as a bare float).
         for norm_key, (canonical, unit) in COLUMN_MAP.items():
             if canonical in ("model", "freq_low", "freq_high"):
+                continue
+            if canonical == "VDD":
+                vdd = parse_vdd(_cell_val(norm_key))
+                if vdd is not None:
+                    raw_params["VDD"] = RawValue(value=vdd, unit="V")
                 continue
             val = _parse_float(_cell_val(norm_key))
             if val is not None:

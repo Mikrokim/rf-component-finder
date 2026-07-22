@@ -15,6 +15,7 @@ class Field:
     comparison: str       # "min" / "max" / "contains" / "eq"
     canonical_unit: str   # e.g. "GHz"
     units: list[str]      # accepted units, canonical first
+    single_value_ok: bool = False   # contains field that also accepts one value (VDD)
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ def build_form(component_type: str) -> FormSchema:
             comparison=param.comparison,
             canonical_unit=param.canonical_unit,
             units=param.units,
+            single_value_ok=param.single_value_ok,
         )
         if param.comparison in ("contains", "between"):
             range_fields.append(field)

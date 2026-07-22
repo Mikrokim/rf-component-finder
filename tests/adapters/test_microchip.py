@@ -15,8 +15,10 @@ import pytest
 from rf_finder.adapters.base import ADAPTERS, AdapterError
 from rf_finder.adapters.microchip import (
     MicrochipAdapter,
+    _catalog_url,
     _is_amplifier,
     _parse_bias_volts,
+    _parse_float,
     _parse_freq,
     _parse_size_mm,
     _sse_json,
@@ -41,12 +43,14 @@ def test_lna_maps_all_present_params():
     c = _build("MMA044AA")
     assert c.manufacturer == "Microchip"
     assert c.source == "table"
-    assert c.url == "https://www.microchipdirect.com/product/MMA044AA"
+    # catalog page built from the feed slug (title-cased type words), not the
+    # microchipdirect store stub
+    assert c.url == "https://www.microchip.com/en-us/product/MMA044AA-Low-Noise-Amplifier"
     assert c.raw_params["freq_range"] == RawValue((6.0, 18.0), "GHz")
     assert c.raw_params["Gain"] == RawValue(21.0, "dB")
     assert c.raw_params["IP3"] == RawValue(30.0, "dBm")
     assert c.raw_params["P1dB"] == RawValue(16.0, "dBm")
-    assert c.raw_params["VDD"] == RawValue(4.0, "V")
+    assert c.raw_params["VDD"] == RawValue((4.0, 4.0), "V")
     assert c.raw_params["Size"] == RawValue(1.351, "mm")  # largest package edge
     assert "NF" not in c.raw_params
     assert "Psat" not in c.raw_params
@@ -58,7 +62,7 @@ def test_dc_freq_edge_becomes_zero():
     c = _build("MMA015AA")
     assert c.raw_params["freq_range"] == RawValue((0.0, 14.0), "GHz")
     assert c.raw_params["NF"] == RawValue(2.6, "dB")
-    assert c.raw_params["VDD"] == RawValue(4.0, "V")  # "4V, 80mA" (space)
+    assert c.raw_params["VDD"] == RawValue((4.0, 4.0), "V")  # "4V, 80mA" (space)
     assert c.raw_params["Size"] == RawValue(0.76, "mm")
 
 
@@ -67,7 +71,7 @@ def test_power_amp_misspelled_type_still_accepted():
     c = _build("MMA052AA")
     assert c is not None
     assert c.raw_params["freq_range"] == RawValue((0.0, 26.0), "GHz")
-    assert c.raw_params["VDD"] == RawValue(10.0, "V")
+    assert c.raw_params["VDD"] == RawValue((10.0, 10.0), "V")
     assert c.raw_params["IP3"] == RawValue(35.0, "dBm")
     assert c.raw_params["P1dB"] == RawValue(27.0, "dBm")
 
@@ -76,7 +80,7 @@ def test_pout_and_voltage_schema():
     """SYNTH-PA1: Pout (dBm) -> Psat; Voltage (V) -> VDD (no Bias); MSL parsed."""
     c = _build("SYNTH-PA1")
     assert c.raw_params["Psat"] == RawValue(40.0, "dBm")
-    assert c.raw_params["VDD"] == RawValue(28.0, "V")
+    assert c.raw_params["VDD"] == RawValue((28.0, 28.0), "V")
     assert c.raw_params["MSL"] == RawValue(3.0, "")
     assert c.raw_params["Size"] == RawValue(5.0, "mm")
     assert "NF" not in c.raw_params
@@ -112,6 +116,30 @@ def test_parse_freq_dc():
     assert _parse_freq("") is None
 
 
+def test_parse_float_strips_trailing_unit():
+    """A value published with its unit ("28 dBm") still parses to the number."""
+    assert _parse_float("28 dBm") == 28.0
+    assert _parse_float("17 dB") == 17.0
+    assert _parse_float("10.25") == 10.25   # clean number unaffected
+    assert _parse_float("-3.5 dBm") == -3.5
+    assert _parse_float("N/A") is None      # sentinel still None
+    assert _parse_float("QFN") is None      # no leading number -> None
+
+
+def test_oip3_with_unit_still_maps_to_ip3():
+    """MMA044PP3-style feed: OIP3 '28 dBm' -> IP3 28.0 (not dropped as UNKNOWN)."""
+    feed = {
+        "Freq Min GHz": "6", "Freq Max GHz": "18",
+        "Gain (dB)": "17", "NF (dB)": "2",
+        "OIP3 (dBm)": "28 dBm", "p1db(dBM)": "14",
+        "Bias": "4V,100mA", "product_type": "Low noise amplifier",
+    }
+    c = MicrochipAdapter()._build_candidate(
+        "MMA044PP3", {"partNumber": "MMA044PP3"}, {}, feed
+    )
+    assert c.raw_params["IP3"] == RawValue(28.0, "dBm")
+
+
 def test_parse_bias_volts():
     assert _parse_bias_volts("4V,102mA") == 4.0
     assert _parse_bias_volts("11V, 410 mA") == 11.0
@@ -129,6 +157,68 @@ def test_parse_size_mm_takes_largest_edge():
 def test_sse_json_extracts_data_line():
     payload = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n'
     assert _sse_json(payload)["result"]["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# _fetch_physical — flat vs. multi-match ('products' list) shapes
+# ---------------------------------------------------------------------------
+
+def test_fetch_physical_flat_shape(monkeypatch):
+    """Unique match: data is a flat object -> returned as-is."""
+    a = MicrochipAdapter()
+    monkeypatch.setattr(
+        a, "_mcp_call",
+        lambda tool, args: {"data": {"partNumber": "MMA035AA", "parametricData": "u"}},
+    )
+    assert a._fetch_physical("MMA035AA")["parametricData"] == "u"
+
+
+def test_fetch_physical_products_list_picks_exact_part(monkeypatch):
+    """Multi-match (MMA044PP3 + /TR + E): pick the exact-partNumber row's feed."""
+    a = MicrochipAdapter()
+    payload = {"data": {"products": [
+        {"partNumber": "MMA044PP3", "parametricData": "good"},
+        {"partNumber": "MMA044PP3/TR", "parametricData": None},
+        {"partNumber": "MMA044PP3E", "parametricData": "eval"},
+    ]}}
+    monkeypatch.setattr(a, "_mcp_call", lambda tool, args: payload)
+    assert a._fetch_physical("MMA044PP3")["parametricData"] == "good"
+
+
+def test_fetch_physical_products_list_without_exact_match_skips(monkeypatch):
+    """Multi-match but our exact part isn't among the rows -> {} (skip)."""
+    a = MicrochipAdapter()
+    payload = {"data": {"products": [{"partNumber": "OTHER", "parametricData": "x"}]}}
+    monkeypatch.setattr(a, "_mcp_call", lambda tool, args: payload)
+    assert a._fetch_physical("MMA044PP3") == {}
+
+
+# ---------------------------------------------------------------------------
+# Catalog URL (microchip.com page, not the microchipdirect store stub)
+# ---------------------------------------------------------------------------
+
+def test_catalog_url_title_cases_type_words():
+    """Feed slug is upper-case; catalog page title-cases only the type words."""
+    url = _catalog_url(
+        "MMA035AA",
+        "https://www.microchipdirect.com/feed/json/MMA035AA-AMPLIFIER-DISTRIBUTED.json",
+    )
+    assert url == "https://www.microchip.com/en-us/product/MMA035AA-Amplifier-Distributed"
+
+
+def test_catalog_url_preserves_suffixed_part_number():
+    """A part number with its own suffix (ICP0444-FL) keeps 'FL' upper-cased."""
+    url = _catalog_url(
+        "ICP0444-FL",
+        "https://www.microchipdirect.com/feed/json/ICP0444-FL-POWER-AMPLIFIER.json",
+    )
+    assert url == "https://www.microchip.com/en-us/product/ICP0444-FL-Power-Amplifier"
+
+
+def test_catalog_url_none_without_feed():
+    """No feed URL -> no catalog slug to build from -> None (caller falls back)."""
+    assert _catalog_url("MMA035AA", None) is None
+    assert _catalog_url("MMA035AA", "") is None
 
 
 # ---------------------------------------------------------------------------

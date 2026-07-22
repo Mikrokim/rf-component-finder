@@ -65,3 +65,22 @@ Enumerations:
 - **THEN** its `status` is one of `PASS`, `FAIL`, `UNKNOWN`
 - **AND** the enclosing `VerifiedCandidate.overall` is one of `match`, `partial`, `fail`
 - **AND** its `confidence` is one of `table`, `datasheet`, `unknown`
+
+### Requirement: Candidate URL is a display-only product-page link
+
+`Candidate.url` SHALL be a human-facing **product-page** link, populated for display/report use only and never fetched programmatically. It SHALL point at the manufacturer's product page for the part rather than the datasheet PDF. Where a manufacturer exposes no per-part product page, adapters SHALL fall back to a link into the manufacturer's shared all-products / catalogue page — preferring a Scroll-to-Text-Fragment deep link (`#:~:text=<part number>`) that highlights the exact part in browsers that support text fragments, and otherwise simply loads the catalogue page. Per-manufacturer URL specifics live in the **manufacturer-adapters** capability.
+
+#### Scenario: URL is the product page, not the datasheet
+
+- **WHEN** an adapter builds a `Candidate` for a part whose manufacturer exposes a per-part product page
+- **THEN** its `url` is that product page, not the datasheet PDF
+
+#### Scenario: URL falls back to the shared catalogue page
+
+- **WHEN** an adapter builds a `Candidate` for a part whose manufacturer exposes no per-part product page
+- **THEN** its `url` is a link into the manufacturer's shared all-products / catalogue page (preferring a `#:~:text=<part number>` highlight deep link)
+
+#### Scenario: URL is display-only
+
+- **WHEN** a `Candidate.url` is produced
+- **THEN** it is used for human display / reporting only and is never fetched programmatically

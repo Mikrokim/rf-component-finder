@@ -32,6 +32,7 @@ from selectolax.parser import HTMLParser
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -72,8 +73,9 @@ RACKMOUNT_CATEGORY: dict[str, str] = {
 # from the header (MHz vs GHz).  Both "Pout" and "Psat" columns map to the
 # canonical "Psat".  The supply column is "Vd (V)" (LNA / GaN) or "Bias (V)"
 # (Driver / GaAs / SSPA); both carry volts and map to canonical "VDD" (V→V
-# identity).  Dual-supply cells ("+8 / -0.75") are not a single float, so
-# _parse_float returns None and VDD stays UNKNOWN for those rows — correct.
+# identity).  VDD is parsed by the shared parser (parse_vdd): a single value or
+# range -> interval, discrete options -> list, and a dual-supply cell
+# ("+8 / -0.75") stays UNKNOWN (a negative rail is out of scope).
 # Any header still not listed here (Package, ECCN, Connector...) is ignored.
 # ---------------------------------------------------------------------------
 
@@ -287,6 +289,16 @@ class AmcomUSAAdapter(Adapter):
                     continue
                 ddtf = cell.attributes.get("ddtf-value")
                 raw_text = ddtf if (ddtf and ddtf.strip()) else cell.text(strip=True)
+
+                # VDD through the shared parser: a range/list is kept, a single
+                # value becomes (v, v), and a dual-supply cell ("+8 / -0.75")
+                # stays UNKNOWN — never a bare float that would break the search.
+                if SCALAR_COLUMN_MAP.get(norm, (None,))[0] == "VDD":
+                    vdd = parse_vdd(raw_text)
+                    if vdd is not None:
+                        raw_params["VDD"] = RawValue(value=vdd, unit="V")
+                    continue
+
                 value = _parse_float(raw_text)
                 if value is None:
                     continue

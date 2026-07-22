@@ -139,7 +139,13 @@ def _parse_float(value: object) -> float | None:
     try:
         return float(text)
     except ValueError:
-        return None
+        pass
+    # Some feed cells carry a trailing unit ("28 dBm", "17 dB") instead of a bare
+    # number — an inconsistency in how a part is published, not a real absence.
+    # Take the leading numeric token so the value isn't lost as UNKNOWN (which
+    # would wrongly hide the part). Applies to every scalar parsed here.
+    match = re.match(r"[-+]?\d*\.?\d+", text)
+    return float(match.group()) if match else None
 
 
 def _parse_freq(value: object) -> float | None:
@@ -209,6 +215,39 @@ def _sse_json(text: str) -> dict:
             return json.loads(line[len("data:"):].strip())
     # Some deployments may answer with a plain JSON body.
     return json.loads(text)
+
+
+def _catalog_url(model: str, feed_url: str | None) -> str | None:
+    """Build the human-facing ``microchip.com`` catalog URL from a part's feed URL.
+
+    The microchipdirect ``productUrl`` the MCP returns points at the *store*
+    (``microchipdirect.com/product/<part>``), which for RF-MMIC parts renders a
+    "This Product is Not Available Online" stub — useless to a user. The real
+    catalog page lives at ``www.microchip.com/en-us/product/<slug>`` where
+    ``<slug>`` is the very ``<PART>-<TYPE-WORDS>`` slug that names the
+    ``parametricData`` feed (e.g. feed ``…/MMA035AA-AMPLIFIER-DISTRIBUTED.json``
+    → page ``…/product/MMA035AA-Amplifier-Distributed``).
+
+    The feed slug is upper-cased but the catalog's canonical form title-cases the
+    *type words* while the part number keeps its own casing. A part number may
+    itself carry a suffix (``ICP0444-FL`` → page ``ICP0444-FL-Power-Amplifier``),
+    so we strip the known ``model`` prefix and title-case only the trailing type
+    words rather than title-casing blindly (which would break ``FL`` → ``Fl``).
+    If the slug doesn't start with ``model`` we leave it verbatim.
+
+    ``www.microchip.com`` is Akamai-blocked to fetchers, but this URL is
+    display-only (opened by a human in a browser; never fetched by us), so that
+    block is irrelevant. Returns None when there is no feed slug to build from.
+    """
+    if not feed_url:
+        return None
+    slug = feed_url.rsplit("/", 1)[-1].removesuffix(".json")
+    if not slug:
+        return None
+    if model and slug.upper().startswith(model.upper() + "-"):
+        type_words = slug[len(model) + 1:]
+        slug = model + "-" + "-".join(w.capitalize() for w in type_words.split("-"))
+    return f"https://www.microchip.com/en-us/product/{slug}"
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +348,21 @@ class MicrochipAdapter(Adapter):
         return products
 
     def _fetch_physical(self, part_number: str) -> dict:
-        """Return the ``search_product_physical_specs`` data for a part ({} on failure)."""
+        """Return the ``search_product_physical_specs`` data for a part ({} on failure).
+
+        The tool returns two shapes depending on how many products the part
+        number matches:
+
+        - a **flat** object (``partNumber``, ``parametricData``, …) for a unique
+          match (e.g. MMA035AA);
+        - a ``{"products": [...]}`` **list** when the part number also matches
+          variants — tape-and-reel ``…/TR``, eval boards ``…E`` (e.g. MMA044PP3).
+          Here ``parametricData`` is nested one level down, so we pick the row
+          whose ``partNumber`` is exactly the one we asked for.
+
+        Handling only the flat shape would silently drop every part that has
+        sibling variants (its ``parametricData`` reads as ``None`` → skipped).
+        """
         try:
             inner = self._mcp_call(
                 "search_product_physical_specs", {"partNumber": part_number}
@@ -317,7 +370,15 @@ class MicrochipAdapter(Adapter):
         except AdapterError:
             return {}
         data = inner.get("data") if isinstance(inner, dict) else None
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        products = data.get("products")
+        if isinstance(products, list):
+            for prod in products:
+                if isinstance(prod, dict) and prod.get("partNumber") == part_number:
+                    return prod
+            return {}  # multi-match but our exact part isn't among them → skip
+        return data
 
     def _fetch_feed(self, url: str) -> dict | None:
         """GET one microchipdirect parametric feed (cache-first); None on any error."""
@@ -409,7 +470,9 @@ class MicrochipAdapter(Adapter):
         if vdd is None:
             vdd = _parse_float(by_key.get(_VOLTAGE_KEY))
         if vdd is not None:
-            raw_params["VDD"] = RawValue(value=vdd, unit="V")
+            # A bias/supply figure is a single value -> degenerate (v, v) interval,
+            # the shape the contains rule compares (never a bare float).
+            raw_params["VDD"] = RawValue(value=(vdd, vdd), unit="V")
 
         # Size / MSL come from the MCP physical-specs (not the feed).
         size = _parse_size_mm(physical.get("packageWidthOrSize"))
@@ -419,7 +482,14 @@ class MicrochipAdapter(Adapter):
         if msl is not None:
             raw_params["MSL"] = RawValue(value=msl, unit="")
 
-        url = product.get("productUrl") or f"https://www.microchipdirect.com/product/{model}"
+        # Prefer the microchip.com catalog page (built from the feed slug) over the
+        # microchipdirect store URL, which is a "Not Available Online" stub for
+        # RF-MMIC parts; fall back to the store URL only if no feed slug is known.
+        url = (
+            _catalog_url(model, physical.get("parametricData"))
+            or product.get("productUrl")
+            or f"https://www.microchipdirect.com/product/{model}"
+        )
 
         return Candidate(
             model=model,

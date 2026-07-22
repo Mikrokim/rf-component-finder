@@ -60,7 +60,7 @@ def test_lna_scalar_and_freq_mapping():
     assert c.raw_params["Gain"] == RawValue(value=30.5, unit="dB")
     assert c.raw_params["NF"] == RawValue(value=0.6, unit="dB")
     assert c.raw_params["P1dB"] == RawValue(value=18.0, unit="dBm")
-    assert c.raw_params["VDD"] == RawValue(value=5.0, unit="V")
+    assert c.raw_params["VDD"] == RawValue(value=(5.0, 5.0), unit="V")
 
 
 def test_ip3_absent_rwmmic_does_not_publish_it():
@@ -79,7 +79,7 @@ def test_pa_gain_unknown_small_signal_gain_not_treated_as_gain():
 
 def test_pa_vd_maps_to_vdd_and_psat_present():
     c = _by_model("RW5001")
-    assert c.raw_params["VDD"] == RawValue(value=28.0, unit="V")
+    assert c.raw_params["VDD"] == RawValue(value=(28.0, 28.0), unit="V")
     assert c.raw_params["Psat"] == RawValue(value=44.5, unit="dBm")
     assert c.raw_params["freq_range"] == RawValue(value=(0.8, 2.0), unit="GHz")
 
@@ -150,10 +150,11 @@ def test_mismatched_value_counts_fall_back_safely():
     assert "P1dB" not in cands[0].raw_params
 
 
-def test_url_is_datasheet_link():
+def test_url_is_catalogue_page_text_fragment():
+    # rwmmic has no per-part page, so the link points at the shared catalogue
+    # page with a Scroll-to-Text-Fragment directive that highlights this part.
     c = _by_model("RWLA1001")
-    assert c.url.endswith("RWLA1001.pdf")
-    assert "rwmmic.com" in c.url
+    assert c.url == "https://www.rwmmic.com/product.html#:~:text=RWLA1001"
 
 
 def test_bad_json_raises_adaptererror():
@@ -204,12 +205,12 @@ def test_two_operating_points_are_coupled():
     assert a.model == "RW3010 (op 1/2)"
     assert b.model == "RW3010 (op 2/2)"
     # Point 1 = Vd 5 V:  Gain 24, P1dB 27, Psat 28.5
-    assert a.raw_params["VDD"].value == 5.0
+    assert a.raw_params["VDD"].value == (5.0, 5.0)
     assert a.raw_params["Gain"].value == 24.0
     assert a.raw_params["P1dB"].value == 27.0
     assert a.raw_params["Psat"].value == 28.5
     # Point 2 = Vd 6 V:  Gain 23.5, P1dB 29, Psat 29.5
-    assert b.raw_params["VDD"].value == 6.0
+    assert b.raw_params["VDD"].value == (6.0, 6.0)
     assert b.raw_params["Gain"].value == 23.5
     assert b.raw_params["P1dB"].value == 29.0
     assert b.raw_params["Psat"].value == 29.5
@@ -239,7 +240,7 @@ def test_three_operating_points_with_shared_singles():
     assert [c.raw_params["Gain"].value for c in cands] == [15.0, 13.5, 14.5]
     assert [c.raw_params["P1dB"].value for c in cands] == [14.0, 13.0, 16.0]
     assert [c.raw_params["Psat"].value for c in cands] == [17.0, 17.0, 18.0]
-    assert [c.raw_params["VDD"].value for c in cands] == [5.0, 5.0, 8.0]
+    assert [c.raw_params["VDD"].value for c in cands] == [(5.0, 5.0), (5.0, 5.0), (8.0, 8.0)]
 
 
 def test_single_value_product_still_one_candidate():

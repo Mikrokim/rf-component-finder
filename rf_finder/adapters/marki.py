@@ -36,8 +36,9 @@ per candidate product page (``/products/{pkg}/amplifiers/{slug}/``) for:
                   "max" in mm); the EVB variant row (Size "-") is ignored by
                   matching the row whose part number equals the model.
   * VDD         — from the SvelteKit JS payload ``power_supply_voltage:[{value:"5"}]``
-                  (volts); first parseable value.  Bare-die parts without SnP files
-                  have no such field -> VDD stays UNKNOWN.
+                  (volts); the first value the shared VDD parser accepts, as an
+                  interval/list.  Bare-die parts without SnP files have no such
+                  field -> VDD stays UNKNOWN.
   * Temperature — from ``temperature:"25"`` in the same payload.  This is the single
                   characterisation temperature, so it is stored as a degenerate
                   range ``(t, t)`` °C: the ontology compares Temperature with
@@ -67,6 +68,7 @@ from selectolax.parser import HTMLParser
 from rf_finder import http
 from rf_finder.adapters.base import Adapter, AdapterError, register
 from rf_finder.models import Candidate, QuerySpec, RawValue
+from rf_finder.ontology.supply import parse_vdd
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -192,6 +194,15 @@ def _first_parseable(values: list[str]) -> float | None:
         f = _parse_float(v)
         if f is not None:
             return f
+    return None
+
+
+def _first_vdd(values: list[str]) -> tuple[float, float] | list[float] | None:
+    """First value the shared VDD parser accepts (interval/list), else None."""
+    for v in values:
+        vdd = parse_vdd(v)
+        if vdd is not None:
+            return vdd
     return None
 
 
@@ -397,7 +408,7 @@ class MarkiMicrowaveAdapter(Adapter):
         if size is not None:
             extra["Size"] = RawValue(value=size, unit="mm")
 
-        vdd = _first_parseable(_VDD_RE.findall(html))
+        vdd = _first_vdd(_VDD_RE.findall(html))
         if vdd is not None:
             extra["VDD"] = RawValue(value=vdd, unit="V")
 

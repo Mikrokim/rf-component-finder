@@ -70,7 +70,7 @@ def test_lna_maps_nf_not_ip3_or_psat():
     assert c.raw_params["Gain"] == RawValue(26.0, "dB")
     assert c.raw_params["NF"] == RawValue(2.8, "dB")
     assert c.raw_params["P1dB"] == RawValue(11.0, "dBm")
-    assert c.raw_params["VDD"] == RawValue(5.0, "V")
+    assert c.raw_params["VDD"] == RawValue((5.0, 5.0), "V")
     assert "IP3" not in c.raw_params
     assert "Psat" not in c.raw_params
 
@@ -83,7 +83,7 @@ def test_hpa_maps_ip3_and_psat_not_nf():
     assert c.raw_params["IP3"] == RawValue(38.5, "dBm")
     assert c.raw_params["P1dB"] == RawValue(30.0, "dBm")
     assert c.raw_params["Psat"] == RawValue(31.0, "dBm")
-    assert c.raw_params["VDD"] == RawValue(6.0, "V")
+    assert c.raw_params["VDD"] == RawValue((6.0, 6.0), "V")
     assert "NF" not in c.raw_params
 
 

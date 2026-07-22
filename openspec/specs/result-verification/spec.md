@@ -24,7 +24,13 @@ The system SHALL provide `verify(spec, candidate) -> VerifiedCandidate` producin
 
 ### Requirement: Range containment comparison (contains)
 
-For a `contains` constraint, the candidate's `(low, high)` band and the required `(low, high)` band SHALL both be normalized to the parameter's canonical unit (taken from the ontology, not from the constraint unit). The verdict SHALL be `PASS` when `cand_low <= req_low` and `cand_high >= req_high`, otherwise `FAIL`. The user MAY express the required band in any accepted unit (e.g. MHz against a GHz canonical).
+For a `contains` constraint the required side is a `(low, high)` band — a single requested value is the degenerate point `(v, v)`, a requested range is `(low, high)`. Both the required bounds and the candidate value SHALL be normalized to the parameter's canonical unit (taken from the ontology, not from the constraint unit); the user MAY express the requirement in any accepted unit (e.g. MHz against a GHz canonical). The candidate value's SHAPE (produced by each adapter's parser) decides the comparison:
+
+- a **continuous band** `(low, high)` (e.g. a supply range, or `freq_range`) MATCHES when it COVERS the whole requested band — `PASS` when `cand_low <= req_low` and `cand_high >= req_high`, otherwise `FAIL`;
+- a **discrete option list** (e.g. a VDD `[3, 5, 8]` — a part that offers only fixed supply voltages) MATCHES only a **single** requested voltage (a degenerate request) that equals one of the options; a requested **range** never matches a discrete-option part (fixed points do not span a continuous band) and SHALL be `FAIL`;
+- a bare scalar SHALL be treated defensively as the degenerate band `(v, v)`.
+
+Normalization and comparison use a tolerant float equality for the single-value / option-equality checks.
 
 #### Scenario: Candidate band fully covers the required band
 
@@ -41,6 +47,23 @@ For a `contains` constraint, the candidate's `(low, high)` band and the required
 - **WHEN** the candidate band `(2000.0, 6000.0) MHz` is checked against required `(2.0, 6.0) GHz`
 - **THEN** the verdict is `PASS`
 - **AND WHEN** the required band is `(2000.0, 6000.0) MHz` against a candidate `(1.0, 8.0) GHz`, the verdict is `PASS`
+
+#### Scenario: Discrete option list matches a single requested voltage
+
+- **WHEN** a candidate VDD option list `[3.0, 5.0, 8.0] V` is checked against a single requested `5 V` (the point `(5.0, 5.0)`)
+- **THEN** the verdict is `PASS`
+- **AND WHEN** the requested voltage is `6 V`, the verdict is `FAIL`
+
+#### Scenario: Discrete option list cannot satisfy a requested range
+
+- **WHEN** a candidate VDD option list `[3.0, 5.0, 8.0] V` is checked against a requested range `(3.0, 8.0) V`
+- **THEN** the verdict is `FAIL` (fixed points do not span a continuous band)
+
+#### Scenario: Single requested voltage against a continuous supply band
+
+- **WHEN** a candidate VDD band `(3.0, 6.0) V` is checked against a single requested `5 V`
+- **THEN** the verdict is `PASS` (the band covers the point)
+- **AND WHEN** the requested voltage is `7 V`, the verdict is `FAIL`
 
 ### Requirement: Scalar threshold comparisons (min, max)
 
