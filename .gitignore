@@ -6,6 +6,7 @@
 # Note the "env/" rule further down ignores a *directory*, not this file.
 .env
 .env.*
+*.env
 !.env.example
 
 # Cache directory

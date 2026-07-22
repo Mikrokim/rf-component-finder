@@ -147,6 +147,41 @@ class TestLengthToMM:
 
 
 # ---------------------------------------------------------------------------
+# Temperature → degC
+# ---------------------------------------------------------------------------
+
+class TestTemperatureToDegC:
+    """Conversion table: degC / degF → degC (degC = (degF - 32) * 5/9)."""
+
+    def test_degc_identity(self):
+        assert to_canonical(85.0, "degC", "degC") == pytest.approx(85.0)
+
+    def test_degc_identity_negative(self):
+        # operating ranges are routinely negative — must not be rejected
+        assert to_canonical(-40.0, "degC", "degC") == pytest.approx(-40.0)
+
+    def test_degf_freezing_to_degc(self):
+        # 32 degF = 0 degC
+        assert to_canonical(32.0, "degF", "degC") == pytest.approx(0.0)
+
+    def test_degf_boiling_to_degc(self):
+        # 212 degF = 100 degC
+        assert to_canonical(212.0, "degF", "degC") == pytest.approx(100.0)
+
+    def test_degf_operating_high_to_degc(self):
+        # 185 degF = 85 degC (a common upper operating limit)
+        assert to_canonical(185.0, "degF", "degC") == pytest.approx(85.0)
+
+    def test_degf_below_zero_to_degc(self):
+        # -40 is the scale crossover: -40 degF = -40 degC
+        assert to_canonical(-40.0, "degF", "degC") == pytest.approx(-40.0)
+
+    def test_unknown_temp_unit_raises(self):
+        with pytest.raises(ValueError, match="Unknown temperature unit"):
+            to_canonical(20.0, "K", "degC")
+
+
+# ---------------------------------------------------------------------------
 # Unsupported canonical unit
 # ---------------------------------------------------------------------------
 

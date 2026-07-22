@@ -14,6 +14,9 @@ Ratio canonical unit: dB
 
 Length canonical unit: mm
     mm, cm, inch, mil → mm   (linear factors; package length/width)
+
+Temperature canonical unit: degC
+    degC, degF → degC        (degC = (degF - 32) * 5/9; operating temperature)
 """
 
 import math
@@ -46,6 +49,20 @@ def _power_to_dbm(value: float, from_unit: str) -> float:
             raise ValueError(f"Cannot convert non-positive power {value} W to dBm")
         return 10.0 * math.log10(mw)
     raise ValueError(f"Unknown power unit '{from_unit}'; expected one of: W, mW, dBm")
+
+
+# ---------------------------------------------------------------------------
+# Temperature: all → degC
+# ---------------------------------------------------------------------------
+
+def _temp_to_degc(value: float, from_unit: str) -> float:
+    if from_unit == "degC":
+        return value
+    if from_unit == "degF":
+        return (value - 32.0) * 5.0 / 9.0
+    raise ValueError(
+        f"Unknown temperature unit '{from_unit}'; expected one of: degC, degF"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +120,7 @@ def to_canonical(value: float, from_unit: str, canonical: str) -> float:
     ----------
     value:     numeric value in *from_unit*.
     from_unit: source unit string (case-sensitive).
-    canonical: target canonical unit — ``"GHz"``, ``"dBm"``, ``"dB"``, or ``"mm"``.
+    canonical: target canonical unit — ``"GHz"``, ``"dBm"``, ``"dB"``, ``"mm"``, or ``"degC"``.
 
     Returns
     -------
@@ -149,6 +166,9 @@ def to_canonical(value: float, from_unit: str, canonical: str) -> float:
             )
         return value
 
+    if canonical == "degC":
+        return _temp_to_degc(value, from_unit)
+
     raise ValueError(
-        f"Unsupported canonical unit '{canonical}'; expected 'GHz', 'dBm', 'dB', or 'mm'"
+        f"Unsupported canonical unit '{canonical}'; expected 'GHz', 'dBm', 'dB', 'mm', or 'degC'"
     )

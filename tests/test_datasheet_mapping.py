@@ -84,6 +84,40 @@ def test_contains_range_becomes_low_high_tuple():
     assert raw["Temperature"] == RawValue(value=(-30.0, 110.0), unit="degC")
 
 
+import pytest
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    ["Celsius", "degree Celsius", "degrees Celsius", "deg C", "degC",
+     "°C", "C", "centigrade"],
+)
+def test_any_celsius_spelling_reconciles_to_degc(spelling):
+    # The LLM emits many free-form Celsius spellings (all live-observed variants);
+    # every one must map to canonical "degC", not pass through (which
+    # units.to_canonical cannot convert -> the ValueError that dropped every
+    # enriched candidate).
+    params = {"Temperature": _spec_obj(unit=spelling, min=-40, max=85)}
+
+    raw = to_raw_params(params)
+
+    assert raw["Temperature"] == RawValue(value=(-40.0, 85.0), unit="degC")
+
+
+def test_fahrenheit_unit_maps_to_degf_and_verifies_via_conversion():
+    # A Fahrenheit datasheet: mapping reconciles the spelling to "degF", then the
+    # REAL verifier converts degF -> degC. -40..185 degF = -40..85 degC, which
+    # covers a requested -20..70 degC band -> PASS. Proves the two layers compose.
+    params = {"Temperature": _spec_obj(unit="Fahrenheit", min=-40, max=185)}
+
+    raw = to_raw_params(params)
+    assert raw["Temperature"] == RawValue(value=(-40.0, 185.0), unit="degF")
+
+    spec = _spec(ParamConstraint("Temperature", "contains", None, (-20.0, 70.0), "degC"))
+    result = verify(spec, _candidate(raw))
+    assert result.verdicts[0].status == "PASS"
+
+
 def test_contains_discrete_list_stays_a_list():
     params = {"VDD": _spec_obj(unit="V", value=[3, 5, 8])}
 
