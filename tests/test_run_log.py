@@ -17,13 +17,18 @@ from rf_finder.agent.run_log import (
     CANDIDATE_FOUND,
     COVERAGE,
     DATASHEET_READ,
+    OUTCOME_FAILED_INFRA,
+    OUTCOME_KEPT,
+    OUTCOME_REJECTED_MISMATCH,
     REJECT,
+    RUN_STARTED,
     TOOL_CALL,
     TOOL_RESULT,
     VERIFY_RESULT,
     NullRunLogger,
     RunLogger,
     block_to_event,
+    classify_verify_outcome,
     make_run_logger,
     render_summary,
 )
@@ -158,3 +163,60 @@ def test_finish_writes_summary_file(tmp_path):
     assert path is not None
     text = (tmp_path / "summary.md").read_text(encoding="utf-8")
     assert "**Candidates found:** 1" in text
+
+
+# --- Resume support: outcome classification, spec_text, reused --------------
+
+
+def test_classify_verify_outcome_maps_status_and_reason():
+    assert classify_verify_outcome("kept", None) == OUTCOME_KEPT
+    # Infrastructure failures -> retried on resume.
+    assert classify_verify_outcome(
+        "rejected", "insufficient verification: only 2/4, Gemini not available"
+    ) == OUTCOME_FAILED_INFRA
+    assert classify_verify_outcome(
+        "rejected", "verify failed (error/rate-limit)"
+    ) == OUTCOME_FAILED_INFRA
+    # Genuine spec mismatches -> final.
+    assert classify_verify_outcome(
+        "rejected", "band does not contain 2-6 GHz"
+    ) == OUTCOME_REJECTED_MISMATCH
+    assert classify_verify_outcome("rejected", "no qualifying match") == OUTCOME_REJECTED_MISMATCH
+
+
+def test_run_started_persists_spec_text(tmp_path):
+    # The logger passes arbitrary fields through, so spec_text lands in the file.
+    logger = RunLogger(str(tmp_path))
+    logger.emit({"kind": RUN_STARTED, "agent_id": "run", "spec_text": "Component type: amplifier"})
+    logger.close()
+    obj = json.loads((tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert obj["spec_text"] == "Component type: amplifier"
+
+
+def test_reused_flag_is_persisted(tmp_path):
+    logger = RunLogger(str(tmp_path))
+    logger.emit({
+        "kind": VERIFY_RESULT, "agent_id": "verify[M1]", "status": "kept",
+        "model": "M1", "outcome": OUTCOME_KEPT, "reused": True,
+    })
+    logger.close()
+    obj = json.loads((tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert obj["reused"] is True and obj["outcome"] == OUTCOME_KEPT
+
+
+def test_summary_counts_reused_and_marks_entries():
+    events = [
+        {"kind": CANDIDATE_FOUND, "agent_id": "discovery", "model": "M1",
+         "manufacturer": "BeRex", "reused": True},           # carried over
+        {"kind": CANDIDATE_FOUND, "agent_id": "discovery", "model": "M2", "manufacturer": "X"},
+        {"kind": VERIFY_RESULT, "agent_id": "verify[M1]", "status": "kept",
+         "verdict": "match", "outcome": OUTCOME_KEPT, "reused": True},
+        {"kind": VERIFY_RESULT, "agent_id": "verify[M3]", "status": "rejected",
+         "reason": "gain too low", "outcome": OUTCOME_REJECTED_MISMATCH, "reused": True},
+    ]
+    md = render_summary(events)
+    assert "**Candidates found:** 2" in md                    # reused counts too
+    assert "**Reused from prior runs:** 3" in md              # 2 candidates + 1 kept + 1 reject = 3 flagged...
+    # (M1 candidate, M1 kept, M3 reject) all carry reused -> 3
+    assert "M1 (BeRex) (reused)" in md                        # candidate marked
+    assert "gain too low | verify[M3] (reused)" in md         # rejection marked

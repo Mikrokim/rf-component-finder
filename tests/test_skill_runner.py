@@ -10,6 +10,7 @@ the ``run_rf_search`` configuration.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import types
 
@@ -603,3 +604,179 @@ def test_errored_run_raises_with_status_code(fake_sdk):
             )
         )
     assert "429" in str(excinfo.value)
+
+
+# --- RF_RESUME: continue from prior-run logs -------------------------------
+
+
+def _write_prior_run(runs_base, name, events):
+    """Create ``runs_base/<name>/events.jsonl`` from a list of event dicts."""
+    run_dir = runs_base / name
+    run_dir.mkdir(parents=True)
+    with open(run_dir / "events.jsonl", "w", encoding="utf-8") as fh:
+        for e in events:
+            fh.write(json.dumps(e, ensure_ascii=False) + "\n")
+
+
+def test_resume_off_runs_discovery_even_with_matching_log(fake_sdk, monkeypatch, tmp_path):
+    """RF_RESUME unset (default): a matching prior log is ignored; discovery runs."""
+    import rf_finder.agent.skill_runner as sr
+    from rf_finder.agent import run_log
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    monkeypatch.setattr(sr, "PROJECT_ROOT", str(tmp_path))
+    monkeypatch.delenv("RF_RESUME", raising=False)
+    _write_prior_run(tmp_path / "runs", "20260101_000000_000000", [
+        {"kind": run_log.RUN_STARTED, "agent_id": "run", "spec_text": "SPEC"},
+        {"kind": run_log.AGENT_FINISHED, "agent_id": "discovery", "is_error": False},
+        {"kind": run_log.CANDIDATE_FOUND, "agent_id": "discovery", "model": "M1", "manufacturer": "X", "url": "u"},
+        {"kind": run_log.VERIFY_RESULT, "agent_id": "verify[M1]", "status": "kept",
+         "model": "M1", "verdict": "from-log", "outcome": run_log.OUTCOME_KEPT},
+    ])
+    _FakeClient.messages = [
+        _FakeAssistantMessage([_Block('@@CANDIDATE@@ {"model": "M1", "manufacturer": "X", "url": "u"}\n')]),
+        _FakeResultMessage(structured_output={"candidates": [{"model": "M1", "manufacturer": "X", "url": "u"}]}),
+    ]
+    fake_sdk.query = _make_query(
+        [_FakeResultMessage(structured_output={"components": [{"model": "M1", "manufacturer": "X", "url": "u", "verdict": "fresh"}]})],
+        {},
+    )
+
+    out = asyncio.run(run_rf_search_pipelined("SPEC", on_text=lambda _t: None))
+    assert _FakeClient.instances                       # discovery client was opened
+    assert out["components"][0]["verdict"] == "fresh"  # verified fresh, not reused
+
+
+def test_resume_skips_clean_discovery_and_passes_kept_through(fake_sdk, monkeypatch, tmp_path):
+    """RF_RESUME on + prior clean discovery: discovery is skipped entirely and the
+    prior kept candidate is passed straight through without re-verifying."""
+    import rf_finder.agent.skill_runner as sr
+    from rf_finder.agent import run_log
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    monkeypatch.setattr(sr, "PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("RF_RESUME", "on")
+    _write_prior_run(tmp_path / "runs", "20260101_000000_000000", [
+        {"kind": run_log.RUN_STARTED, "agent_id": "run", "spec_text": "SPEC"},
+        {"kind": run_log.AGENT_FINISHED, "agent_id": "discovery", "is_error": False},
+        {"kind": run_log.CANDIDATE_FOUND, "agent_id": "discovery", "model": "M1", "manufacturer": "BeRex", "url": "u1"},
+        {"kind": run_log.VERIFY_RESULT, "agent_id": "verify[M1]", "status": "kept",
+         "model": "M1", "verdict": "from-log", "outcome": run_log.OUTCOME_KEPT},
+    ])
+    # If verify or discovery were invoked, this would blow up the run.
+    def _boom(*a, **k):
+        raise AssertionError("no agent call expected on a fully-reused run")
+    fake_sdk.query = _boom
+    _FakeClient.messages = []
+
+    seen: list = []
+    out = asyncio.run(run_rf_search_pipelined("SPEC", on_text=lambda _t: None, on_component=seen.append))
+
+    assert _FakeClient.instances == []                 # discovery skipped: no client opened
+    assert out["components"] == [{"model": "M1", "manufacturer": "BeRex", "url": "u1", "verdict": "from-log"}]
+    assert [c["model"] for c in seen] == ["M1"]        # reused kept reached on_component
+
+
+def test_resume_reruns_discovery_but_does_not_repeat_settled_verify(fake_sdk, monkeypatch, tmp_path):
+    """RF_RESUME on + prior discovery INCOMPLETE: discovery re-runs, but a candidate
+    already kept is not re-verified — only a newly-surfaced candidate is."""
+    import rf_finder.agent.skill_runner as sr
+    from rf_finder.agent import run_log
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    monkeypatch.setattr(sr, "PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("RF_RESUME", "on")
+    _write_prior_run(tmp_path / "runs", "20260101_000000_000000", [
+        {"kind": run_log.RUN_STARTED, "agent_id": "run", "spec_text": "SPEC"},
+        {"kind": run_log.AGENT_FINISHED, "agent_id": "discovery", "is_error": True},  # incomplete
+        {"kind": run_log.CANDIDATE_FOUND, "agent_id": "discovery", "model": "M1", "manufacturer": "X", "url": "u1"},
+        {"kind": run_log.VERIFY_RESULT, "agent_id": "verify[M1]", "status": "kept",
+         "model": "M1", "verdict": "from-log", "outcome": run_log.OUTCOME_KEPT},
+    ])
+    # Discovery re-runs and re-streams M1 (settled) plus a brand-new M2.
+    disc_text = (
+        '@@CANDIDATE@@ {"model": "M1", "manufacturer": "X", "url": "u1"}\n'
+        '@@CANDIDATE@@ {"model": "M2", "manufacturer": "X", "url": "u2"}\n'
+    )
+    _FakeClient.messages = [
+        _FakeAssistantMessage([_Block(disc_text)]),
+        _FakeResultMessage(structured_output={"candidates": [
+            {"model": "M1", "manufacturer": "X", "url": "u1"},
+            {"model": "M2", "manufacturer": "X", "url": "u2"},
+        ]}),
+    ]
+    # Count verify calls and record which candidate each was for.
+    calls = {"n": 0, "prompts": []}
+
+    async def _q(*, prompt, options):
+        calls["n"] += 1
+        calls["prompts"].append(prompt)
+        yield _FakeResultMessage(structured_output={"components": [
+            {"model": "M2", "manufacturer": "X", "url": "u2", "verdict": "fresh"}
+        ]})
+
+    fake_sdk.query = _q
+
+    out = asyncio.run(run_rf_search_pipelined("SPEC", on_text=lambda _t: None))
+
+    assert _FakeClient.instances                        # discovery DID re-run
+    assert calls["n"] == 1                              # only ONE verify — M1 was not repeated
+    assert "M2" in calls["prompts"][0] and "M1" not in calls["prompts"][0]
+    models = {c["model"]: c["verdict"] for c in out["components"]}
+    assert models == {"M1": "from-log", "M2": "fresh"}  # M1 reused, M2 fresh
+
+
+def test_resume_reverifies_failed_infra_candidate(fake_sdk, monkeypatch, tmp_path):
+    """RF_RESUME on + prior clean discovery, but the candidate's prior verify was a
+    failed_infra (dead Gemini): discovery is skipped, yet the candidate IS
+    re-verified rather than treated as settled."""
+    import rf_finder.agent.skill_runner as sr
+    from rf_finder.agent import run_log
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    monkeypatch.setattr(sr, "PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("RF_RESUME", "on")
+    _write_prior_run(tmp_path / "runs", "20260101_000000_000000", [
+        {"kind": run_log.RUN_STARTED, "agent_id": "run", "spec_text": "SPEC"},
+        {"kind": run_log.AGENT_FINISHED, "agent_id": "discovery", "is_error": False},
+        {"kind": run_log.CANDIDATE_FOUND, "agent_id": "discovery", "model": "M1", "manufacturer": "X", "url": "u1"},
+        {"kind": run_log.VERIFY_RESULT, "agent_id": "verify[M1]", "status": "rejected",
+         "model": "M1", "reason": "insufficient verification: Gemini not available",
+         "outcome": run_log.OUTCOME_FAILED_INFRA},
+    ])
+    _FakeClient.messages = []      # discovery must be skipped (clean prior)
+    fake_sdk.query = _make_query(
+        [_FakeResultMessage(structured_output={"components": [{"model": "M1", "manufacturer": "X", "url": "u1", "verdict": "now-verified"}]})],
+        {},
+    )
+
+    out = asyncio.run(run_rf_search_pipelined("SPEC", on_text=lambda _t: None))
+
+    assert _FakeClient.instances == []                  # discovery skipped
+    assert out["components"] == [{"model": "M1", "manufacturer": "X", "url": "u1", "verdict": "now-verified"}]
+
+
+def test_resume_on_with_no_matching_log_runs_fresh(fake_sdk, monkeypatch, tmp_path):
+    """RF_RESUME on but nothing matches this query: run proceeds fresh, no error."""
+    import rf_finder.agent.skill_runner as sr
+    from rf_finder.agent import run_log
+    from rf_finder.agent.skill_runner import run_rf_search_pipelined
+
+    monkeypatch.setattr(sr, "PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("RF_RESUME", "on")
+    _write_prior_run(tmp_path / "runs", "20260101_000000_000000", [
+        {"kind": run_log.RUN_STARTED, "agent_id": "run", "spec_text": "A DIFFERENT SPEC"},
+        {"kind": run_log.AGENT_FINISHED, "agent_id": "discovery", "is_error": False},
+    ])
+    _FakeClient.messages = [
+        _FakeAssistantMessage([_Block('@@CANDIDATE@@ {"model": "M1", "manufacturer": "X", "url": "u"}\n')]),
+        _FakeResultMessage(structured_output={"candidates": [{"model": "M1", "manufacturer": "X", "url": "u"}]}),
+    ]
+    fake_sdk.query = _make_query(
+        [_FakeResultMessage(structured_output={"components": [{"model": "M1", "manufacturer": "X", "url": "u", "verdict": "fresh"}]})],
+        {},
+    )
+
+    out = asyncio.run(run_rf_search_pipelined("SPEC", on_text=lambda _t: None))
+    assert _FakeClient.instances                        # discovery ran fresh
+    assert out["components"][0]["verdict"] == "fresh"

@@ -61,9 +61,52 @@ VERIFY_RESULT = "verify_result"
 AGENT_FINISHED = "agent_finished"
 #: Discovery's verbatim final coverage statement (human context only).
 COVERAGE = "coverage"
-#: Run boundaries.
+#: Run boundaries. ``RUN_STARTED`` also carries the run's ``spec_text`` — the
+#: deterministic form output that keys "the same query" for resume.
 RUN_STARTED = "run_started"
 RUN_FINISHED = "run_finished"
+
+
+# --- Verify outcome classification -----------------------------------------
+
+#: A verify reached a definitive verdict and need not be repeated on resume.
+OUTCOME_KEPT = "kept"
+OUTCOME_REJECTED_MISMATCH = "rejected_mismatch"
+#: A verify did NOT settle the candidate — a transient/infrastructure failure
+#: (dead Gemini key / "insufficient verification", rate-limit, or a raised
+#: error). These are retried on resume, never treated as done.
+OUTCOME_FAILED_INFRA = "failed_infra"
+
+#: Substrings in a rejection reason that mark an infrastructure failure rather
+#: than a genuine spec mismatch. Kept in one place so resume and the conductor
+#: classify identically — and so hardening to a structured skill field later is a
+#: single-site change. (The dead-Gemini signature is "insufficient verification";
+#: a raised verify is logged as "verify failed"; the provider skip says the
+#: provider is "not registered" / "לא רשום".)
+_INFRA_REASON_MARKERS = (
+    "insufficient verification",
+    "verify failed",
+    "not registered",
+    "rate limit",
+    "rate-limit",
+    "לא רשום",
+)
+
+
+def classify_verify_outcome(status: str, reason: str | None) -> str:
+    """Map a ``VERIFY_RESULT`` (status + reason) to one of the outcome codes.
+
+    ``kept`` stays :data:`OUTCOME_KEPT`; a rejection whose reason names an
+    infrastructure failure (dead Gemini / "insufficient verification" /
+    rate-limit / a raised error) is :data:`OUTCOME_FAILED_INFRA` — *not done*, so
+    resume retries it — while any other rejection is a genuine
+    :data:`OUTCOME_REJECTED_MISMATCH` and is final."""
+    if status == "kept":
+        return OUTCOME_KEPT
+    r = (reason or "").lower()
+    if any(marker in r for marker in _INFRA_REASON_MARKERS):
+        return OUTCOME_FAILED_INFRA
+    return OUTCOME_REJECTED_MISMATCH
 
 
 # --- SDK block → event (duck-typed, no SDK import) -------------------------
@@ -240,9 +283,15 @@ def render_summary(events: list[dict[str, Any]]) -> str:
     coverage = ""
     tokens = 0
     turns = 0
+    # Reused = events carried over from a prior run by resume. They contribute to
+    # the counts/sections identically to fresh work (so a resumed run's summary is
+    # a complete whole); this is only a headline tally of how much was reused.
+    reused = 0
 
     for e in events:
         kind = e.get("kind")
+        if e.get("reused"):
+            reused += 1
         if kind == TOOL_CALL and str(e.get("tool", "")).lower() in _WEBISH:
             _add_unique(sites, e.get("target", ""))
         elif kind == DATASHEET_READ:
@@ -253,11 +302,12 @@ def render_summary(events: list[dict[str, Any]]) -> str:
             rejections.append(
                 f"- **{e.get('model', '?')}** - {e.get('param', '')} "
                 f"{e.get('site_value', '')} ({e.get('reason', '')}) | site-screen"
+                f"{_reused_tag(e)}"
             )
         elif kind == VERIFY_RESULT and e.get("status") == "rejected":
             rejections.append(
                 f"- **{e.get('model', '?')}** - {e.get('reason', 'rejected')} "
-                f"| {e.get('agent_id', '')}"
+                f"| {e.get('agent_id', '')}{_reused_tag(e)}"
             )
         elif kind == COVERAGE:
             coverage = str(e.get("text", "") or "")
@@ -271,6 +321,7 @@ def render_summary(events: list[dict[str, Any]]) -> str:
         f"- **Candidates found:** {len(found)}",
         f"- **Rejected:** {len(rejections)}",
         f"- **Sites/sources visited:** {len(sites)}",
+        f"- **Reused from prior runs:** {reused}",
         f"- **Cost:** {tokens:,} tokens | {turns} turns",
         "",
         "## Sites / sources visited",
@@ -284,7 +335,11 @@ def render_summary(events: list[dict[str, Any]]) -> str:
         "## Candidates found",
         "",
         *(
-            [f"- {c.get('model', '?')} ({c.get('manufacturer', '')})" for c in found]
+            [
+                f"- {c.get('model', '?')} ({c.get('manufacturer', '')})"
+                f"{_reused_tag(c)}"
+                for c in found
+            ]
             or ["- (none)"]
         ),
         "",
@@ -300,6 +355,11 @@ def _add_unique(acc: list[str], value: Any) -> None:
     v = str(value or "").strip()
     if v and v not in acc:
         acc.append(v)
+
+
+def _reused_tag(event: dict[str, Any]) -> str:
+    """`` (reused)`` when the event was carried over from a prior run, else ``""``."""
+    return " (reused)" if event.get("reused") else ""
 
 
 # --- The logger ------------------------------------------------------------
@@ -343,6 +403,10 @@ class RunLogger:
         except Exception:
             line = None   # a formatting bug must never break the run
         if line is not None:
+            # Events carried over from a prior run (resume) are marked so the live
+            # feed distinguishes reused work from work done now.
+            if stamped.get("reused"):
+                line = f"(reused) {line}"
             _safe_print(line)
 
     def finish(self) -> str | None:

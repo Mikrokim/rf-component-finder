@@ -16,6 +16,7 @@ import json
 import os
 from typing import Any, Callable
 
+from rf_finder.agent import resume as resume_mod
 from rf_finder.agent import run_log
 from rf_finder.agent.run_log import block_to_event, make_run_logger
 
@@ -294,6 +295,18 @@ def _logging_enabled() -> bool:
     return os.environ.get("RF_LOG", "").strip().lower() == "on"
 
 
+def _resume_enabled() -> bool:
+    """True when ``RF_RESUME`` turns on continuation from prior-run logs.
+
+    Independent of ``RF_LOG`` (which gates *writing*): this gates only *reading*
+    the last runs to continue a re-run of the same query. Resolved exactly like
+    ``_logging_enabled`` — only the explicit ``on`` token enables it; unset,
+    empty, or anything unknown is off, so resume never turns itself on by
+    accident. When on but no prior run matches, the conductor simply runs fresh.
+    """
+    return os.environ.get("RF_RESUME", "").strip().lower() == "on"
+
+
 def _resolve_skills() -> tuple[str, list[str], str, list[str]]:
     """(discovery_skill, discovery_tools, verify_skill, verify_tools) for the
     current ``RF_SKILL_MODE`` — the one place the switch is applied."""
@@ -527,9 +540,19 @@ async def run_rf_search_pipelined(
     sem = asyncio.Semaphore(max(1, max_concurrency))
     stopped = False
 
+    # Resume (RF_RESUME): read the recent run logs for this same query BEFORE the
+    # new run's own dir is created, so the fresh (empty) dir never consumes a
+    # lookback slot. Off -> None, and the conductor behaves exactly as before.
+    runs_base = os.path.join(PROJECT_ROOT, "runs")
+    resume_state = (
+        resume_mod.load_resume_state(runs_base, spec_text)
+        if _resume_enabled()
+        else None
+    )
+
     # Run logging: RF_LOG decides file+console; `emit` also forwards to an
     # optional external sink so callers/tests can observe events unconditionally.
-    logger = make_run_logger(_logging_enabled(), os.path.join(PROJECT_ROOT, "runs"))
+    logger = make_run_logger(_logging_enabled(), runs_base)
     rejected_count = 0   # rebindable via `nonlocal` in the verify closure
 
     def emit(event: dict[str, Any]) -> None:
@@ -537,7 +560,10 @@ async def run_rf_search_pipelined(
         if on_event is not None:
             on_event(event)
 
-    emit({"kind": run_log.RUN_STARTED, "agent_id": "run", "run_dir": logger.run_dir})
+    emit({
+        "kind": run_log.RUN_STARTED, "agent_id": "run",
+        "run_dir": logger.run_dir, "spec_text": spec_text,
+    })
 
     def _accumulate(m: dict[str, Any]) -> None:
         totals["tokens"] += (m.get("tokens") or 0)
@@ -576,10 +602,13 @@ async def run_rf_search_pipelined(
                 # One failed verify (error/rate-limit on that call) must not kill
                 # the whole pipeline; its candidate is dropped — but no longer
                 # silently: the drop is recorded so it is visible in the log.
+                # Marked `failed_infra` so a resume retries it rather than treating
+                # it as a settled rejection.
                 rejected_count += 1
                 emit({
                     "kind": run_log.VERIFY_RESULT, "agent_id": agent_id,
                     "status": "rejected", "reason": "verify failed (error/rate-limit)",
+                    "outcome": run_log.OUTCOME_FAILED_INFRA,
                 })
                 return
             comps = (result or {}).get("components", [])
@@ -591,24 +620,30 @@ async def run_rf_search_pipelined(
                     "kind": run_log.VERIFY_RESULT, "agent_id": agent_id,
                     "status": "kept", "model": comp.get("model"),
                     "verdict": comp.get("verdict", ""),
+                    "outcome": run_log.OUTCOME_KEPT,
                 })
             # Structured rejects (rf-verify's `rejected[]`, when present) carry a
-            # reason; otherwise an empty result is itself a rejection.
+            # reason; otherwise an empty result is itself a rejection. Classify the
+            # reason so a dead-Gemini "insufficient verification" is `failed_infra`
+            # (retried on resume), not a final `rejected_mismatch`.
             rejects = (result or {}).get("rejected", [])
             for r in rejects:
                 rejected_count += 1
+                reason = r.get("reason") or _reject_reason(r)
                 emit({
                     "kind": run_log.VERIFY_RESULT, "agent_id": agent_id,
                     "status": "rejected", "model": r.get("model", candidate.get("model")),
                     "param": r.get("param"), "found": r.get("found"),
                     "required": r.get("required"),
-                    "reason": r.get("reason") or _reject_reason(r),
+                    "reason": reason,
+                    "outcome": run_log.classify_verify_outcome("rejected", reason),
                 })
             if not comps and not rejects:
                 rejected_count += 1
                 emit({
                     "kind": run_log.VERIFY_RESULT, "agent_id": agent_id,
                     "status": "rejected", "reason": "no qualifying match",
+                    "outcome": run_log.OUTCOME_REJECTED_MISMATCH,
                 })
 
     def _spawn(candidate: dict[str, Any]) -> None:
@@ -625,86 +660,161 @@ async def run_rf_search_pipelined(
         })
         tasks.append(asyncio.create_task(_verify(candidate)))
 
-    options = ClaudeAgentOptions(
-        cwd=PROJECT_ROOT,
-        setting_sources=["user", "project"],
-        skills=[disc_skill],
-        allowed_tools=disc_tools,
-        model="opus",
-        permission_mode="acceptEdits",
-        output_format=DISCOVERY_SCHEMA,
-    )
+    def _seed_resume(state: resume_mod.ResumeState, *, load_all: bool) -> None:
+        """Seed the pipeline from prior runs' settled work (resume).
 
-    buffer = ""
+        For each candidate a matching prior run recorded:
+        - a FINAL verdict (``kept`` / genuine ``rejected_mismatch``) is replayed as
+          ``reused`` events and NOT re-verified — a kept part is passed straight
+          through to the results;
+        - a non-final candidate (``failed_infra`` or never verified) is re-verified
+          now when discovery is being skipped (``load_all``), or left for the
+          re-run of discovery to resurface and verify (``load_all`` false).
+
+        Adding a final candidate to ``seen`` is what stops a re-running discovery
+        from verifying it again.
+        """
+        nonlocal rejected_count
+        for model_key, cand in state.candidates.items():
+            key = _candidate_key(cand)
+            if key in seen:
+                continue
+            final = state.final_outcome(model_key)
+            if final is None and not load_all:
+                # Discovery will re-run and resurface this candidate; verify it
+                # fresh then. Do NOT seed it (leave it out of `seen`).
+                continue
+            seen.add(key)
+            model = cand.get("model")
+            v_agent = f"verify[{model or '?'}]"
+            emit({
+                "kind": run_log.CANDIDATE_FOUND, "agent_id": "discovery",
+                "model": model, "manufacturer": cand.get("manufacturer", ""),
+                "url": cand.get("url", ""), "screened": cand.get("screened"),
+                "reused": True,
+            })
+            if final == run_log.OUTCOME_KEPT:
+                comp = state.kept_result(model_key)
+                if comp is not None:
+                    components.append(comp)
+                    if on_component is not None:
+                        on_component(comp)
+                emit({
+                    "kind": run_log.VERIFY_RESULT, "agent_id": v_agent,
+                    "status": "kept", "model": model,
+                    "verdict": (comp or {}).get("verdict", ""),
+                    "outcome": run_log.OUTCOME_KEPT, "reused": True,
+                })
+            elif final == run_log.OUTCOME_REJECTED_MISMATCH:
+                rejected_count += 1
+                emit({
+                    "kind": run_log.VERIFY_RESULT, "agent_id": v_agent,
+                    "status": "rejected", "model": model,
+                    "reason": state.mismatch_reason(model_key),
+                    "outcome": run_log.OUTCOME_REJECTED_MISMATCH, "reused": True,
+                })
+            else:
+                # load_all and not final -> re-verify this candidate now.
+                tasks.append(asyncio.create_task(_verify(cand)))
+
+    # Resume seeding: replay settled work, decide whether discovery can be skipped.
+    skip_discovery = bool(resume_state and resume_state.discovery_clean)
+    if resume_state is not None:
+        _seed_resume(resume_state, load_all=skip_discovery)
+
     disc_meta: dict[str, Any] = {}
     disc_candidates: list[dict[str, Any]] = []
 
-    async with ClaudeSDKClient(options=options) as client:
-        await client.query(_discovery_prompt(spec_text, disc_skill))
-        async for message in client.receive_response():
-            if stop_event is not None and stop_event.is_set():
-                stopped = True
-                await client.interrupt()
-                break
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    text = getattr(block, "text", None)
-                    if text:
-                        on_text(text)
-                        combined = buffer + text
-                        buffer, fresh = _extract_candidates(combined)
-                        for cand in fresh:
-                            _spawn(cand)   # verify starts NOW, mid-discovery
-                        # Same combined buffer, other marker — the two scans
-                        # return the identical remainder, so nothing is lost.
-                        _, rejects = _extract_rejects(combined)
-                        for rej in rejects:
-                            rejected_count += 1
-                            emit({
-                                "kind": run_log.REJECT, "agent_id": "discovery",
-                                "model": rej.get("model"),
-                                "manufacturer": rej.get("manufacturer", ""),
-                                "param": rej.get("param"),
-                                "site_value": rej.get("site_value"),
-                                "reason": rej.get("reason", ""),
-                            })
-                        continue
-                    # Non-text blocks are discovery's ground-truth actions.
-                    ev = block_to_event(block, "discovery")
-                    if ev is not None:
-                        emit(ev)
-            elif isinstance(message, ResultMessage):
-                on_text(f"\n[discovery done: {message.subtype}]")
-                disc_meta = {
-                    "subtype": message.subtype,
-                    "is_error": bool(getattr(message, "is_error", False)),
-                    "api_error_status": getattr(message, "api_error_status", None),
-                    "stop_reason": getattr(message, "stop_reason", None),
-                    "num_turns": getattr(message, "num_turns", None),
-                    "tokens": _sum_tokens(getattr(message, "usage", None)),
-                    "token_breakdown": _token_breakdown(getattr(message, "usage", None)),
-                }
-                _accumulate(disc_meta)
-                so = getattr(message, "structured_output", None)
-                if isinstance(so, dict):
-                    disc_candidates = so.get("candidates") or []
-                emit({
-                    "kind": run_log.COVERAGE, "agent_id": "discovery",
-                    "text": getattr(message, "result", None) or "",
-                })
-                emit({
-                    "kind": run_log.AGENT_FINISHED, "agent_id": "discovery",
-                    "subtype": disc_meta.get("subtype"),
-                    "is_error": disc_meta.get("is_error"),
-                    "num_turns": disc_meta.get("num_turns"),
-                    "tokens": disc_meta.get("tokens"),
-                })
+    if skip_discovery:
+        # A matching prior run finished discovery cleanly; its candidates were
+        # loaded and seeded above. Record a carried-over clean discovery so THIS
+        # run stays independently resumable, and synthesize a success meta.
+        emit({
+            "kind": run_log.AGENT_FINISHED, "agent_id": "discovery",
+            "subtype": "success", "is_error": False,
+            "num_turns": 0, "tokens": 0, "reused": True,
+        })
+        disc_meta = {"subtype": "success", "is_error": False,
+                     "num_turns": 0, "tokens": 0}
+    else:
+        options = ClaudeAgentOptions(
+            cwd=PROJECT_ROOT,
+            setting_sources=["user", "project"],
+            skills=[disc_skill],
+            allowed_tools=disc_tools,
+            model="opus",
+            permission_mode="acceptEdits",
+            output_format=DISCOVERY_SCHEMA,
+        )
 
-    # Safety net: verify any final-list candidate discovery didn't stream (unless
-    # the user stopped — then don't start new work).
-    if not stopped:
-        for cand in disc_candidates:
-            _spawn(cand)
+        buffer = ""
+
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(_discovery_prompt(spec_text, disc_skill))
+            async for message in client.receive_response():
+                if stop_event is not None and stop_event.is_set():
+                    stopped = True
+                    await client.interrupt()
+                    break
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        text = getattr(block, "text", None)
+                        if text:
+                            on_text(text)
+                            combined = buffer + text
+                            buffer, fresh = _extract_candidates(combined)
+                            for cand in fresh:
+                                _spawn(cand)   # verify starts NOW, mid-discovery
+                            # Same combined buffer, other marker — the two scans
+                            # return the identical remainder, so nothing is lost.
+                            _, rejects = _extract_rejects(combined)
+                            for rej in rejects:
+                                rejected_count += 1
+                                emit({
+                                    "kind": run_log.REJECT, "agent_id": "discovery",
+                                    "model": rej.get("model"),
+                                    "manufacturer": rej.get("manufacturer", ""),
+                                    "param": rej.get("param"),
+                                    "site_value": rej.get("site_value"),
+                                    "reason": rej.get("reason", ""),
+                                })
+                            continue
+                        # Non-text blocks are discovery's ground-truth actions.
+                        ev = block_to_event(block, "discovery")
+                        if ev is not None:
+                            emit(ev)
+                elif isinstance(message, ResultMessage):
+                    on_text(f"\n[discovery done: {message.subtype}]")
+                    disc_meta = {
+                        "subtype": message.subtype,
+                        "is_error": bool(getattr(message, "is_error", False)),
+                        "api_error_status": getattr(message, "api_error_status", None),
+                        "stop_reason": getattr(message, "stop_reason", None),
+                        "num_turns": getattr(message, "num_turns", None),
+                        "tokens": _sum_tokens(getattr(message, "usage", None)),
+                        "token_breakdown": _token_breakdown(getattr(message, "usage", None)),
+                    }
+                    _accumulate(disc_meta)
+                    so = getattr(message, "structured_output", None)
+                    if isinstance(so, dict):
+                        disc_candidates = so.get("candidates") or []
+                    emit({
+                        "kind": run_log.COVERAGE, "agent_id": "discovery",
+                        "text": getattr(message, "result", None) or "",
+                    })
+                    emit({
+                        "kind": run_log.AGENT_FINISHED, "agent_id": "discovery",
+                        "subtype": disc_meta.get("subtype"),
+                        "is_error": disc_meta.get("is_error"),
+                        "num_turns": disc_meta.get("num_turns"),
+                        "tokens": disc_meta.get("tokens"),
+                    })
+
+        # Safety net: verify any final-list candidate discovery didn't stream
+        # (unless the user stopped — then don't start new work).
+        if not stopped:
+            for cand in disc_candidates:
+                _spawn(cand)
 
     if stopped:
         for task in tasks:
